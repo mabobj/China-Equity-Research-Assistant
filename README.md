@@ -1,314 +1,131 @@
-\# A-Share Research Assistant
+# A-Share Research Assistant
 
+面向中国大陆 A 股市场的研究与交易决策辅助系统。
 
+当前仓库仍处于 Phase 0，只完成项目骨架、最小前后端空壳、配置脚手架和基础测试，不包含任何数据接入、研究分析或交易业务逻辑。
 
-一个面向中国大陆 A 股市场的 AI 投资研究与交易决策助手。
+## 当前范围
 
+- 全市场选股骨架
+- 单票研究骨架
+- 交易策略输出骨架
+- 交易记录骨架
+- 复盘记录骨架
 
+当前阶段明确不包含：
 
-\## 项目目标
+- 自动实盘交易
+- 券商下单集成
+- 高频交易
+- 盘中自动执行
 
+## 技术栈
 
+- Backend: Python, FastAPI, Pydantic, pytest
+- Frontend: Next.js, TypeScript, Tailwind CSS
+- Storage planning: SQLite, DuckDB, Parquet
 
-本项目用于构建一个以 \*\*沪深 A 股\*\* 为核心市场的研究系统，帮助用户完成：
-
-
-
-\- 全市场选股
-
-\- 单只股票深入研究
-
-\- 交易策略生成
-
-\- 交易记录管理
-
-\- 复盘与策略迭代
-
-
-
-本项目当前阶段的目标是：
-
-
-
-1\. 提供高质量、可解释的研究结果
-
-2\. 输出结构化的操作建议
-
-3\. 建立可复盘、可学习、可迭代的研究闭环
-
-
-
-\## 当前阶段边界
-
-
-
-当前版本 \*\*不做自动实盘交易\*\*，只做：
-
-
-
-\- 研究
-
-\- 分析
-
-\- 选股
-
-\- 交易建议
-
-\- 交易记录
-
-\- 复盘学习
-
-
-
-\## 核心功能
-
-
-
-\### 1. 全市场选股器
-
-系统定期扫描全市场 A 股，输出三类结果：
-
-
-
-\- 可买候选
-
-\- 重点观察
-
-\- 暂时回避
-
-
-
-\### 2. 单票研究
-
-输入股票代码，系统生成：
-
-
-
-\- 技术面分析
-
-\- 基本面摘要
-
-\- 公告/新闻摘要
-
-\- 风险提示
-
-\- 综合判断
-
-\- 操作建议
-
-
-
-\### 3. 交易策略
-
-针对指定股票，输出明确策略：
-
-
-
-\- 关注区间
-
-\- 买入触发条件
-
-\- 理想买入区间
-
-\- 仓位建议
-
-\- 止损/失效条件
-
-\- 卖出条件
-
-\- 继续持有条件
-
-\- 复查周期
-
-
-
-\### 4. 交易记录
-
-支持用户手工录入交易：
-
-
-
-\- 股票代码
-
-\- 时间
-
-\- 价格
-
-\- 数量
-
-\- 买卖方向
-
-\- 原因
-
-\- 当时策略
-
-
-
-\### 5. 复盘学习
-
-对历史交易进行复盘：
-
-
-
-\- 判断是否符合原计划
-
-\- 分析盈亏原因
-
-\- 识别有效 setup
-
-\- 发现低质量策略
-
-\- 形成后续优化建议
-
-
-
-\## 目标用户
-
-
-
-当前版本只服务单一用户，即项目 owner 本人。
-
-
-
-因此，第一阶段不考虑：
-
-
-
-\- 多租户
-
-\- 团队协作权限
-
-\- 企业级部署复杂性
-
-
-
-优先保证：
-
-
-
-\- 架构清晰
-
-\- 数据可维护
-
-\- 研究质量高
-
-\- 策略逻辑可解释
-
-
-
-\## 技术栈
-
-
-
-\### 后端
-
-\- Python 3.11+
-
-\- FastAPI
-
-\- Pydantic
-
-\- SQLAlchemy
-
-\- Alembic
-
-\- SQLite
-
-\- DuckDB
-
-
-
-\### 数据分析
-
-\- pandas
-
-\- numpy
-
-\- pyarrow
-
-
-
-\### 前端
-
-\- Next.js
-
-\- React
-
-\- Tailwind CSS
-
-
-
-\### AI 层
-
-\- OpenAI API
-
-\- 结构化 JSON 输出
-
-\- Prompt 模板化
-
-\- 模块化研究流程
-
-
-
-\## 数据源策略
-
-
-
-\### 优先级
-
-1\. 中国大陆官方源优先
-
-2\. 免费源优先
-
-3\. 开源可维护方案优先
-
-4\. 门户站与抓取作为补充
-
-
-
-\### 当前计划使用的数据源
-
-\- AKShare
-
-\- Baostock
-
-\- 巨潮资讯
-
-\- 东方财富等公开网页源
-
-
-
-\### 原则
-
-\- 公告、财报原文以官方披露为准
-
-\- 门户摘要只做辅助，不作为最终真相源
-
-\- 所有外部数据都必须经过标准化与缓存层
-
-
-
-\## 系统架构概览
-
-
+## 目录结构
 
 ```text
+backend/   FastAPI 后端骨架
+frontend/  Next.js 前端骨架
+docs/      架构与路线图
+scripts/   本地开发与测试脚本
+```
 
-数据源
+## 本地启动方式
 
-&#x20; -> 数据采集层
+### 1. 准备环境变量
 
-&#x20; -> 标准化与缓存层
+在仓库根目录创建 `.env`：
 
-&#x20; -> 特征/信号层
+```powershell
+Copy-Item .env.example .env
+```
 
-&#x20; -> 研究与策略层
+### 2. 准备后端依赖
 
-&#x20; -> 选股层
+建议使用 Python 3.11+ 虚拟环境：
 
-&#x20; -> 交易记录/复盘层
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r backend\requirements.txt
+```
 
-&#x20; -> API 层
+### 3. 准备前端依赖
 
-&#x20; -> Web 前端
+```powershell
+Set-Location frontend
+npm install
+Set-Location ..
+```
 
+### 4. 启动后端
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_backend.ps1
+```
+
+默认会启动 FastAPI 开发服务，并提供健康检查接口：
+
+```text
+GET /health
+```
+
+### 5. 启动前端
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
+```
+
+默认启动 Next.js 开发服务，当前仅包含以下 Phase 0 占位页面：
+
+- `/`
+- `/screener`
+- `/stocks/[symbol]`
+- `/trades`
+- `/reviews`
+
+## 测试方式
+
+后端测试脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
+```
+
+该脚本会在当前 Windows 环境下显式设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，避免全局 pytest 插件导致测试卡住。
+
+## 配置说明
+
+后端配置统一在 `backend/app/core/config.py` 中读取，使用方式如下：
+
+```python
+from app.core.config import get_settings
+
+settings = get_settings()
+```
+
+当前 Phase 0 只提供最小配置能力，包括：
+
+- 应用名称、版本、环境
+- 调试开关
+- API 前缀
+- 本地开发主机与端口
+- SQLite / DuckDB / cache / data 路径
+- 预留的 OpenAI 与数据源开关字段
+
+## 当前状态
+
+本仓库当前目标是先把骨架打稳，再进入后续阶段：
+
+1. Phase 0: 项目初始化与最小可运行骨架
+2. Phase 1: 数据接入
+3. Phase 2: 技术分析底层
+4. Phase 3: 单票研究
+5. Phase 4: 选股器
+6. Phase 5: 交易记录与复盘
+7. Phase 6: 轻量前端完善
+8. Phase 7: 策略优化与学习增强
