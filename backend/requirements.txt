@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+pydantic
+sqlalchemy
+alembic
+pandas
+numpy
+duckdb
+pyarrow
+httpx
+akshare
+baostock
+python-dotenv
+pytest
