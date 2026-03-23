@@ -2,27 +2,18 @@
 
 面向中国大陆 A 股市场的研究与交易决策辅助系统。
 
-当前仓库处于早期建设阶段。已完成项目骨架、最小前后端空壳，以及 Phase 1-1 的第一段数据层 MVP：
+当前项目重点是把数据接入、技术分析、结构化研究、结构化策略和规则选股链路先做稳。现阶段仍不包含自动实盘交易、券商下单集成、高频交易和盘中自动执行。
 
-- 股票代码标准化
-- 单票基础信息
-- 单票日线行情
-- 基础股票池
+## 当前已完成能力
 
-并已完成 Phase 2-A 的第一段技术分析底层 MVP：
-
-- 常用技术指标计算
-- 最新交易日 technical snapshot
-- 最小技术分析 API
-
-当前仍然不包含：
-
-- 公告抓取
-- 新闻抓取
-- AI 研究总结
-- 策略生成
-- 定时任务
-- 自动实盘交易
+- 股票代码标准化，系统内部统一使用 canonical symbol，例如 `600519.SH`
+- 股票基础信息、日线行情、基础股票池
+- 公告列表与基础财务摘要
+- 技术分析底层与结构化 technical snapshot
+- 结构化单票研究报告
+- 结构化交易策略计划
+- 全市场规则初筛选股器
+- 基于初筛结果的深筛聚合选股器
 
 ## 技术栈
 
@@ -36,10 +27,10 @@
 backend/   FastAPI 后端
 frontend/  Next.js 前端
 docs/      架构与路线图
-scripts/   本地开发与测试脚本
+scripts/   本地启动与测试脚本
 ```
 
-## 本地启动方式
+## 本地启动
 
 ### 1. 准备环境变量
 
@@ -47,7 +38,7 @@ scripts/   本地开发与测试脚本
 Copy-Item .env.example .env
 ```
 
-### 2. 准备后端依赖
+### 2. 安装后端依赖
 
 建议使用 Python 3.11+ 虚拟环境：
 
@@ -57,7 +48,7 @@ python -m venv .venv
 pip install -r backend\requirements.txt
 ```
 
-### 3. 准备前端依赖
+### 3. 安装前端依赖
 
 ```powershell
 Set-Location frontend
@@ -71,11 +62,20 @@ Set-Location ..
 powershell -ExecutionPolicy Bypass -File scripts\run_backend.ps1
 ```
 
+默认地址：
+
+- 健康检查：[http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
+- Swagger 文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+
 ### 5. 启动前端
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
 ```
+
+默认地址：
+
+- [http://localhost:3000/](http://localhost:3000/)
 
 ## 测试方式
 
@@ -83,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
 powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 ```
 
-该脚本会显式设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，避免当前 Windows 环境下全局 pytest 插件干扰测试执行。
+该脚本会显式设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，用于规避当前 Windows 环境下全局 pytest 插件干扰，保证测试稳定运行。
 
 ## 当前可用 API
 
@@ -91,7 +91,7 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 
 - `GET /health`
 
-### A 股基础数据接口
+### 股票数据接口
 
 - `GET /stocks/universe`
 - `GET /stocks/{symbol}/profile`
@@ -104,69 +104,7 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 
 - `GET /research/{symbol}`
 
-### 结构化策略接口
-
-- `GET /strategy/{symbol}`
-
-### 规则初筛选股接口
-
-- `GET /screener/run`
-
-`/stocks/{symbol}/daily-bars` 支持可选查询参数：
-
-- `start_date=YYYY-MM-DD`
-- `end_date=YYYY-MM-DD`
-
-`/stocks/{symbol}/announcements` 支持可选查询参数：
-
-- `start_date=YYYY-MM-DD`
-- `end_date=YYYY-MM-DD`
-- `limit=1-100`
-
-返回的是结构化公告列表，当前每项包含：
-
-- `symbol`
-- `title`
-- `publish_date`
-- `announcement_type`
-- `source`
-- `url`
-
-`/stocks/{symbol}/financial-summary` 返回结构化基础财务摘要，当前包含：
-
-- `symbol`
-- `name`
-- `report_period`
-- `revenue`
-- `revenue_yoy`
-- `net_profit`
-- `net_profit_yoy`
-- `roe`
-- `gross_margin`
-- `debt_ratio`
-- `eps`
-- `bps`
-- `source`
-
-`/stocks/{symbol}/technical` 同样支持可选查询参数：
-
-- `start_date=YYYY-MM-DD`
-- `end_date=YYYY-MM-DD`
-
-返回的是结构化技术分析快照，包含：
-
-- 最新收盘价与成交量
-- MA / EMA
-- MACD
-- RSI14
-- ATR14
-- 布林带
-- 成交量均线
-- 趋势状态与趋势分数
-- 波动状态
-- 第一版支撑位与压力位
-
-`/research/{symbol}` 返回结构化研究报告，当前包含：
+返回字段概要：
 
 - `symbol`
 - `name`
@@ -184,7 +122,11 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - `triggers`
 - `invalidations`
 
-`/strategy/{symbol}` 返回结构化交易策略计划，当前包含：
+### 结构化策略接口
+
+- `GET /strategy/{symbol}`
+
+返回字段概要：
 
 - `symbol`
 - `name`
@@ -205,12 +147,16 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - `review_timeframe`
 - `confidence`
 
-`/screener/run` 支持可选查询参数：
+### 初筛选股接口
+
+- `GET /screener/run`
+
+可选参数：
 
 - `max_symbols`
 - `top_n`
 
-返回的是规则初筛选股结果，当前包含：
+返回字段概要：
 
 - `as_of_date`
 - `total_symbols`
@@ -233,6 +179,44 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - `resistance_level`
 - `short_reason`
 
+### 深筛聚合接口
+
+- `GET /screener/deep-run`
+
+可选参数：
+
+- `max_symbols`
+- `top_n`
+- `deep_top_k`
+
+返回字段概要：
+
+- `as_of_date`
+- `total_symbols`
+- `scanned_symbols`
+- `selected_for_deep_review`
+- `deep_candidates`
+
+每个 deep candidate 当前包含：
+
+- `symbol`
+- `name`
+- `base_list_type`
+- `base_rank`
+- `base_screener_score`
+- `research_action`
+- `research_overall_score`
+- `research_confidence`
+- `strategy_action`
+- `strategy_type`
+- `ideal_entry_range`
+- `stop_loss_price`
+- `take_profit_range`
+- `review_timeframe`
+- `thesis`
+- `short_reason`
+- `priority_score`
+
 ## 股票代码规范
 
 系统内部统一使用 canonical symbol：
@@ -241,7 +225,7 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - `000001.SZ`
 - `300750.SZ`
 
-API 层当前支持以下输入格式：
+API 当前支持以下输入格式：
 
 - `600519`
 - `600519.SH`
@@ -250,7 +234,7 @@ API 层当前支持以下输入格式：
 - `000001.SZ`
 - `sz000001`
 
-代码标准化与 provider symbol convert 统一集中在：
+symbol 标准化与 provider symbol convert 统一集中在：
 
 ```text
 backend/app/services/data_service/normalize.py
@@ -271,20 +255,10 @@ from app.core.config import get_settings
 settings = get_settings()
 ```
 
-## 当前开发说明
-
-当前数据层实现遵循以下原则：
+## 当前开发约束
 
 - 所有外部数据源访问都放在 `backend/app/services/data_service/providers/`
-- service 层统一完成 symbol normalize
-- provider 层的 symbol 转换集中实现，不在多个文件硬编码
-- API 层只负责参数接收和结构化响应返回
-- 测试不依赖实时外部网络，主要通过 fake provider 和 stub service 验证
-
-当前技术分析底层实现遵循以下原则：
-
-- 指标计算集中在 `backend/app/services/feature_service/`
-- 不依赖 TA-Lib，只使用 pandas / numpy
-- 技术快照只面向最新交易日输出
-- 趋势、波动、支撑压力逻辑保持朴素、可解释
-- 本轮不包含 AI 研究、选股、策略生成或复杂形态识别
+- API 层只负责参数接收与结构化响应返回
+- 复杂业务逻辑放在 service 层
+- 关键输出优先结构化，避免把核心结果放进自由文本
+- 测试不依赖实时外网，优先用 fake provider、stub service 和 mock 验证

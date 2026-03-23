@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     )
     from app.services.research_service.research_manager import ResearchManager
     from app.services.research_service.strategy_planner import StrategyPlanner
+    from app.services.screener_service.deep_pipeline import DeepScreenerPipeline
     from app.services.screener_service.pipeline import ScreenerPipeline
 
 
@@ -77,4 +78,16 @@ def get_screener_pipeline() -> "ScreenerPipeline":
     return ScreenerPipeline(
         market_data_service=get_market_data_service(),
         technical_analysis_service=get_technical_analysis_service(),
+    )
+
+
+@lru_cache
+def get_deep_screener_pipeline() -> "DeepScreenerPipeline":
+    """构建深筛聚合 pipeline。"""
+    from app.services.screener_service.deep_pipeline import DeepScreenerPipeline
+
+    return DeepScreenerPipeline(
+        screener_pipeline=get_screener_pipeline(),
+        research_manager=get_research_manager(),
+        strategy_planner=get_strategy_planner(),
     )
