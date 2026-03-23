@@ -14,6 +14,7 @@ if TYPE_CHECKING:
         TechnicalAnalysisService,
     )
     from app.services.research_service.research_manager import ResearchManager
+    from app.services.research_service.strategy_planner import StrategyPlanner
 
 
 @lru_cache
@@ -52,4 +53,16 @@ def get_research_manager() -> "ResearchManager":
     return ResearchManager(
         market_data_service=get_market_data_service(),
         technical_analysis_service=get_technical_analysis_service(),
+    )
+
+
+@lru_cache
+def get_strategy_planner() -> "StrategyPlanner":
+    """构建结构化交易策略 planner。"""
+    from app.services.research_service.strategy_planner import StrategyPlanner
+
+    return StrategyPlanner(
+        market_data_service=get_market_data_service(),
+        technical_analysis_service=get_technical_analysis_service(),
+        research_manager=get_research_manager(),
     )

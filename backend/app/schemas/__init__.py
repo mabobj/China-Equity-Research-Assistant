@@ -26,6 +26,7 @@ from app.schemas.technical import (
     TechnicalSnapshot,
     VolumeMetricsSnapshot,
 )
+from app.schemas.strategy import PriceRange, StrategyPlan
 
 __all__ = [
     "AnnouncementItem",
@@ -39,8 +40,10 @@ __all__ = [
     "FundamentalResearchResult",
     "MacdSnapshot",
     "MovingAverageSnapshot",
+    "PriceRange",
     "ResearchReport",
     "StockProfile",
+    "StrategyPlan",
     "TechnicalResearchResult",
     "TechnicalSnapshot",
     "UniverseItem",

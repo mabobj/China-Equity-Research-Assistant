@@ -104,6 +104,10 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 
 - `GET /research/{symbol}`
 
+### 结构化策略接口
+
+- `GET /strategy/{symbol}`
+
 `/stocks/{symbol}/daily-bars` 支持可选查询参数：
 
 - `start_date=YYYY-MM-DD`
@@ -175,6 +179,27 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - `risks`
 - `triggers`
 - `invalidations`
+
+`/strategy/{symbol}` 返回结构化交易策略计划，当前包含：
+
+- `symbol`
+- `name`
+- `as_of_date`
+- `action`
+- `strategy_type`
+- `entry_window`
+- `ideal_entry_range`
+- `entry_triggers`
+- `avoid_if`
+- `initial_position_hint`
+- `stop_loss_price`
+- `stop_loss_rule`
+- `take_profit_range`
+- `take_profit_rule`
+- `hold_rule`
+- `sell_rule`
+- `review_timeframe`
+- `confidence`
 
 ## 股票代码规范
 
