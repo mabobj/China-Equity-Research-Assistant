@@ -9,6 +9,12 @@
 - 单票日线行情
 - 基础股票池
 
+并已完成 Phase 2-A 的第一段技术分析底层 MVP：
+
+- 常用技术指标计算
+- 最新交易日 technical snapshot
+- 最小技术分析 API
+
 当前仍然不包含：
 
 - 公告抓取
@@ -90,11 +96,30 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - `GET /stocks/universe`
 - `GET /stocks/{symbol}/profile`
 - `GET /stocks/{symbol}/daily-bars`
+- `GET /stocks/{symbol}/technical`
 
 `/stocks/{symbol}/daily-bars` 支持可选查询参数：
 
 - `start_date=YYYY-MM-DD`
 - `end_date=YYYY-MM-DD`
+
+`/stocks/{symbol}/technical` 同样支持可选查询参数：
+
+- `start_date=YYYY-MM-DD`
+- `end_date=YYYY-MM-DD`
+
+返回的是结构化技术分析快照，包含：
+
+- 最新收盘价与成交量
+- MA / EMA
+- MACD
+- RSI14
+- ATR14
+- 布林带
+- 成交量均线
+- 趋势状态与趋势分数
+- 波动状态
+- 第一版支撑位与压力位
 
 ## 股票代码规范
 
@@ -143,3 +168,11 @@ settings = get_settings()
 - provider 层的 symbol 转换集中实现，不在多个文件硬编码
 - API 层只负责参数接收和结构化响应返回
 - 测试不依赖实时外部网络，主要通过 fake provider 和 stub service 验证
+
+当前技术分析底层实现遵循以下原则：
+
+- 指标计算集中在 `backend/app/services/feature_service/`
+- 不依赖 TA-Lib，只使用 pandas / numpy
+- 技术快照只面向最新交易日输出
+- 趋势、波动、支撑压力逻辑保持朴素、可解释
+- 本轮不包含 AI 研究、选股、策略生成或复杂形态识别

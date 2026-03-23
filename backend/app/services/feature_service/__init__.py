@@ -1,1 +1,1 @@
-"""Feature service package."""
+"""技术特征服务包。"""

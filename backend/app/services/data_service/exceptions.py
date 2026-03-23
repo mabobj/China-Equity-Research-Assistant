@@ -17,6 +17,10 @@ class InvalidDateError(InvalidRequestError):
     """Raised when a date parameter is invalid."""
 
 
+class InsufficientDataError(InvalidRequestError):
+    """Raised when not enough data is available for analysis."""
+
+
 class DataNotFoundError(DataServiceError):
     """Raised when a provider returns no usable data."""
 
