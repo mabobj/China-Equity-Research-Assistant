@@ -100,6 +100,10 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - `GET /stocks/{symbol}/financial-summary`
 - `GET /stocks/{symbol}/technical`
 
+### 单票研究接口
+
+- `GET /research/{symbol}`
+
 `/stocks/{symbol}/daily-bars` 支持可选查询参数：
 
 - `start_date=YYYY-MM-DD`
@@ -153,6 +157,24 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - 趋势状态与趋势分数
 - 波动状态
 - 第一版支撑位与压力位
+
+`/research/{symbol}` 返回结构化研究报告，当前包含：
+
+- `symbol`
+- `name`
+- `as_of_date`
+- `technical_score`
+- `fundamental_score`
+- `event_score`
+- `risk_score`
+- `overall_score`
+- `action`
+- `confidence`
+- `thesis`
+- `key_reasons`
+- `risks`
+- `triggers`
+- `invalidations`
 
 ## 股票代码规范
 

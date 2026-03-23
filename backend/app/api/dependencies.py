@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )
+    from app.services.research_service.research_manager import ResearchManager
 
 
 @lru_cache
@@ -40,4 +41,15 @@ def get_technical_analysis_service() -> "TechnicalAnalysisService":
 
     return TechnicalAnalysisService(
         market_data_service=get_market_data_service(),
+    )
+
+
+@lru_cache
+def get_research_manager() -> "ResearchManager":
+    """构建单票研究 manager。"""
+    from app.services.research_service.research_manager import ResearchManager
+
+    return ResearchManager(
+        market_data_service=get_market_data_service(),
+        technical_analysis_service=get_technical_analysis_service(),
     )

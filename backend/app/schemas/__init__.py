@@ -12,6 +12,12 @@ from app.schemas.research_inputs import (
     AnnouncementListResponse,
     FinancialSummary,
 )
+from app.schemas.research import (
+    EventResearchResult,
+    FundamentalResearchResult,
+    ResearchReport,
+    TechnicalResearchResult,
+)
 from app.schemas.technical import (
     BollingerSnapshot,
     EmaSnapshot,
@@ -28,10 +34,14 @@ __all__ = [
     "DailyBar",
     "DailyBarResponse",
     "EmaSnapshot",
+    "EventResearchResult",
     "FinancialSummary",
+    "FundamentalResearchResult",
     "MacdSnapshot",
     "MovingAverageSnapshot",
+    "ResearchReport",
     "StockProfile",
+    "TechnicalResearchResult",
     "TechnicalSnapshot",
     "UniverseItem",
     "UniverseResponse",
