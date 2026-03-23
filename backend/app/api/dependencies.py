@@ -1,4 +1,4 @@
-"""Dependency helpers for API routes."""
+"""API 依赖注入辅助函数。"""
 
 from functools import lru_cache
 from typing import TYPE_CHECKING
@@ -7,6 +7,7 @@ from app.core.config import get_settings
 from app.services.data_service.market_data_service import MarketDataService
 from app.services.data_service.providers.akshare_provider import AkshareProvider
 from app.services.data_service.providers.baostock_provider import BaostockProvider
+from app.services.data_service.providers.cninfo_provider import CninfoProvider
 
 if TYPE_CHECKING:
     from app.services.feature_service.technical_analysis_service import (
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
 
 @lru_cache
 def get_market_data_service() -> MarketDataService:
-    """Build the market data service with enabled providers."""
+    """构建启用中的市场数据 service。"""
     settings = get_settings()
     providers = []
 
@@ -24,13 +25,15 @@ def get_market_data_service() -> MarketDataService:
         providers.append(AkshareProvider())
     if settings.enable_baostock:
         providers.append(BaostockProvider())
+    if settings.enable_cninfo:
+        providers.append(CninfoProvider())
 
     return MarketDataService(providers=providers)
 
 
 @lru_cache
 def get_technical_analysis_service() -> "TechnicalAnalysisService":
-    """构建技术分析服务。"""
+    """构建技术分析 service。"""
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )

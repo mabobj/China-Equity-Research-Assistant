@@ -1,4 +1,4 @@
-"""Centralized stock symbol normalization and provider conversion."""
+"""集中管理股票代码标准化与 provider 格式转换。"""
 
 from dataclasses import dataclass
 import re
@@ -6,7 +6,7 @@ from typing import Literal
 
 from app.services.data_service.exceptions import InvalidSymbolError
 
-ProviderName = Literal["akshare", "baostock"]
+ProviderName = Literal["akshare", "baostock", "cninfo"]
 Exchange = Literal["SH", "SZ"]
 
 _CANONICAL_PATTERN = re.compile(r"^(?P<code>\d{6})\.(?P<exchange>SH|SZ)$")
@@ -16,24 +16,24 @@ _RAW_CODE_PATTERN = re.compile(r"^\d{6}$")
 
 @dataclass(frozen=True)
 class SymbolParts:
-    """Normalized symbol parts and provider-specific variants."""
+    """标准化后的代码拆分结果。"""
 
     code: str
     exchange: Exchange
 
     @property
     def canonical(self) -> str:
-        """Return the canonical internal symbol format."""
+        """返回系统内部统一使用的 canonical symbol。"""
         return "{code}.{exchange}".format(code=self.code, exchange=self.exchange)
 
     @property
     def akshare_symbol(self) -> str:
-        """Return the AKShare stock code format."""
+        """返回 AKShare 使用的股票代码格式。"""
         return self.code
 
     @property
     def baostock_symbol(self) -> str:
-        """Return the BaoStock stock code format."""
+        """返回 BaoStock 使用的股票代码格式。"""
         return "{exchange}.{code}".format(
             exchange=self.exchange.lower(),
             code=self.code,
@@ -41,20 +41,25 @@ class SymbolParts:
 
     @property
     def prefixed_symbol(self) -> str:
-        """Return the lower-case prefixed symbol format."""
+        """返回小写交易所前缀格式。"""
         return "{exchange}{code}".format(
             exchange=self.exchange.lower(),
             code=self.code,
         )
 
+    @property
+    def cninfo_symbol(self) -> str:
+        """返回 CNINFO 使用的股票代码格式。"""
+        return self.code
+
 
 def normalize_symbol(symbol: str) -> str:
-    """Normalize a user-provided stock symbol to canonical format."""
+    """将用户输入的代码标准化为 canonical symbol。"""
     return parse_symbol(symbol).canonical
 
 
 def parse_symbol(symbol: str) -> SymbolParts:
-    """Parse a user-provided stock symbol into normalized parts."""
+    """解析用户输入的股票代码。"""
     cleaned = symbol.strip()
     if not cleaned:
         raise InvalidSymbolError("Symbol cannot be empty.")
@@ -84,19 +89,21 @@ def parse_symbol(symbol: str) -> SymbolParts:
 
 
 def convert_symbol_for_provider(symbol: str, provider: ProviderName) -> str:
-    """Convert a symbol to a provider-specific format."""
+    """将 canonical symbol 转换为 provider 需要的格式。"""
     parts = parse_symbol(symbol)
     if provider == "akshare":
         return parts.akshare_symbol
     if provider == "baostock":
         return parts.baostock_symbol
+    if provider == "cninfo":
+        return parts.cninfo_symbol
     raise InvalidSymbolError(
         "Unsupported provider symbol conversion: {provider}".format(provider=provider),
     )
 
 
 def canonical_symbol_from_provider_symbol(symbol: str) -> str:
-    """Convert provider-style symbols like sh.600519 to canonical format."""
+    """将 provider 风格代码转换回 canonical symbol。"""
     cleaned = symbol.strip().lower()
 
     if re.fullmatch(r"^(sh|sz)\.\d{6}$", cleaned) is None:
@@ -107,7 +114,7 @@ def canonical_symbol_from_provider_symbol(symbol: str) -> str:
 
 
 def _infer_exchange(code: str) -> Exchange:
-    """Infer exchange from a six-digit A-share stock code."""
+    """根据六位 A 股代码推断交易所。"""
     if code.startswith(("5", "6", "9")):
         return "SH"
     if code.startswith(("0", "1", "2", "3")):

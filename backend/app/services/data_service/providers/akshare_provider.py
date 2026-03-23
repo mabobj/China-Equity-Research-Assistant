@@ -1,4 +1,4 @@
-"""AKShare provider wrapper for basic A-share market data."""
+"""AKShare provider，负责基础行情与财务摘要。"""
 
 from datetime import date, datetime
 import importlib
@@ -7,21 +7,22 @@ import math
 from typing import Any, Optional
 
 from app.schemas.market_data import DailyBar, StockProfile, UniverseItem
+from app.schemas.research_inputs import AnnouncementItem, FinancialSummary
 from app.services.data_service.exceptions import ProviderError
 from app.services.data_service.normalize import convert_symbol_for_provider, parse_symbol
 
 
 class AkshareProvider:
-    """Provider wrapper built on top of AKShare."""
+    """基于 AKShare 的 provider。"""
 
     name = "akshare"
 
     def is_available(self) -> bool:
-        """Return whether AKShare is importable."""
+        """返回 AKShare 是否可导入。"""
         return importlib.util.find_spec("akshare") is not None
 
     def get_stock_profile(self, symbol: str) -> Optional[StockProfile]:
-        """Return one stock profile from AKShare."""
+        """获取单只股票基础信息。"""
         self._ensure_available()
         ak = _get_akshare_module()
         parts = parse_symbol(symbol)
@@ -60,7 +61,7 @@ class AkshareProvider:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> list[DailyBar]:
-        """Return daily bars from AKShare."""
+        """获取单只股票日线行情。"""
         self._ensure_available()
         ak = _get_akshare_module()
         parts = parse_symbol(symbol)
@@ -103,7 +104,7 @@ class AkshareProvider:
         return bars
 
     def get_stock_universe(self) -> list[UniverseItem]:
-        """Return the basic A-share universe from AKShare."""
+        """获取基础股票池。"""
         self._ensure_available()
         ak = _get_akshare_module()
 
@@ -140,14 +141,102 @@ class AkshareProvider:
 
         return items
 
+    def get_stock_announcements(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        limit: int = 20,
+    ) -> list[AnnouncementItem]:
+        """当前 provider 不负责公告列表。"""
+        return []
+
+    def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
+        """获取单只股票基础财务摘要。"""
+        self._ensure_available()
+        ak = _get_akshare_module()
+        parts = parse_symbol(symbol)
+
+        try:
+            frame = ak.stock_financial_analysis_indicator_em(
+                symbol=parts.canonical,
+                indicator="按报告期",
+            )
+        except Exception as exc:  # pragma: no cover - network/runtime dependent
+            raise ProviderError("AKShare failed to load financial summary.") from exc
+
+        if frame is None or frame.empty:
+            return None
+
+        latest_row = _select_latest_financial_row(frame)
+        if latest_row is None:
+            return None
+
+        return FinancialSummary(
+            symbol=parts.canonical,
+            name=_pick_first_string(
+                latest_row,
+                ["SECURITY_NAME_ABBR", "股票简称", "名称"],
+            )
+            or parts.code,
+            report_period=_parse_flexible_date(
+                _pick_first_value(
+                    latest_row,
+                    ["REPORT_DATE", "REPORT_PERIOD", "报告期"],
+                ),
+            ),
+            revenue=_pick_first_float(
+                latest_row,
+                [
+                    "TOTAL_OPERATE_INCOME",
+                    "OPERATE_INCOME",
+                    "营业总收入",
+                    "营业收入",
+                ],
+            ),
+            revenue_yoy=_pick_first_float(
+                latest_row,
+                ["YSTZ", "TOTAL_OPERATE_INCOME_YOY", "营业总收入同比增长", "营业收入同比增长"],
+            ),
+            net_profit=_pick_first_float(
+                latest_row,
+                ["PARENT_NETPROFIT", "NETPROFIT", "归母净利润", "净利润"],
+            ),
+            net_profit_yoy=_pick_first_float(
+                latest_row,
+                ["SJLTZ", "NETPROFIT_YOY", "归母净利润同比增长", "净利润同比增长"],
+            ),
+            roe=_pick_first_float(
+                latest_row,
+                ["ROE_WEIGHT", "WEIGHTAVG_ROE", "净资产收益率", "加权净资产收益率"],
+            ),
+            gross_margin=_pick_first_float(
+                latest_row,
+                ["XSMLL", "GROSS_MARGIN", "销售毛利率"],
+            ),
+            debt_ratio=_pick_first_float(
+                latest_row,
+                ["ZCFZL", "DEBT_RATIO", "资产负债率"],
+            ),
+            eps=_pick_first_float(
+                latest_row,
+                ["BASIC_EPS", "EPSJB", "基本每股收益", "每股收益"],
+            ),
+            bps=_pick_first_float(
+                latest_row,
+                ["BPS", "每股净资产"],
+            ),
+            source=self.name,
+        )
+
     def _ensure_available(self) -> None:
-        """Raise a provider error if AKShare is unavailable."""
+        """在 AKShare 不可用时抛出统一错误。"""
         if not self.is_available():
             raise ProviderError("AKShare is not installed or unavailable.")
 
 
 def _get_akshare_module() -> Any:
-    """Import and return the AKShare module on demand."""
+    """按需导入并返回 AKShare 模块。"""
     try:
         return importlib.import_module("akshare")
     except Exception as exc:  # pragma: no cover - depends on local environment
@@ -155,14 +244,14 @@ def _get_akshare_module() -> Any:
 
 
 def _format_akshare_date(value: Optional[date]) -> str:
-    """Format a date for AKShare query parameters."""
+    """格式化 AKShare 查询日期。"""
     if value is None:
         return ""
     return value.strftime("%Y%m%d")
 
 
 def _parse_compact_date(value: Any) -> Optional[date]:
-    """Parse compact dates like 20010531."""
+    """解析类似 20010531 的紧凑日期。"""
     text = _as_optional_string(value)
     if text is None:
         return None
@@ -174,7 +263,7 @@ def _parse_compact_date(value: Any) -> Optional[date]:
 
 
 def _parse_flexible_date(value: Any) -> Optional[date]:
-    """Parse provider date fields into ``date`` objects."""
+    """解析 provider 日期字段。"""
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
@@ -184,7 +273,7 @@ def _parse_flexible_date(value: Any) -> Optional[date]:
     if text is None:
         return None
 
-    for pattern in ("%Y-%m-%d", "%Y%m%d"):
+    for pattern in ("%Y-%m-%d", "%Y%m%d", "%Y-%m-%d %H:%M:%S"):
         try:
             return datetime.strptime(text, pattern).date()
         except ValueError:
@@ -194,7 +283,7 @@ def _parse_flexible_date(value: Any) -> Optional[date]:
 
 
 def _as_optional_string(value: Any) -> Optional[str]:
-    """Convert a provider value into a clean optional string."""
+    """将 provider 字段转换为清洗后的字符串。"""
     if _is_missing(value):
         return None
 
@@ -205,7 +294,7 @@ def _as_optional_string(value: Any) -> Optional[str]:
 
 
 def _as_optional_float(value: Any) -> Optional[float]:
-    """Convert a provider value into an optional float."""
+    """将 provider 字段转换为浮点数。"""
     if _is_missing(value):
         return None
 
@@ -216,9 +305,50 @@ def _as_optional_float(value: Any) -> Optional[float]:
 
 
 def _is_missing(value: Any) -> bool:
-    """Return whether a provider value should be treated as missing."""
+    """判断 provider 字段是否应视为缺失值。"""
     if value is None:
         return True
     if isinstance(value, float) and math.isnan(value):
         return True
     return False
+
+
+def _select_latest_financial_row(frame: Any) -> Optional[dict[str, Any]]:
+    """从财务指标表中选出最新报告期记录。"""
+    if frame is None or frame.empty:
+        return None
+
+    rows: list[dict[str, Any]] = frame.to_dict(orient="records")
+    if not rows:
+        return None
+
+    def _sort_key(row: dict[str, Any]) -> tuple[int, str]:
+        report_date = _parse_flexible_date(
+            _pick_first_value(row, ["REPORT_DATE", "REPORT_PERIOD", "报告期"]),
+        )
+        if report_date is None:
+            return (0, "")
+        return (1, report_date.isoformat())
+
+    return sorted(rows, key=_sort_key, reverse=True)[0]
+
+
+def _pick_first_value(row: dict[str, Any], keys: list[str]) -> Any:
+    """按候选字段顺序读取首个非空值。"""
+    for key in keys:
+        if key not in row:
+            continue
+        value = row.get(key)
+        if not _is_missing(value) and value != "":
+            return value
+    return None
+
+
+def _pick_first_string(row: dict[str, Any], keys: list[str]) -> Optional[str]:
+    """按候选字段顺序读取首个非空字符串。"""
+    return _as_optional_string(_pick_first_value(row, keys))
+
+
+def _pick_first_float(row: dict[str, Any], keys: list[str]) -> Optional[float]:
+    """按候选字段顺序读取首个数值。"""
+    return _as_optional_float(_pick_first_value(row, keys))

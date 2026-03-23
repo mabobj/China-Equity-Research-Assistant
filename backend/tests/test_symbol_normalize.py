@@ -34,6 +34,7 @@ def test_convert_symbol_for_provider_is_centralized() -> None:
     """Provider-specific symbol formats should be generated centrally."""
     assert convert_symbol_for_provider("600519.SH", "akshare") == "600519"
     assert convert_symbol_for_provider("600519.SH", "baostock") == "sh.600519"
+    assert convert_symbol_for_provider("600519.SH", "cninfo") == "600519"
     assert canonical_symbol_from_provider_symbol("sz.000001") == "000001.SZ"
 
 

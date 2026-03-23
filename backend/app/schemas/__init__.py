@@ -7,6 +7,11 @@ from app.schemas.market_data import (
     UniverseItem,
     UniverseResponse,
 )
+from app.schemas.research_inputs import (
+    AnnouncementItem,
+    AnnouncementListResponse,
+    FinancialSummary,
+)
 from app.schemas.technical import (
     BollingerSnapshot,
     EmaSnapshot,
@@ -17,10 +22,13 @@ from app.schemas.technical import (
 )
 
 __all__ = [
+    "AnnouncementItem",
+    "AnnouncementListResponse",
     "BollingerSnapshot",
     "DailyBar",
     "DailyBarResponse",
     "EmaSnapshot",
+    "FinancialSummary",
     "MacdSnapshot",
     "MovingAverageSnapshot",
     "StockProfile",

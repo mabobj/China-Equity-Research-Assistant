@@ -96,12 +96,45 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - `GET /stocks/universe`
 - `GET /stocks/{symbol}/profile`
 - `GET /stocks/{symbol}/daily-bars`
+- `GET /stocks/{symbol}/announcements`
+- `GET /stocks/{symbol}/financial-summary`
 - `GET /stocks/{symbol}/technical`
 
 `/stocks/{symbol}/daily-bars` 支持可选查询参数：
 
 - `start_date=YYYY-MM-DD`
 - `end_date=YYYY-MM-DD`
+
+`/stocks/{symbol}/announcements` 支持可选查询参数：
+
+- `start_date=YYYY-MM-DD`
+- `end_date=YYYY-MM-DD`
+- `limit=1-100`
+
+返回的是结构化公告列表，当前每项包含：
+
+- `symbol`
+- `title`
+- `publish_date`
+- `announcement_type`
+- `source`
+- `url`
+
+`/stocks/{symbol}/financial-summary` 返回结构化基础财务摘要，当前包含：
+
+- `symbol`
+- `name`
+- `report_period`
+- `revenue`
+- `revenue_yoy`
+- `net_profit`
+- `net_profit_yoy`
+- `roe`
+- `gross_margin`
+- `debt_ratio`
+- `eps`
+- `bps`
+- `source`
 
 `/stocks/{symbol}/technical` 同样支持可选查询参数：
 

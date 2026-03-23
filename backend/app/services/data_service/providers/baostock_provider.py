@@ -1,4 +1,4 @@
-"""BaoStock provider wrapper for basic A-share market data."""
+"""BaoStock provider，负责基础行情补充。"""
 
 from datetime import date, datetime
 import importlib
@@ -7,6 +7,7 @@ import math
 from typing import Any, Optional
 
 from app.schemas.market_data import DailyBar, StockProfile, UniverseItem
+from app.schemas.research_inputs import AnnouncementItem, FinancialSummary
 from app.services.data_service.exceptions import ProviderError
 from app.services.data_service.normalize import (
     canonical_symbol_from_provider_symbol,
@@ -16,16 +17,16 @@ from app.services.data_service.normalize import (
 
 
 class BaostockProvider:
-    """Provider wrapper built on top of BaoStock."""
+    """基于 BaoStock 的 provider。"""
 
     name = "baostock"
 
     def is_available(self) -> bool:
-        """Return whether BaoStock is importable."""
+        """返回 BaoStock 是否可导入。"""
         return importlib.util.find_spec("baostock") is not None
 
     def get_stock_profile(self, symbol: str) -> Optional[StockProfile]:
-        """Return one stock profile from BaoStock."""
+        """获取单只股票基础信息。"""
         self._ensure_available()
         bs = _get_baostock_module()
         parts = parse_symbol(symbol)
@@ -61,7 +62,7 @@ class BaostockProvider:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> list[DailyBar]:
-        """Return daily bars from BaoStock."""
+        """获取单只股票日线行情。"""
         self._ensure_available()
         bs = _get_baostock_module()
         parts = parse_symbol(symbol)
@@ -107,7 +108,7 @@ class BaostockProvider:
         return bars
 
     def get_stock_universe(self) -> list[UniverseItem]:
-        """Return the basic A-share universe from BaoStock."""
+        """获取基础股票池。"""
         self._ensure_available()
         bs = _get_baostock_module()
 
@@ -147,14 +148,28 @@ class BaostockProvider:
 
         return items
 
+    def get_stock_announcements(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        limit: int = 20,
+    ) -> list[AnnouncementItem]:
+        """当前 provider 不负责公告列表。"""
+        return []
+
+    def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
+        """当前 provider 不负责财务摘要。"""
+        return None
+
     def _ensure_available(self) -> None:
-        """Raise a provider error if BaoStock is unavailable."""
+        """在 BaoStock 不可用时抛出统一错误。"""
         if not self.is_available():
             raise ProviderError("BaoStock is not installed or unavailable.")
 
 
 class _BaoStockSession:
-    """Context manager for BaoStock login and logout."""
+    """BaoStock 登录上下文管理器。"""
 
     def __init__(self, baostock_module: Any) -> None:
         self._baostock_module = baostock_module
@@ -170,7 +185,7 @@ class _BaoStockSession:
 
 
 def _get_baostock_module() -> Any:
-    """Import and return the BaoStock module on demand."""
+    """按需导入并返回 BaoStock 模块。"""
     try:
         return importlib.import_module("baostock")
     except Exception as exc:  # pragma: no cover - depends on local environment
@@ -178,7 +193,7 @@ def _get_baostock_module() -> Any:
 
 
 def _result_to_rows(result: Any) -> list[dict[str, Any]]:
-    """Convert a BaoStock result set into a list of row dictionaries."""
+    """将 BaoStock 结果集转换为字典列表。"""
     if getattr(result, "error_code", "") != "0":
         raise ProviderError("BaoStock query failed.")
 
@@ -192,14 +207,14 @@ def _result_to_rows(result: Any) -> list[dict[str, Any]]:
 
 
 def _format_baostock_date(value: Optional[date]) -> str:
-    """Format a date for BaoStock query parameters."""
+    """格式化 BaoStock 查询日期。"""
     if value is None:
         return ""
     return value.strftime("%Y-%m-%d")
 
 
 def _parse_iso_date(value: Any) -> Optional[date]:
-    """Parse an ISO date string."""
+    """解析 ISO 日期字符串。"""
     text = _as_optional_string(value)
     if text is None:
         return None
@@ -211,7 +226,7 @@ def _parse_iso_date(value: Any) -> Optional[date]:
 
 
 def _map_trade_status(value: Any) -> Optional[str]:
-    """Map BaoStock status codes into readable status labels."""
+    """将 BaoStock 状态码映射为可读标签。"""
     text = _as_optional_string(value)
     if text is None:
         return None
@@ -219,7 +234,7 @@ def _map_trade_status(value: Any) -> Optional[str]:
 
 
 def _as_optional_string(value: Any) -> Optional[str]:
-    """Convert a provider value into a clean optional string."""
+    """将 provider 字段转换为清洗后的字符串。"""
     if _is_missing(value):
         return None
 
@@ -230,7 +245,7 @@ def _as_optional_string(value: Any) -> Optional[str]:
 
 
 def _as_optional_float(value: Any) -> Optional[float]:
-    """Convert a provider value into an optional float."""
+    """将 provider 字段转换为浮点数。"""
     if _is_missing(value) or value == "":
         return None
 
@@ -241,7 +256,7 @@ def _as_optional_float(value: Any) -> Optional[float]:
 
 
 def _is_missing(value: Any) -> bool:
-    """Return whether a provider value should be treated as missing."""
+    """判断 provider 字段是否应视为缺失值。"""
     if value is None:
         return True
     if isinstance(value, float) and math.isnan(value):
