@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     )
     from app.services.research_service.research_manager import ResearchManager
     from app.services.research_service.strategy_planner import StrategyPlanner
+    from app.services.screener_service.pipeline import ScreenerPipeline
 
 
 @lru_cache
@@ -65,4 +66,15 @@ def get_strategy_planner() -> "StrategyPlanner":
         market_data_service=get_market_data_service(),
         technical_analysis_service=get_technical_analysis_service(),
         research_manager=get_research_manager(),
+    )
+
+
+@lru_cache
+def get_screener_pipeline() -> "ScreenerPipeline":
+    """构建规则初筛选股 pipeline。"""
+    from app.services.screener_service.pipeline import ScreenerPipeline
+
+    return ScreenerPipeline(
+        market_data_service=get_market_data_service(),
+        technical_analysis_service=get_technical_analysis_service(),
     )

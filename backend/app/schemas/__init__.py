@@ -18,6 +18,7 @@ from app.schemas.research import (
     ResearchReport,
     TechnicalResearchResult,
 )
+from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.schemas.technical import (
     BollingerSnapshot,
     EmaSnapshot,
@@ -42,6 +43,8 @@ __all__ = [
     "MovingAverageSnapshot",
     "PriceRange",
     "ResearchReport",
+    "ScreenerCandidate",
+    "ScreenerRunResponse",
     "StockProfile",
     "StrategyPlan",
     "TechnicalResearchResult",

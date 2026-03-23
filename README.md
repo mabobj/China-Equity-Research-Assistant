@@ -108,6 +108,10 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 
 - `GET /strategy/{symbol}`
 
+### 规则初筛选股接口
+
+- `GET /screener/run`
+
 `/stocks/{symbol}/daily-bars` 支持可选查询参数：
 
 - `start_date=YYYY-MM-DD`
@@ -200,6 +204,34 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - `sell_rule`
 - `review_timeframe`
 - `confidence`
+
+`/screener/run` 支持可选查询参数：
+
+- `max_symbols`
+- `top_n`
+
+返回的是规则初筛选股结果，当前包含：
+
+- `as_of_date`
+- `total_symbols`
+- `scanned_symbols`
+- `buy_candidates`
+- `watch_candidates`
+- `avoid_candidates`
+
+每个 candidate 当前包含：
+
+- `symbol`
+- `name`
+- `list_type`
+- `rank`
+- `screener_score`
+- `trend_state`
+- `trend_score`
+- `latest_close`
+- `support_level`
+- `resistance_level`
+- `short_reason`
 
 ## 股票代码规范
 

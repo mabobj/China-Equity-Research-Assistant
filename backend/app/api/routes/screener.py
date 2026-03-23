@@ -1,5 +1,23 @@
-"""Placeholder routes for screener workflows."""
+"""选股器路由。"""
 
-from fastapi import APIRouter
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, Query
+
+from app.api.dependencies import get_screener_pipeline
+from app.schemas.screener import ScreenerRunResponse
 
 router = APIRouter(prefix="/screener", tags=["screener"])
+
+
+@router.get("/run", response_model=ScreenerRunResponse)
+def run_screener(
+    max_symbols: Optional[int] = Query(default=None, ge=1),
+    top_n: Optional[int] = Query(default=None, ge=1),
+    pipeline: Any = Depends(get_screener_pipeline),
+) -> ScreenerRunResponse:
+    """运行规则初筛选股器。"""
+    return pipeline.run_screener(
+        max_symbols=max_symbols,
+        top_n=top_n,
+    )
