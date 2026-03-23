@@ -1,4 +1,5 @@
 import { PageShell } from "@/components/page-shell";
+import { StockWorkspace } from "@/components/stock-workspace";
 
 type StockPageProps = {
   params: Promise<{
@@ -8,15 +9,14 @@ type StockPageProps = {
 
 export default async function StockPage({ params }: StockPageProps) {
   const { symbol } = await params;
+  const decodedSymbol = decodeURIComponent(symbol);
 
   return (
     <PageShell
-      title={`Stock ${symbol.toUpperCase()}`}
-      description="单票研究页面占位。后续将展示结构化研究报告、评分、触发条件和失效条件。"
+      title={`单票研究：${decodedSymbol}`}
+      description="页面会同时展示结构化研究报告与结构化策略计划，方便快速判断当前是否值得继续跟踪。"
     >
-      <p className="text-base leading-7 text-slate-600">
-        当前仅显示动态路由骨架，不接入任何研究、行情、公告或策略逻辑。
-      </p>
+      <StockWorkspace symbol={decodedSymbol} />
     </PageShell>
   );
 }

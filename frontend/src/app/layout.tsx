@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     default: "A-Share Research Assistant",
     template: "%s | A-Share Research Assistant",
   },
-  description: "Phase 0 frontend scaffold for the A-share research assistant.",
+  description: "面向中国大陆 A 股市场的轻量研究与策略展示界面。",
 };
 
 type RootLayoutProps = {

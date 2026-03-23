@@ -2,7 +2,7 @@
 
 面向中国大陆 A 股市场的研究与交易决策辅助系统。
 
-当前项目重点是把数据接入、技术分析、结构化研究、结构化策略和规则选股链路先做稳。现阶段仍不包含自动实盘交易、券商下单集成、高频交易和盘中自动执行。
+当前项目重点是先把数据接入、技术分析、结构化研究、结构化策略、规则选股和轻前端链路做稳。现阶段仍不包含自动实盘交易、券商下单集成、高频交易和盘中自动执行。
 
 ## 当前已完成能力
 
@@ -14,6 +14,7 @@
 - 结构化交易策略计划
 - 全市场规则初筛选股器
 - 基于初筛结果的深筛聚合选股器
+- 最小可用前端页面接入
 
 ## 技术栈
 
@@ -77,13 +78,35 @@ powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
 
 - [http://localhost:3000/](http://localhost:3000/)
 
-## 测试方式
+### 6. 前端代理说明
+
+前端通过 Next.js rewrite 把 `/api/backend/*` 转发到后端，默认目标是：
+
+- `http://127.0.0.1:8000`
+
+如需修改，可在启动前设置：
+
+```powershell
+$env:BACKEND_API_BASE_URL = "http://127.0.0.1:8000"
+```
+
+## 测试与校验
+
+### 后端测试
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 ```
 
 该脚本会显式设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，用于规避当前 Windows 环境下全局 pytest 插件干扰，保证测试稳定运行。
+
+### 前端校验
+
+```powershell
+Set-Location frontend
+npm.cmd run lint
+npx.cmd tsc --noEmit
+```
 
 ## 当前可用 API
 
@@ -216,6 +239,36 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 - `thesis`
 - `short_reason`
 - `priority_score`
+
+## 当前前端页面
+
+### `/`
+
+- 项目简介
+- 进入 `/screener` 的入口
+- 股票代码输入框，可跳转到 `/stocks/[symbol]`
+
+### `/screener`
+
+- 可分别触发 `/screener/run` 与 `/screener/deep-run`
+- 支持输入 `max_symbols`、`top_n`、`deep_top_k`
+- 展示初筛和深筛的结构化结果
+- 包含 loading / error / empty state
+
+### `/stocks/[symbol]`
+
+- 页面加载时同时请求 `/research/{symbol}` 与 `/strategy/{symbol}`
+- 展示研究报告与策略计划的重点字段
+- 支持切换股票代码
+- 包含 loading / error / empty state
+
+### `/trades`
+
+- 清晰占位页
+
+### `/reviews`
+
+- 清晰占位页
 
 ## 股票代码规范
 
