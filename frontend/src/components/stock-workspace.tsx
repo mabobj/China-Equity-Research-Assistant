@@ -44,10 +44,8 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
       setError(null);
 
       try {
-        const [researchResponse, strategyResponse] = await Promise.all([
-          getResearchReport(symbol),
-          getStrategyPlan(symbol),
-        ]);
+        const researchResponse = await getResearchReport(symbol);
+        const strategyResponse = await getStrategyPlan(symbol);
 
         if (!active) {
           return;

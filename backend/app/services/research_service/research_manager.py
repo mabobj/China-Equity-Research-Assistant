@@ -1,7 +1,9 @@
 """研究流程编排与报告聚合。"""
 
+from dataclasses import dataclass
 from typing import Optional
 
+from app.schemas.market_data import StockProfile
 from app.schemas.research import (
     EventResearchResult,
     FundamentalResearchResult,
@@ -18,8 +20,18 @@ from app.services.research_service.fundamental_researcher import FundamentalRese
 from app.services.research_service.technical_researcher import TechnicalResearcher
 
 
+@dataclass(frozen=True)
+class ResearchInputs:
+    """研究报告所需的结构化输入。"""
+
+    profile: StockProfile
+    technical_snapshot: TechnicalSnapshot
+    financial_summary: FinancialSummary
+    announcements: list[AnnouncementItem]
+
+
 class ResearchManager:
-    """负责协调输入数据与各研究器，输出统一研究报告。"""
+    """负责协调输入数据与各 researcher，输出统一研究报告。"""
 
     def __init__(
         self,
@@ -37,12 +49,18 @@ class ResearchManager:
 
     def get_research_report(self, symbol: str) -> ResearchReport:
         """生成结构化单票研究报告。"""
+        return self.build_research_report(self.collect_research_inputs(symbol))
+
+    def collect_research_inputs(self, symbol: str) -> ResearchInputs:
+        """集中拉取研究报告所需输入，便于其他服务复用。"""
         try:
             profile = self._market_data_service.get_stock_profile(symbol)
             technical_snapshot = self._technical_analysis_service.get_technical_snapshot(
                 symbol=symbol,
             )
-            financial_summary = self._market_data_service.get_stock_financial_summary(symbol)
+            financial_summary = self._market_data_service.get_stock_financial_summary(
+                symbol,
+            )
             announcements_response = self._market_data_service.get_stock_announcements(
                 symbol=symbol,
                 limit=10,
@@ -52,17 +70,30 @@ class ResearchManager:
         except Exception as exc:
             raise ProviderError("Failed to collect research inputs.") from exc
 
-        technical_result = self._technical_researcher.analyze(technical_snapshot)
-        fundamental_result = self._fundamental_researcher.analyze(financial_summary)
-        event_result = self._event_researcher.analyze(
-            announcements=announcements_response.items,
-            as_of_date=technical_snapshot.as_of_date,
-        )
-
-        risk_score = _calculate_risk_score(
+        return ResearchInputs(
+            profile=profile,
             technical_snapshot=technical_snapshot,
             financial_summary=financial_summary,
             announcements=announcements_response.items,
+        )
+
+    def build_research_report(self, inputs: ResearchInputs) -> ResearchReport:
+        """基于已拉取输入构建研究报告。"""
+        technical_result = self._technical_researcher.analyze(
+            inputs.technical_snapshot,
+        )
+        fundamental_result = self._fundamental_researcher.analyze(
+            inputs.financial_summary,
+        )
+        event_result = self._event_researcher.analyze(
+            announcements=inputs.announcements,
+            as_of_date=inputs.technical_snapshot.as_of_date,
+        )
+
+        risk_score = _calculate_risk_score(
+            technical_snapshot=inputs.technical_snapshot,
+            financial_summary=inputs.financial_summary,
+            announcements=inputs.announcements,
             technical_result=technical_result,
             fundamental_result=fundamental_result,
             event_result=event_result,
@@ -79,9 +110,8 @@ class ResearchManager:
             fundamental_result=fundamental_result,
             event_result=event_result,
         )
-
         thesis = _build_thesis(
-            name=profile.name,
+            name=inputs.profile.name,
             technical_result=technical_result,
             fundamental_result=fundamental_result,
             event_result=event_result,
@@ -89,9 +119,9 @@ class ResearchManager:
         )
 
         return ResearchReport(
-            symbol=technical_snapshot.symbol,
-            name=profile.name,
-            as_of_date=technical_snapshot.as_of_date,
+            symbol=inputs.technical_snapshot.symbol,
+            name=inputs.profile.name,
+            as_of_date=inputs.technical_snapshot.as_of_date,
             technical_score=technical_result.score,
             fundamental_score=fundamental_result.score,
             event_score=event_result.score,

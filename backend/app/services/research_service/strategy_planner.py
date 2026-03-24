@@ -27,16 +27,46 @@ class StrategyPlanner:
     def get_strategy_plan(self, symbol: str) -> StrategyPlan:
         """生成单票结构化交易策略计划。"""
         try:
-            profile = self._market_data_service.get_stock_profile(symbol)
-            technical_snapshot = self._technical_analysis_service.get_technical_snapshot(
-                symbol=symbol,
+            collect_inputs = getattr(
+                self._research_manager,
+                "collect_research_inputs",
+                None,
             )
-            research_report = self._research_manager.get_research_report(symbol)
+            build_report = getattr(
+                self._research_manager,
+                "build_research_report",
+                None,
+            )
+
+            if callable(collect_inputs) and callable(build_report):
+                research_inputs = collect_inputs(symbol)
+                research_report = build_report(research_inputs)
+                profile_name = research_inputs.profile.name
+                technical_snapshot = research_inputs.technical_snapshot
+            else:
+                profile_name = self._market_data_service.get_stock_profile(symbol).name
+                technical_snapshot = self._technical_analysis_service.get_technical_snapshot(
+                    symbol,
+                )
+                research_report = self._research_manager.get_research_report(symbol)
         except DataServiceError:
             raise
         except Exception as exc:
             raise ProviderError("Failed to build strategy inputs.") from exc
 
+        return self._build_strategy_plan(
+            profile_name=profile_name,
+            technical_snapshot=technical_snapshot,
+            research_report=research_report,
+        )
+
+    def _build_strategy_plan(
+        self,
+        profile_name: str,
+        technical_snapshot: TechnicalSnapshot,
+        research_report: ResearchReport,
+    ) -> StrategyPlan:
+        """基于已加载输入生成策略计划。"""
         strategy_type = _determine_strategy_type(
             action=research_report.action,
             snapshot=technical_snapshot,
@@ -57,7 +87,7 @@ class StrategyPlanner:
 
         return StrategyPlan(
             symbol=research_report.symbol,
-            name=profile.name,
+            name=profile_name,
             as_of_date=research_report.as_of_date,
             action=research_report.action,
             strategy_type=strategy_type,
@@ -278,7 +308,7 @@ def _build_take_profit_rule(
         return "等待入场信号出现后，再根据突破或回踩形态设置止盈。"
     if take_profit_range is None:
         return "若价格接近前高或关键压力位，可分批兑现收益。"
-    return "价格进入 {low:.2f}-{high:.2f} 区间后，可考虑分批止盈，不追求一次性卖在最高点。".format(
+    return "价格进入 {low:.2f}-{high:.2f} 区间后，可考虑分批止盈。".format(
         low=take_profit_range.low,
         high=take_profit_range.high,
     )

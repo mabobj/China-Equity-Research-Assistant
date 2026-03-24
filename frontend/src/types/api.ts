@@ -1,6 +1,7 @@
 export type ResearchAction = "BUY" | "WATCH" | "AVOID";
 export type StrategyType = "pullback" | "breakout" | "wait" | "no_trade";
 export type ScreenerListType = "BUY_CANDIDATE" | "WATCHLIST" | "AVOID";
+export type DataRefreshTaskStatus = "idle" | "running" | "completed" | "failed";
 
 export type PriceRange = {
   low: number;
@@ -95,4 +96,49 @@ export type StrategyPlan = {
   sell_rule: string;
   review_timeframe: string;
   confidence: number;
+};
+
+export type DataRefreshStatus = {
+  status: DataRefreshTaskStatus;
+  is_running: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  universe_count: number;
+  total_symbols: number;
+  processed_symbols: number;
+  succeeded_symbols: number;
+  failed_symbols: number;
+  profiles_updated: number;
+  daily_bars_updated: number;
+  financial_summaries_updated: number;
+  announcements_updated: number;
+  daily_bars_synced_rows: number;
+  announcements_synced_items: number;
+  profile_step_failures: number;
+  daily_bar_step_failures: number;
+  financial_step_failures: number;
+  announcement_step_failures: number;
+  universe_updated: boolean;
+  max_symbols: number | null;
+  current_symbol: string | null;
+  current_stage: string | null;
+  message: string;
+  recent_warnings: string[];
+  recent_errors: string[];
+};
+
+export type DbTableInfo = {
+  table_name: string;
+  row_count: number;
+};
+
+export type DbTablesResponse = {
+  count: number;
+  tables: DbTableInfo[];
+};
+
+export type DbQueryResponse = {
+  columns: string[];
+  rows: Array<Array<unknown>>;
+  row_count: number;
 };

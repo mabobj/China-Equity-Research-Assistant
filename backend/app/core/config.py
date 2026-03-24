@@ -88,6 +88,16 @@ class Settings:
     enable_baostock: bool
     enable_cninfo: bool
     enable_eastmoney: bool
+    screener_lookback_days: int
+    screener_progress_log_interval: int
+    data_refresh_daily_bar_lookback_days: int
+    data_refresh_announcement_lookback_days: int
+    data_refresh_announcement_limit: int
+    data_refresh_progress_log_interval: int
+    data_refresh_symbol_sleep_ms: int
+    akshare_daily_retry_max_attempts: int
+    akshare_daily_retry_backoff_seconds: float
+    akshare_daily_retry_jitter_seconds: float
 
 
 @lru_cache
@@ -113,4 +123,39 @@ def get_settings() -> Settings:
         enable_baostock=_read_bool_env("ENABLE_BAOSTOCK", default=True),
         enable_cninfo=_read_bool_env("ENABLE_CNINFO", default=True),
         enable_eastmoney=_read_bool_env("ENABLE_EASTMONEY", default=True),
+        screener_lookback_days=_read_int_env("SCREENER_LOOKBACK_DAYS", default=400),
+        screener_progress_log_interval=_read_int_env(
+            "SCREENER_PROGRESS_LOG_INTERVAL",
+            default=100,
+        ),
+        data_refresh_daily_bar_lookback_days=_read_int_env(
+            "DATA_REFRESH_DAILY_BAR_LOOKBACK_DAYS",
+            default=400,
+        ),
+        data_refresh_announcement_lookback_days=_read_int_env(
+            "DATA_REFRESH_ANNOUNCEMENT_LOOKBACK_DAYS",
+            default=90,
+        ),
+        data_refresh_announcement_limit=_read_int_env(
+            "DATA_REFRESH_ANNOUNCEMENT_LIMIT",
+            default=2000,
+        ),
+        data_refresh_progress_log_interval=_read_int_env(
+            "DATA_REFRESH_PROGRESS_LOG_INTERVAL",
+            default=50,
+        ),
+        data_refresh_symbol_sleep_ms=_read_int_env(
+            "DATA_REFRESH_SYMBOL_SLEEP_MS",
+            default=120,
+        ),
+        akshare_daily_retry_max_attempts=_read_int_env(
+            "AKSHARE_DAILY_RETRY_MAX_ATTEMPTS",
+            default=4,
+        ),
+        akshare_daily_retry_backoff_seconds=float(
+            os.getenv("AKSHARE_DAILY_RETRY_BACKOFF_SECONDS", "0.8"),
+        ),
+        akshare_daily_retry_jitter_seconds=float(
+            os.getenv("AKSHARE_DAILY_RETRY_JITTER_SECONDS", "0.2"),
+        ),
     )

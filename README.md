@@ -108,6 +108,30 @@ npm.cmd run lint
 npx.cmd tsc --noEmit
 ```
 
+### 全量初始化脚本（独立运行）
+
+用于一次性初始化全市场数据，具备断点续传与失败重跑能力：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1
+```
+
+常用参数：
+
+```powershell
+# 从头重跑（清空上次断点与错误日志）
+powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --reset
+
+# 控制频率（毫秒）
+powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --symbol-sleep-ms 250 --daily-step-sleep-ms 400
+```
+
+说明：
+- 断点文件默认在 `data/bootstrap/full_init_state.json`
+- 异常日志默认在 `data/bootstrap/full_init_errors.jsonl`
+- 第一轮全量跑完后，脚本会自动仅重跑失败步骤
+- 脚本独立于 API 服务运行，不影响现有后端/前端调试流程
+
 ## 当前可用 API
 
 ### 健康检查
@@ -169,6 +193,59 @@ npx.cmd tsc --noEmit
 - `sell_rule`
 - `review_timeframe`
 - `confidence`
+
+### 数据补全接口
+
+- `GET /data/refresh`
+- `POST /data/refresh`
+
+`POST /data/refresh` 用于启动一次手动数据补全后台任务，支持可选请求体：
+
+```json
+{
+  "max_symbols": 200
+}
+```
+
+说明：
+- `max_symbols` 表示“本轮批量处理数量”，系统会基于本地游标轮转续扫，不会每次都从第一只股票开始。
+- 日线补全默认规则为：首次补全最近 400 日；后续增量补全从“本地最新日线的下一天”补到当日（若本地已存在当日数据会跳过请求）。
+
+留空时会按当前股票池执行全量补全。返回字段概要：
+
+- `status`
+- `is_running`
+- `started_at`
+- `finished_at`
+- `universe_count`
+- `total_symbols`
+- `processed_symbols`
+- `succeeded_symbols`
+- `failed_symbols`
+- `profiles_updated`
+- `daily_bars_updated`
+- `financial_summaries_updated`
+- `announcements_updated`
+- `universe_updated`
+- `current_symbol`
+- `current_stage`
+- `message`
+- `recent_warnings`
+- `recent_errors`
+
+### 数据库排查接口
+
+- `GET /admin/db/tables`
+- `POST /admin/db/query`
+
+`POST /admin/db/query` 仅支持只读 SQL（`SELECT` / `WITH` / `PRAGMA` / `DESCRIBE` / `SHOW` / `EXPLAIN`），请求体示例：
+
+```json
+{
+  "sql": "SELECT * FROM daily_bars ORDER BY trade_date DESC LIMIT 20",
+  "limit": 200
+}
+```
 
 ### 初筛选股接口
 
@@ -250,6 +327,8 @@ npx.cmd tsc --noEmit
 
 ### `/screener`
 
+- 支持通过按钮触发一次手动数据补全
+- 可查看补全任务状态、进度、最近错误与各数据域完成数
 - 可分别触发 `/screener/run` 与 `/screener/deep-run`
 - 支持输入 `max_symbols`、`top_n`、`deep_top_k`
 - 展示初筛和深筛的结构化结果
@@ -268,7 +347,7 @@ npx.cmd tsc --noEmit
 
 ### `/reviews`
 
-- 清晰占位页
+- 数据排查台（数据库表清单 + 只读 SQL 查询）
 
 ## 股票代码规范
 
@@ -307,6 +386,14 @@ from app.core.config import get_settings
 
 settings = get_settings()
 ```
+
+补全与网络重试常用参数（可写到 `.env`）：
+
+- `DATA_REFRESH_SYMBOL_SLEEP_MS`：补全时每只股票之间的节流间隔（毫秒），默认 `120`
+- `DATA_REFRESH_ANNOUNCEMENT_LIMIT`：单只股票公告补全上限，默认 `2000`
+- `AKSHARE_DAILY_RETRY_MAX_ATTEMPTS`：AKShare 日线请求最大重试次数，默认 `4`
+- `AKSHARE_DAILY_RETRY_BACKOFF_SECONDS`：AKShare 日线重试指数退避基数（秒），默认 `0.8`
+- `AKSHARE_DAILY_RETRY_JITTER_SECONDS`：AKShare 日线重试抖动（秒），默认 `0.2`
 
 ## 当前开发约束
 

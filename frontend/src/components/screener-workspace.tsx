@@ -1,11 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { getDeepScreenerRun, getScreenerRun } from "@/lib/api";
+import {
+  getDataRefreshStatus,
+  getDeepScreenerRun,
+  getScreenerRun,
+  startDataRefresh,
+} from "@/lib/api";
 import { formatDate, formatPrice, formatRange, formatScore } from "@/lib/format";
 import type {
+  DataRefreshStatus,
   DeepScreenerCandidate,
   DeepScreenerRunResponse,
   ScreenerCandidate,
@@ -24,18 +30,36 @@ type DeepFormState = FormState & {
   deepTopK: string;
 };
 
+type RefreshFormState = {
+  maxSymbols: string;
+};
+
 const INITIAL_FORM_STATE: FormState = {
-  maxSymbols: "50",
-  topN: "10",
+  maxSymbols: "5",
+  topN: "3",
 };
 
 const INITIAL_DEEP_FORM_STATE: DeepFormState = {
-  maxSymbols: "50",
-  topN: "10",
-  deepTopK: "5",
+  maxSymbols: "5",
+  topN: "3",
+  deepTopK: "2",
 };
 
+const INITIAL_REFRESH_FORM_STATE: RefreshFormState = {
+  maxSymbols: "",
+};
+
+const REFRESH_POLL_INTERVAL_MS = 3_000;
+
 export function ScreenerWorkspace() {
+  const [refreshForm, setRefreshForm] = useState<RefreshFormState>(
+    INITIAL_REFRESH_FORM_STATE,
+  );
+  const [refreshStatus, setRefreshStatus] = useState<DataRefreshStatus | null>(null);
+  const [refreshLoading, setRefreshLoading] = useState(false);
+  const [refreshStatusLoading, setRefreshStatusLoading] = useState(true);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
   const [initialForm, setInitialForm] = useState<FormState>(INITIAL_FORM_STATE);
   const [deepForm, setDeepForm] = useState<DeepFormState>(INITIAL_DEEP_FORM_STATE);
   const [initialRun, setInitialRun] = useState<ScreenerRunResponse | null>(null);
@@ -45,7 +69,64 @@ export function ScreenerWorkspace() {
   const [initialError, setInitialError] = useState<string | null>(null);
   const [deepError, setDeepError] = useState<string | null>(null);
 
-  const handleInitialSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const loadRefreshStatus = useCallback(async (silent = false) => {
+    if (!silent) {
+      setRefreshStatusLoading(true);
+    }
+
+    try {
+      const response = await getDataRefreshStatus();
+      setRefreshStatus(response);
+      setRefreshError(null);
+    } catch (error) {
+      setRefreshError(getErrorMessage(error));
+    } finally {
+      if (!silent) {
+        setRefreshStatusLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRefreshStatus();
+  }, [loadRefreshStatus]);
+
+  useEffect(() => {
+    if (!refreshStatus?.is_running) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      void loadRefreshStatus(true);
+    }, REFRESH_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [loadRefreshStatus, refreshStatus?.is_running]);
+
+  const handleRefreshSubmit = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    setRefreshLoading(true);
+    setRefreshError(null);
+
+    try {
+      const response = await startDataRefresh({
+        maxSymbols: parseOptionalInteger(refreshForm.maxSymbols),
+      });
+      setRefreshStatus(response);
+    } catch (error) {
+      setRefreshError(getErrorMessage(error));
+    } finally {
+      setRefreshLoading(false);
+    }
+  };
+
+  const handleInitialSubmit = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
     event.preventDefault();
     setInitialLoading(true);
     setInitialError(null);
@@ -84,6 +165,62 @@ export function ScreenerWorkspace() {
 
   return (
     <div className="space-y-6">
+      <SectionCard
+        title="数据补全"
+        description="点击后会在后端启动一次手动数据补全任务，统一刷新股票池、基础信息、日线、财务摘要和近期公告，后续分析会优先使用本地数据。"
+      >
+        <form className="grid gap-4 md:grid-cols-4" onSubmit={handleRefreshSubmit}>
+          <Field
+            label="max_symbols"
+            value={refreshForm.maxSymbols}
+            placeholder="留空为全量"
+            onChange={(value) =>
+              setRefreshForm((current) => ({ ...current, maxSymbols: value }))
+            }
+          />
+          <div className="md:col-span-3 flex items-end gap-3">
+            <button
+              type="submit"
+              disabled={refreshLoading || refreshStatus?.is_running === true}
+              className="min-h-11 rounded-2xl bg-amber-600 px-5 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
+            >
+              {refreshLoading
+                ? "正在启动补全任务..."
+                : refreshStatus?.is_running
+                  ? "补全任务执行中"
+                  : "开始数据补全"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void loadRefreshStatus()}
+              disabled={refreshStatusLoading}
+              className="min-h-11 rounded-2xl border border-slate-300 px-5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              刷新状态
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-5 space-y-4">
+          {refreshError ? (
+            <StatusBlock title="数据补全请求失败" description={refreshError} tone="error" />
+          ) : null}
+          {refreshStatusLoading && !refreshStatus ? (
+            <StatusBlock
+              title="正在加载"
+              description="正在读取最近一次数据补全任务状态。"
+            />
+          ) : null}
+          {!refreshStatusLoading && !refreshStatus && !refreshError ? (
+            <StatusBlock
+              title="尚未执行"
+              description="当前还没有读取到数据补全状态，点击按钮后即可启动一次手动补全。"
+            />
+          ) : null}
+          {refreshStatus ? <RefreshStatusPanel status={refreshStatus} /> : null}
+        </div>
+      </SectionCard>
+
       <SectionCard
         title="规则初筛"
         description="调用 /screener/run，查看当前全市场规则初筛结果。"
@@ -125,10 +262,7 @@ export function ScreenerWorkspace() {
             />
           ) : null}
           {initialLoading ? (
-            <StatusBlock
-              title="正在加载"
-              description="正在请求初筛结果，请稍候。"
-            />
+            <StatusBlock title="正在加载" description="正在请求初筛结果，请稍候。" />
           ) : null}
           {initialRun ? <ScreenerRunResult run={initialRun} /> : null}
         </div>
@@ -182,10 +316,7 @@ export function ScreenerWorkspace() {
             />
           ) : null}
           {deepLoading ? (
-            <StatusBlock
-              title="正在加载"
-              description="正在请求深筛结果，请稍候。"
-            />
+            <StatusBlock title="正在加载" description="正在请求深筛结果，请稍候。" />
           ) : null}
           {deepRun ? <DeepScreenerRunResult run={deepRun} /> : null}
         </div>
@@ -194,14 +325,75 @@ export function ScreenerWorkspace() {
   );
 }
 
+function RefreshStatusPanel({ status }: { status: DataRefreshStatus }) {
+  const tone = status.status === "failed" ? "error" : "default";
+  const title = resolveRefreshTitle(status);
+
+  return (
+    <div className="space-y-4">
+      <StatusBlock title={title} description={status.message} tone={tone} />
+      <SummaryGrid
+        items={[
+          { label: "任务状态", value: status.status },
+          { label: "股票池总数", value: String(status.universe_count) },
+          { label: "本次目标数", value: String(status.total_symbols) },
+          { label: "已处理", value: String(status.processed_symbols) },
+          { label: "成功", value: String(status.succeeded_symbols) },
+          { label: "失败", value: String(status.failed_symbols) },
+          { label: "当前股票", value: status.current_symbol ?? "-" },
+          { label: "开始时间", value: formatDateTime(status.started_at) },
+          { label: "结束时间", value: formatDateTime(status.finished_at) },
+        ]}
+      />
+      <SummaryGrid
+        items={[
+          { label: "股票池刷新", value: status.universe_updated ? "已完成" : "未执行" },
+          { label: "基础信息", value: String(status.profiles_updated) },
+          { label: "日线补全", value: String(status.daily_bars_updated) },
+          { label: "日线条数", value: String(status.daily_bars_synced_rows) },
+          { label: "财务摘要", value: String(status.financial_summaries_updated) },
+          { label: "近期公告", value: String(status.announcements_updated) },
+          { label: "公告条数", value: String(status.announcements_synced_items) },
+          { label: "基础信息失败", value: String(status.profile_step_failures) },
+          { label: "日线失败", value: String(status.daily_bar_step_failures) },
+          { label: "财务失败", value: String(status.financial_step_failures) },
+          { label: "公告失败", value: String(status.announcement_step_failures) },
+        ]}
+      />
+      {status.recent_warnings.length > 0 ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <h3 className="text-sm font-semibold text-amber-900">最近警告（详细）</h3>
+          <ul className="mt-3 space-y-2 text-sm leading-6 text-amber-800">
+            {status.recent_warnings.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {status.recent_errors.length > 0 ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+          <h3 className="text-sm font-semibold text-rose-900">最近错误</h3>
+          <ul className="mt-3 space-y-2 text-sm leading-6 text-rose-800">
+            {status.recent_errors.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Field({
   label,
   value,
   onChange,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  placeholder?: string;
 }) {
   return (
     <label className="space-y-2">
@@ -210,6 +402,7 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         inputMode="numeric"
+        placeholder={placeholder}
         className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
       />
     </label>
@@ -399,6 +592,34 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function resolveRefreshTitle(status: DataRefreshStatus): string {
+  if (status.status === "running") {
+    return "数据补全执行中";
+  }
+  if (status.status === "completed") {
+    return "数据补全已完成";
+  }
+  if (status.status === "failed") {
+    return "数据补全失败";
+  }
+  return "尚未执行数据补全";
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) {
+    return "-";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString("zh-CN", {
+    hour12: false,
+  });
+}
+
 function parseOptionalInteger(value: string): number | undefined {
   const normalized = value.trim();
   if (!normalized) {
@@ -417,5 +638,6 @@ function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
+
   return "发生未知错误，请稍后重试。";
 }

@@ -4,12 +4,15 @@ from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from app.core.config import get_settings
+from app.db.market_data_store import LocalMarketDataStore
 from app.services.data_service.market_data_service import MarketDataService
 from app.services.data_service.providers.akshare_provider import AkshareProvider
 from app.services.data_service.providers.baostock_provider import BaostockProvider
 from app.services.data_service.providers.cninfo_provider import CninfoProvider
 
 if TYPE_CHECKING:
+    from app.services.data_service.db_inspector_service import DbInspectorService
+    from app.services.data_service.refresh_service import DataRefreshService
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )
@@ -20,19 +23,59 @@ if TYPE_CHECKING:
 
 
 @lru_cache
+def get_local_market_data_store() -> LocalMarketDataStore:
+    """构建本地市场数据仓储。"""
+    settings = get_settings()
+    return LocalMarketDataStore(database_path=settings.duckdb_path)
+
+
+@lru_cache
 def get_market_data_service() -> MarketDataService:
     """构建启用中的市场数据 service。"""
     settings = get_settings()
     providers = []
 
     if settings.enable_akshare:
-        providers.append(AkshareProvider())
+        providers.append(
+            AkshareProvider(
+                daily_bars_max_retries=settings.akshare_daily_retry_max_attempts,
+                daily_bars_retry_backoff_seconds=settings.akshare_daily_retry_backoff_seconds,
+                daily_bars_retry_jitter_seconds=settings.akshare_daily_retry_jitter_seconds,
+            )
+        )
     if settings.enable_baostock:
         providers.append(BaostockProvider())
     if settings.enable_cninfo:
         providers.append(CninfoProvider())
 
-    return MarketDataService(providers=providers)
+    return MarketDataService(
+        providers=providers,
+        local_store=get_local_market_data_store(),
+    )
+
+
+@lru_cache
+def get_data_refresh_service() -> "DataRefreshService":
+    """构建手动数据补全 service。"""
+    from app.services.data_service.refresh_service import DataRefreshService
+
+    settings = get_settings()
+    return DataRefreshService(
+        market_data_service=get_market_data_service(),
+        daily_bar_lookback_days=settings.data_refresh_daily_bar_lookback_days,
+        announcement_lookback_days=settings.data_refresh_announcement_lookback_days,
+        announcement_limit=settings.data_refresh_announcement_limit,
+        progress_log_interval=settings.data_refresh_progress_log_interval,
+        symbol_sleep_ms=settings.data_refresh_symbol_sleep_ms,
+    )
+
+
+@lru_cache
+def get_db_inspector_service() -> "DbInspectorService":
+    """构建数据库排查 service。"""
+    from app.services.data_service.db_inspector_service import DbInspectorService
+
+    return DbInspectorService(local_store=get_local_market_data_store())
 
 
 @lru_cache
@@ -75,9 +118,12 @@ def get_screener_pipeline() -> "ScreenerPipeline":
     """构建规则初筛选股 pipeline。"""
     from app.services.screener_service.pipeline import ScreenerPipeline
 
+    settings = get_settings()
     return ScreenerPipeline(
         market_data_service=get_market_data_service(),
         technical_analysis_service=get_technical_analysis_service(),
+        lookback_days=settings.screener_lookback_days,
+        progress_log_interval=settings.screener_progress_log_interval,
     )
 
 

@@ -2,7 +2,6 @@
 
 from datetime import date, datetime
 from functools import lru_cache
-import math
 from typing import Any, Optional
 
 import httpx
@@ -67,7 +66,8 @@ class CninfoProvider:
         parts = parse_symbol(symbol)
         stock_code = convert_symbol_for_provider(symbol, "cninfo")
         org_id = self._get_org_id(stock_code)
-        total_pages = max(1, math.ceil(limit / 30))
+        page_size = min(max(limit, 1), 30)
+        max_items = max(limit, 1)
         items: list[AnnouncementItem] = []
 
         try:
@@ -76,10 +76,11 @@ class CninfoProvider:
                 follow_redirects=True,
                 timeout=15.0,
             ) as client:
-                for page_num in range(1, total_pages + 1):
+                page_num = 1
+                while len(items) < max_items:
                     payload = {
                         "pageNum": str(page_num),
-                        "pageSize": str(min(max(limit, 1), 30)),
+                        "pageSize": str(page_size),
                         "column": "szse",
                         "tabName": "fulltext",
                         "plate": "",
@@ -107,7 +108,11 @@ class CninfoProvider:
                     )
                     response.raise_for_status()
                     data = response.json()
-                    for raw_item in data.get("announcements", []):
+                    page_items = data.get("announcements", [])
+                    if not isinstance(page_items, list) or not page_items:
+                        break
+
+                    for raw_item in page_items:
                         mapped_item = self._map_announcement_item(
                             parts.canonical,
                             stock_code,
@@ -115,14 +120,20 @@ class CninfoProvider:
                         )
                         if mapped_item is not None:
                             items.append(mapped_item)
-                        if len(items) >= limit:
-                            return items[:limit]
+                        if len(items) >= max_items:
+                            break
+
+                    if len(page_items) < page_size:
+                        break
+                    page_num += 1
         except httpx.HTTPError as exc:  # pragma: no cover - 依赖外部网络
             raise ProviderError("CNINFO failed to load announcements.") from exc
         except ValueError as exc:  # pragma: no cover - 依赖外部响应
             raise ProviderError("CNINFO returned an invalid announcements payload.") from exc
+        except Exception as exc:  # pragma: no cover - 兜底保护
+            raise ProviderError("CNINFO failed to parse announcements payload.") from exc
 
-        return items[:limit]
+        return items[:max_items]
 
     def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
         """当前 provider 不负责财务摘要。"""

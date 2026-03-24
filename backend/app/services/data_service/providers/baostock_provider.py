@@ -1,10 +1,12 @@
 """BaoStock provider，负责基础行情补充。"""
 
+from contextlib import contextmanager
 from datetime import date, datetime
 import importlib
 import importlib.util
 import math
-from typing import Any, Optional
+from threading import RLock
+from typing import Any, Iterator, Optional
 
 from app.schemas.market_data import DailyBar, StockProfile, UniverseItem
 from app.schemas.research_inputs import AnnouncementItem, FinancialSummary
@@ -15,25 +17,55 @@ from app.services.data_service.normalize import (
     parse_symbol,
 )
 
+_BAOSTOCK_LOCK = RLock()
+
 
 class BaostockProvider:
     """基于 BaoStock 的 provider。"""
 
     name = "baostock"
 
+    def __init__(self) -> None:
+        self._session_depth = 0
+        self._logged_in_module: Optional[Any] = None
+
     def is_available(self) -> bool:
         """返回 BaoStock 是否可导入。"""
         return importlib.util.find_spec("baostock") is not None
 
+    @contextmanager
+    def session_scope(self) -> Iterator[None]:
+        """在一段批量查询中复用同一个 BaoStock 会话。"""
+        self._ensure_available()
+        bs = _get_baostock_module()
+
+        with _BAOSTOCK_LOCK:
+            should_login = self._session_depth == 0
+            if should_login:
+                _login_baostock(bs)
+                self._logged_in_module = bs
+            self._session_depth += 1
+
+            try:
+                yield
+            finally:
+                self._session_depth -= 1
+                if self._session_depth == 0:
+                    try:
+                        if self._logged_in_module is not None:
+                            self._logged_in_module.logout()
+                    finally:
+                        self._logged_in_module = None
+
     def get_stock_profile(self, symbol: str) -> Optional[StockProfile]:
         """获取单只股票基础信息。"""
         self._ensure_available()
-        bs = _get_baostock_module()
         parts = parse_symbol(symbol)
         baostock_symbol = convert_symbol_for_provider(symbol, "baostock")
 
         try:
-            with _BaoStockSession(bs):
+            with self.session_scope():
+                bs = self._get_active_module()
                 result = bs.query_stock_basic(code=baostock_symbol)
                 rows = _result_to_rows(result)
         except Exception as exc:  # pragma: no cover - network/runtime dependent
@@ -64,12 +96,12 @@ class BaostockProvider:
     ) -> list[DailyBar]:
         """获取单只股票日线行情。"""
         self._ensure_available()
-        bs = _get_baostock_module()
         parts = parse_symbol(symbol)
         baostock_symbol = convert_symbol_for_provider(symbol, "baostock")
 
         try:
-            with _BaoStockSession(bs):
+            with self.session_scope():
+                bs = self._get_active_module()
                 result = bs.query_history_k_data_plus(
                     code=baostock_symbol,
                     fields="date,open,high,low,close,volume,amount",
@@ -110,10 +142,10 @@ class BaostockProvider:
     def get_stock_universe(self) -> list[UniverseItem]:
         """获取基础股票池。"""
         self._ensure_available()
-        bs = _get_baostock_module()
 
         try:
-            with _BaoStockSession(bs):
+            with self.session_scope():
+                bs = self._get_active_module()
                 result = bs.query_all_stock(day="")
                 rows = _result_to_rows(result)
         except Exception as exc:  # pragma: no cover - network/runtime dependent
@@ -167,21 +199,11 @@ class BaostockProvider:
         if not self.is_available():
             raise ProviderError("BaoStock is not installed or unavailable.")
 
-
-class _BaoStockSession:
-    """BaoStock 登录上下文管理器。"""
-
-    def __init__(self, baostock_module: Any) -> None:
-        self._baostock_module = baostock_module
-
-    def __enter__(self) -> "_BaoStockSession":
-        login_result = self._baostock_module.login()
-        if getattr(login_result, "error_code", "") != "0":
-            raise ProviderError("BaoStock login failed.")
-        return self
-
-    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
-        self._baostock_module.logout()
+    def _get_active_module(self) -> Any:
+        """返回当前已登录的 BaoStock 模块。"""
+        if self._logged_in_module is None:
+            raise ProviderError("BaoStock session is not active.")
+        return self._logged_in_module
 
 
 def _get_baostock_module() -> Any:
@@ -192,15 +214,35 @@ def _get_baostock_module() -> Any:
         raise ProviderError("BaoStock is not installed or unavailable.") from exc
 
 
+def _login_baostock(baostock_module: Any) -> None:
+    """登录 BaoStock。"""
+    login_result = baostock_module.login()
+    if getattr(login_result, "error_code", "") != "0":
+        raise ProviderError("BaoStock login failed.")
+
+
 def _result_to_rows(result: Any) -> list[dict[str, Any]]:
-    """将 BaoStock 结果集转换为字典列表。"""
+    """把 BaoStock 结果集转换为字典列表。"""
+    if result is None:
+        raise ProviderError("BaoStock returned an empty query result object.")
+
     if getattr(result, "error_code", "") != "0":
         raise ProviderError("BaoStock query failed.")
 
     rows = []
-    fields = list(getattr(result, "fields", []))
-    while result.next():
+    raw_fields = getattr(result, "fields", [])
+    if raw_fields is None:
+        return rows
+
+    fields = list(raw_fields)
+    next_method = getattr(result, "next", None)
+    if not callable(next_method):
+        raise ProviderError("BaoStock returned an unexpected query result format.")
+
+    while next_method():
         values = result.get_row_data()
+        if values is None:
+            continue
         rows.append(dict(zip(fields, values)))
 
     return rows
@@ -226,7 +268,7 @@ def _parse_iso_date(value: Any) -> Optional[date]:
 
 
 def _map_trade_status(value: Any) -> Optional[str]:
-    """将 BaoStock 状态码映射为可读标签。"""
+    """把 BaoStock 状态码映射为可读标签。"""
     text = _as_optional_string(value)
     if text is None:
         return None
@@ -234,7 +276,7 @@ def _map_trade_status(value: Any) -> Optional[str]:
 
 
 def _as_optional_string(value: Any) -> Optional[str]:
-    """将 provider 字段转换为清洗后的字符串。"""
+    """把 provider 字段转换为清洗后的字符串。"""
     if _is_missing(value):
         return None
 
@@ -245,7 +287,7 @@ def _as_optional_string(value: Any) -> Optional[str]:
 
 
 def _as_optional_float(value: Any) -> Optional[float]:
-    """将 provider 字段转换为浮点数。"""
+    """把 provider 字段转换为浮点数。"""
     if _is_missing(value) or value == "":
         return None
 

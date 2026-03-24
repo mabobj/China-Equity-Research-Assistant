@@ -4,6 +4,8 @@ from datetime import date, datetime
 import importlib
 import importlib.util
 import math
+import random
+import time
 from typing import Any, Optional
 
 from app.schemas.market_data import DailyBar, StockProfile, UniverseItem
@@ -16,6 +18,16 @@ class AkshareProvider:
     """基于 AKShare 的 provider。"""
 
     name = "akshare"
+
+    def __init__(
+        self,
+        daily_bars_max_retries: int = 4,
+        daily_bars_retry_backoff_seconds: float = 0.8,
+        daily_bars_retry_jitter_seconds: float = 0.2,
+    ) -> None:
+        self._daily_bars_max_retries = max(1, daily_bars_max_retries)
+        self._daily_bars_retry_backoff_seconds = max(0.0, daily_bars_retry_backoff_seconds)
+        self._daily_bars_retry_jitter_seconds = max(0.0, daily_bars_retry_jitter_seconds)
 
     def is_available(self) -> bool:
         """返回 AKShare 是否可导入。"""
@@ -67,16 +79,12 @@ class AkshareProvider:
         parts = parse_symbol(symbol)
         ak_symbol = convert_symbol_for_provider(symbol, "akshare")
 
-        try:
-            frame = ak.stock_zh_a_hist(
-                symbol=ak_symbol,
-                period="daily",
-                start_date=_format_akshare_date(start_date),
-                end_date=_format_akshare_date(end_date),
-                adjust="",
-            )
-        except Exception as exc:  # pragma: no cover - network/runtime dependent
-            raise ProviderError("AKShare failed to load daily bars.") from exc
+        frame = self._load_daily_frame_with_retry(
+            ak=ak,
+            ak_symbol=ak_symbol,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
         if frame is None or frame.empty:
             return []
@@ -102,6 +110,48 @@ class AkshareProvider:
             )
 
         return bars
+
+    def _load_daily_frame_with_retry(
+        self,
+        ak: Any,
+        ak_symbol: str,
+        start_date: Optional[date],
+        end_date: Optional[date],
+    ) -> Any:
+        """日线查询在网络抖动时执行重试。"""
+        last_error: Optional[Exception] = None
+        attempts_used = 0
+
+        for attempt in range(1, self._daily_bars_max_retries + 1):
+            attempts_used = attempt
+            try:
+                return ak.stock_zh_a_hist(
+                    symbol=ak_symbol,
+                    period="daily",
+                    start_date=_format_akshare_date(start_date),
+                    end_date=_format_akshare_date(end_date),
+                    adjust="",
+                )
+            except Exception as exc:  # pragma: no cover - network/runtime dependent
+                last_error = exc
+                if attempt >= self._daily_bars_max_retries:
+                    break
+                if not _is_transient_akshare_error(exc):
+                    break
+
+                backoff_seconds = (
+                    self._daily_bars_retry_backoff_seconds * (2 ** (attempt - 1))
+                    + random.uniform(0.0, self._daily_bars_retry_jitter_seconds)
+                )
+                time.sleep(backoff_seconds)
+
+        if last_error is None:
+            raise ProviderError("AKShare failed to load daily bars.")
+        raise ProviderError(
+            "AKShare failed to load daily bars after {attempts} attempts.".format(
+                attempts=attempts_used,
+            ),
+        ) from last_error
 
     def get_stock_universe(self) -> list[UniverseItem]:
         """获取基础股票池。"""
@@ -352,3 +402,19 @@ def _pick_first_string(row: dict[str, Any], keys: list[str]) -> Optional[str]:
 def _pick_first_float(row: dict[str, Any], keys: list[str]) -> Optional[float]:
     """按候选字段顺序读取首个数值。"""
     return _as_optional_float(_pick_first_value(row, keys))
+
+
+def _is_transient_akshare_error(exc: Exception) -> bool:
+    """判断是否属于可重试网络错误。"""
+    text = str(exc).lower()
+    markers = [
+        "remotedisconnected",
+        "connection aborted",
+        "connectionerror",
+        "protocolerror",
+        "read timed out",
+        "max retries exceeded",
+        "temporarily unavailable",
+        "connection reset",
+    ]
+    return any(marker in text for marker in markers)

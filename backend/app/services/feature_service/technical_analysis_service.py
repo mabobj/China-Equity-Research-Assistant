@@ -44,15 +44,26 @@ class TechnicalAnalysisService:
             start_date=start_date,
             end_date=end_date,
         )
+        return self.build_snapshot_from_bars(
+            symbol=canonical_symbol,
+            bars=daily_bar_response.bars,
+        )
 
-        if not daily_bar_response.bars:
+    def build_snapshot_from_bars(
+        self,
+        symbol: str,
+        bars: list[DailyBar],
+    ) -> TechnicalSnapshot:
+        """基于已加载的日线数据生成技术快照。"""
+        canonical_symbol = normalize_symbol(symbol)
+        if not bars:
             raise DataNotFoundError(
                 "未找到可用于技术分析的日线数据：{symbol}。".format(
                     symbol=canonical_symbol,
                 ),
             )
 
-        frame = _build_price_frame(daily_bar_response.bars)
+        frame = _build_price_frame(bars)
         if len(frame) < 30:
             raise InsufficientDataError(
                 "技术分析至少需要 30 根有效日线数据，当前只有 {count} 根。".format(
@@ -62,7 +73,10 @@ class TechnicalAnalysisService:
 
         enriched = add_indicators(frame)
         latest_row = enriched.iloc[-1]
-        latest_map = {column: latest_optional_float(latest_row.get(column)) for column in enriched.columns}
+        latest_map = {
+            column: latest_optional_float(latest_row.get(column))
+            for column in enriched.columns
+        }
         trend_state, trend_score = evaluate_trend(latest_map)
         volatility_state = evaluate_volatility_state(latest_map)
         support_level, resistance_level = detect_support_resistance(enriched)
@@ -120,7 +134,7 @@ class TechnicalAnalysisService:
 
 
 def _build_price_frame(bars: list[DailyBar]) -> pd.DataFrame:
-    """将日线 bars 转换为技术分析使用的 DataFrame。"""
+    """将日线 bars 转成技术分析使用的 DataFrame。"""
     rows = []
     for bar in bars:
         rows.append(
@@ -139,15 +153,23 @@ def _build_price_frame(bars: list[DailyBar]) -> pd.DataFrame:
     if frame.empty:
         return frame
 
-    frame = frame.sort_values("trade_date").drop_duplicates(subset=["trade_date"], keep="last")
+    frame = frame.sort_values("trade_date").drop_duplicates(
+        subset=["trade_date"],
+        keep="last",
+    )
     for column in ("open", "high", "low", "close", "volume", "amount"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
-    frame = frame.dropna(subset=["trade_date", "high", "low", "close"]).reset_index(drop=True)
+    frame = frame.dropna(
+        subset=["trade_date", "high", "low", "close"],
+    ).reset_index(drop=True)
     return frame
 
 
-def _safe_ratio(numerator: Optional[float], denominator: Optional[float]) -> Optional[float]:
+def _safe_ratio(
+    numerator: Optional[float],
+    denominator: Optional[float],
+) -> Optional[float]:
     """安全计算比值。"""
     if numerator is None or denominator is None or denominator == 0:
         return None

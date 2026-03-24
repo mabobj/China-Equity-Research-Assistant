@@ -1,6 +1,8 @@
 """选股器 pipeline 测试。"""
 
+from contextlib import contextmanager
 from datetime import date, timedelta
+from typing import Iterator, Optional
 
 from app.schemas.market_data import DailyBar, DailyBarResponse, UniverseItem, UniverseResponse
 from app.schemas.screener import ScreenerRunResponse
@@ -17,6 +19,15 @@ from app.services.screener_service.pipeline import ScreenerPipeline
 
 class FakeMarketDataService:
     """用于选股器测试的假市场数据服务。"""
+
+    def __init__(self) -> None:
+        self.session_scope_entered = 0
+        self.requested_start_dates: list[str] = []
+
+    @contextmanager
+    def session_scope(self) -> Iterator[None]:
+        self.session_scope_entered += 1
+        yield
 
     def get_stock_universe(self) -> UniverseResponse:
         return UniverseResponse(
@@ -56,9 +67,12 @@ class FakeMarketDataService:
     def get_daily_bars(
         self,
         symbol: str,
-        start_date: str = None,
-        end_date: str = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> DailyBarResponse:
+        if start_date is not None:
+            self.requested_start_dates.append(start_date)
+
         if symbol == "688001.SH":
             return DailyBarResponse(
                 symbol=symbol,
@@ -96,8 +110,8 @@ class FakeTechnicalAnalysisService:
     def get_technical_snapshot(
         self,
         symbol: str,
-        start_date: str = None,
-        end_date: str = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> TechnicalSnapshot:
         if symbol == "600519.SH":
             return _build_snapshot(
@@ -123,8 +137,9 @@ class FakeTechnicalAnalysisService:
 
 def test_run_screener_returns_bucketed_candidates() -> None:
     """pipeline 应返回按分桶组织的结构化结果。"""
+    market_data_service = FakeMarketDataService()
     pipeline = ScreenerPipeline(
-        market_data_service=FakeMarketDataService(),
+        market_data_service=market_data_service,
         technical_analysis_service=FakeTechnicalAnalysisService(),
     )
 
@@ -138,6 +153,8 @@ def test_run_screener_returns_bucketed_candidates() -> None:
     assert response.buy_candidates[0].rank == 1
     assert len(response.watch_candidates) == 0
     assert len(response.avoid_candidates) == 0
+    assert market_data_service.session_scope_entered == 1
+    assert len(market_data_service.requested_start_dates) == 3
 
 
 def _build_bars(
@@ -162,7 +179,7 @@ def _build_bars(
                 volume=500000.0 + index * 1000.0,
                 amount=amount,
                 source="fake",
-            )
+            ),
         )
     return bars
 
@@ -217,4 +234,3 @@ def _build_snapshot(
         support_level=support_level,
         resistance_level=resistance_level,
     )
-
