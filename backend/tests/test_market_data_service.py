@@ -138,6 +138,26 @@ class BrokenDailyBarProvider(FakeProvider):
         raise TypeError("'NoneType' object is not iterable")
 
 
+class EmptyDailyBarProvider(FakeProvider):
+    """用于模拟优先 provider 返回空结果。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.name = "empty_daily"
+
+    def get_daily_bars(
+        self,
+        symbol: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> list[DailyBar]:
+        self.daily_bar_call_count += 1
+        self.bar_symbol = symbol
+        self.bar_start_date = start_date
+        self.bar_end_date = end_date
+        return []
+
+
 class ProfileOnlyProvider:
     name = "profile_only"
     capabilities = ("profile",)
@@ -476,6 +496,41 @@ def test_service_wraps_unexpected_provider_daily_bar_error() -> None:
         assert "TypeError: 'NoneType' object is not iterable" in str(exc)
     else:
         raise AssertionError("Expected provider failure was not raised.")
+
+
+def test_service_returns_cached_daily_bars_when_incremental_refresh_fails(
+    tmp_path: Path,
+) -> None:
+    """增量补今日失败时，应优先回退到本地已缓存的日线数据。"""
+    empty_provider = EmptyDailyBarProvider()
+    broken_provider = BrokenDailyBarProvider()
+    local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
+    local_store.upsert_daily_bars(
+        [
+            DailyBar(
+                symbol="600519.SH",
+                trade_date=date.today() - timedelta(days=1),
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.5,
+                volume=1000.0,
+                amount=100000.0,
+                source="local",
+            )
+        ]
+    )
+
+    service = MarketDataService(
+        providers=[empty_provider, broken_provider],
+        local_store=local_store,
+    )
+
+    response = service.get_daily_bars("600519.SH")
+
+    assert empty_provider.daily_bar_call_count == 1
+    assert response.count == 1
+    assert response.bars[0].source == "local"
 
 
 def test_service_remains_compatible_with_split_capability_providers() -> None:

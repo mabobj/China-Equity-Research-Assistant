@@ -142,11 +142,21 @@ class MarketDataService:
                     cached_bars,
                 )
 
-        remote_bars = self._load_daily_bars_from_providers(
-            canonical_symbol,
-            sync_start_date,
-            sync_end_date,
-        )
+        try:
+            remote_bars = self._load_daily_bars_from_providers(
+                canonical_symbol,
+                sync_start_date,
+                sync_end_date,
+            )
+        except ProviderError:
+            if cached_bars and normalized_start_date is None and normalized_end_date is None:
+                return _build_daily_bar_response(
+                    canonical_symbol,
+                    normalized_start_date,
+                    normalized_end_date,
+                    cached_bars,
+                )
+            raise
         self._local_store.upsert_daily_bars(remote_bars)
 
         if sync_start_date is not None and sync_end_date is not None:
@@ -559,6 +569,9 @@ class MarketDataService:
                 continue
             if bars:
                 return bars
+            provider_errors.append(
+                "{provider}: empty result".format(provider=provider.name),
+            )
 
         if last_error is not None:
             raise ProviderError(
