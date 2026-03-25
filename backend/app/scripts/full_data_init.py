@@ -56,6 +56,17 @@ def _parse_args() -> argparse.Namespace:
         help="日线步骤前的额外暂停毫秒数，默认 200。",
     )
     parser.add_argument(
+        "--enable-baostock",
+        action="store_true",
+        help="是否启用 baostock 作为补充 provider。默认关闭以提升全量稳定性。",
+    )
+    parser.add_argument(
+        "--slow-step-warning-seconds",
+        type=float,
+        default=20.0,
+        help="步骤耗时超过该阈值时输出慢步骤告警日志。",
+    )
+    parser.add_argument(
         "--progress-log-interval",
         type=int,
         default=50,
@@ -83,7 +94,10 @@ def _configure_logging() -> None:
     )
 
 
-def _build_market_data_service(settings: Settings) -> MarketDataService:
+def _build_market_data_service(
+    settings: Settings,
+    enable_baostock: bool,
+) -> MarketDataService:
     providers: list[object] = []
     if settings.enable_akshare:
         providers.append(
@@ -93,7 +107,7 @@ def _build_market_data_service(settings: Settings) -> MarketDataService:
                 daily_bars_retry_jitter_seconds=settings.akshare_daily_retry_jitter_seconds,
             )
         )
-    if settings.enable_baostock:
+    if settings.enable_baostock and enable_baostock:
         providers.append(BaostockProvider())
     if settings.enable_cninfo:
         providers.append(CninfoProvider())
@@ -112,6 +126,8 @@ def _default_state(universe_symbols: list[str]) -> dict[str, Any]:
         "started_at": _now_iso(),
         "updated_at": _now_iso(),
         "completed_at": None,
+        "current_symbol": None,
+        "current_step": None,
         "universe_symbols": universe_symbols,
         "next_index": 0,
         "first_pass_failures": [],
@@ -230,6 +246,36 @@ def _run_one_step(
     raise ValueError("Unsupported step: {step}".format(step=step))
 
 
+def _run_step_with_logging(
+    *,
+    market_data_service: MarketDataService,
+    settings: Settings,
+    symbol: str,
+    step: StepName,
+    phase: str,
+    slow_step_warning_seconds: float,
+) -> None:
+    logger.info("%s 步骤开始 %s [%s]", phase, symbol, step)
+    started_at = time.perf_counter()
+    _run_one_step(market_data_service, settings, symbol, step)
+    elapsed_seconds = time.perf_counter() - started_at
+    logger.info(
+        "%s 步骤完成 %s [%s]，耗时 %.2f 秒",
+        phase,
+        symbol,
+        step,
+        elapsed_seconds,
+    )
+    if elapsed_seconds >= slow_step_warning_seconds:
+        logger.warning(
+            "%s 慢步骤告警 %s [%s]，耗时 %.2f 秒",
+            phase,
+            symbol,
+            step,
+            elapsed_seconds,
+        )
+
+
 def _contains_failure(
     failures: list[dict[str, str]],
     symbol: str,
@@ -254,6 +300,7 @@ def _run_first_pass(
     symbol_sleep_seconds: float,
     daily_step_sleep_seconds: float,
     progress_log_interval: int,
+    slow_step_warning_seconds: float,
 ) -> None:
     symbols: list[str] = state["universe_symbols"]
     start_index = int(state.get("next_index", 0))
@@ -269,10 +316,20 @@ def _run_first_pass(
             logger.info("第一轮进度 %s/%s，当前股票=%s", index + 1, total, symbol)
 
             for step in STEP_SEQUENCE:
+                state["current_symbol"] = symbol
+                state["current_step"] = step
+                _save_state(state_path, state)
                 if step == "daily_bars" and daily_step_sleep_seconds > 0:
                     time.sleep(daily_step_sleep_seconds)
                 try:
-                    _run_one_step(market_data_service, settings, symbol, step)
+                    _run_step_with_logging(
+                        market_data_service=market_data_service,
+                        settings=settings,
+                        symbol=symbol,
+                        step=step,
+                        phase="第一轮",
+                        slow_step_warning_seconds=slow_step_warning_seconds,
+                    )
                     stats["step_success"][step] += 1
                 except Exception as exc:  # pragma: no cover - 依赖外部网络
                     stats["step_failures"][step] += 1
@@ -295,6 +352,8 @@ def _run_first_pass(
             stats["processed_symbols"] = index + 1
             state["next_index"] = index + 1
             state["first_pass_failures"] = failures
+            state["current_symbol"] = None
+            state["current_step"] = None
             state["stats"] = stats
             _save_state(state_path, state)
 
@@ -329,6 +388,7 @@ def _run_retry_pass(
     symbol_sleep_seconds: float,
     daily_step_sleep_seconds: float,
     progress_log_interval: int,
+    slow_step_warning_seconds: float,
 ) -> None:
     retry_targets: list[dict[str, str]] = list(state.get("retry_targets", []))
     retry_index = int(state.get("retry_next_index", 0))
@@ -348,16 +408,21 @@ def _run_retry_pass(
             symbol = target["symbol"]
             step = _parse_step_name(target["step"])
             logger.info("第二轮进度 %s/%s，重跑 %s [%s]", index + 1, total, symbol, step)
+            state["current_symbol"] = symbol
+            state["current_step"] = step
+            _save_state(state_path, state)
 
             if step == "daily_bars" and daily_step_sleep_seconds > 0:
                 time.sleep(daily_step_sleep_seconds)
 
             try:
-                _run_one_step(
-                    market_data_service,
-                    settings,
-                    symbol,
-                    step,
+                _run_step_with_logging(
+                    market_data_service=market_data_service,
+                    settings=settings,
+                    symbol=symbol,
+                    step=step,
+                    phase="第二轮",
+                    slow_step_warning_seconds=slow_step_warning_seconds,
                 )
                 stats["retry_step_success"][step] += 1
             except Exception as exc:  # pragma: no cover - 依赖外部网络
@@ -380,6 +445,8 @@ def _run_retry_pass(
 
             state["retry_next_index"] = index + 1
             state["retry_failures"] = retry_failures
+            state["current_symbol"] = None
+            state["current_step"] = None
             state["stats"] = stats
             _save_state(state_path, state)
 
@@ -415,6 +482,7 @@ def main() -> int:
     symbol_sleep_seconds = max(0.0, symbol_sleep_ms / 1000.0)
     daily_step_sleep_seconds = max(0.0, max(0, args.daily_step_sleep_ms) / 1000.0)
     progress_log_interval = max(1, args.progress_log_interval)
+    slow_step_warning_seconds = max(0.1, args.slow_step_warning_seconds)
 
     state_path = (
         Path(args.state_path)
@@ -432,7 +500,17 @@ def main() -> int:
         _safe_unlink(error_log_path)
         logger.info("已重置断点状态和错误日志。")
 
-    market_data_service = _build_market_data_service(settings)
+    market_data_service = _build_market_data_service(
+        settings=settings,
+        enable_baostock=args.enable_baostock,
+    )
+    logger.info(
+        "脚本启动参数：enable_baostock=%s, symbol_sleep_ms=%s, daily_step_sleep_ms=%s, slow_step_warning_seconds=%.1f",
+        args.enable_baostock,
+        symbol_sleep_ms,
+        max(0, args.daily_step_sleep_ms),
+        slow_step_warning_seconds,
+    )
 
     state = _load_state(state_path)
     if state is None:
@@ -458,6 +536,7 @@ def main() -> int:
                 symbol_sleep_seconds=symbol_sleep_seconds,
                 daily_step_sleep_seconds=daily_step_sleep_seconds,
                 progress_log_interval=progress_log_interval,
+                slow_step_warning_seconds=slow_step_warning_seconds,
             )
             state["phase"] = "retry_pass"
             state["retry_targets"] = list(state.get("first_pass_failures", []))
@@ -474,6 +553,7 @@ def main() -> int:
                 symbol_sleep_seconds=symbol_sleep_seconds,
                 daily_step_sleep_seconds=daily_step_sleep_seconds,
                 progress_log_interval=progress_log_interval,
+                slow_step_warning_seconds=slow_step_warning_seconds,
             )
             state["phase"] = "completed"
             state["completed_at"] = _now_iso()

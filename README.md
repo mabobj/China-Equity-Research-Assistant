@@ -124,12 +124,17 @@ powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --reset
 
 # 控制频率（毫秒）
 powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --symbol-sleep-ms 250 --daily-step-sleep-ms 400
+
+# 如需启用 baostock 作为补充 provider（默认关闭）
+powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --enable-baostock
 ```
 
 说明：
 - 断点文件默认在 `data/bootstrap/full_init_state.json`
 - 异常日志默认在 `data/bootstrap/full_init_errors.jsonl`
 - 第一轮全量跑完后，脚本会自动仅重跑失败步骤
+- 脚本会输出每个步骤（profile/daily/financial/announcements）的开始、完成与耗时日志
+- 全量初始化默认不启用 `baostock`，用于降低长任务中的阻塞风险
 - 脚本独立于 API 服务运行，不影响现有后端/前端调试流程
 
 ## 当前可用 API
