@@ -151,6 +151,12 @@
 - 北交所专门支持
 - 扩展市场 / 商品 / 期货
 
+当前限制：
+- 当前只保证沪深 SH / SZ 本地标准市场路径。
+- `intraday_bars` 当前只支持 `1m` / `5m`。
+- `timeline` 当前基于本地 `fzline/lc5` 数据提取最新交易日预览，不是完整盘中分析引擎。
+- 若本地目录存在但对应数据文件缺失，会返回清晰业务错误。
+
 ## mootdx 接入策略
 
 ### 1. 启用方式
@@ -163,6 +169,7 @@
 
 独立验证脚本：
 - `backend/app/scripts/validate_mootdx_provider.py`
+- `backend/app/scripts/run_mootdx_validation_matrix.py`
 
 脚本职责：
 - 输出 capability report
@@ -171,6 +178,11 @@
 - 验证分钟线读取
 - 尝试分时线读取
 - 失败时打印清晰错误原因
+
+批量验证矩阵补充：
+- 支持多 symbol、多频率批量验证
+- 可选与 `akshare` / `baostock` 做最近 20 个交易日日线对比
+- 输出结构化 JSON / CSV，便于实测验收与问题排查
 
 ### 3. 设计原则
 
@@ -191,6 +203,7 @@
 - 从 `TechnicalSnapshot` 生成 `FactorSnapshot`
 - 生成 `AlphaScore`
 - 生成 `TriggerScore`
+- 基于 `TechnicalSnapshot + IntradaySnapshot` 生成 `TriggerSnapshot`
 - 让 screener 开始依赖 factor snapshot / trigger 结构
 
 当前边界：
@@ -198,6 +211,25 @@
 - 不是行业中性化框架
 - 不是回测引擎
 - 只是为下一阶段扩展预留稳定接口
+
+## 盘中能力层
+
+当前新增的最小盘中结构分为两层：
+- `backend/app/services/data_service/intraday_service.py`
+- `backend/app/services/factor_service/trigger_snapshot_service.py`
+
+职责划分：
+- `IntradayService`：基于分钟线构建 `IntradaySnapshot`
+- `TriggerSnapshotService`：组合日线 `TechnicalSnapshot` 与 `IntradaySnapshot`，输出轻量 `TriggerSnapshot`
+
+当前公开接口保持克制：
+- `GET /stocks/{symbol}/intraday-bars`
+- `GET /stocks/{symbol}/trigger-snapshot`
+
+说明：
+- `intraday-bars` 负责结构化分钟线返回
+- `trigger-snapshot` 负责给出接近日线支撑、接近突破、拉伸过度等轻量触发判断
+- 盘中层当前不实现复杂盘中策略、自动交易或图表分析
 
 ## Screener 架构收敛
 
@@ -267,4 +299,3 @@
 - 一次性堆很多新功能
 - 为了“智能感”牺牲可维护性
 - 让数据层继续膨胀成所有逻辑的汇集点
-

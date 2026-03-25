@@ -5,7 +5,8 @@ from typing import Optional
 
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_market_data_service
+from app.api.dependencies import get_market_data_service, get_trigger_snapshot_service
+from app.schemas.intraday import TriggerSnapshot
 from app.main import app
 from app.schemas.market_data import (
     DailyBar,
@@ -114,6 +115,27 @@ class StubMarketDataService:
 client = TestClient(app)
 
 
+class StubTriggerSnapshotService:
+    def get_trigger_snapshot(
+        self,
+        symbol: str,
+        frequency: str = "1m",
+        limit: int = 60,
+    ) -> TriggerSnapshot:
+        return TriggerSnapshot(
+            symbol="600519.SH",
+            as_of_datetime=datetime(2024, 1, 2, 10, 0, 0),
+            daily_trend_state="up",
+            daily_support_level=100.0,
+            daily_resistance_level=102.0,
+            latest_intraday_price=101.3,
+            distance_to_support_pct=1.3,
+            distance_to_resistance_pct=0.69,
+            trigger_state="near_breakout",
+            trigger_note="盘中价格接近日线压力位，上行趋势下处于突破观察区。",
+        )
+
+
 def test_get_stock_profile_route_returns_structured_payload() -> None:
     """The stock profile endpoint should return the schema payload."""
     app.dependency_overrides[get_market_data_service] = lambda: StubMarketDataService()
@@ -165,5 +187,22 @@ def test_timeline_route_returns_structured_payload() -> None:
     assert payload["symbol"] == "600519.SH"
     assert payload["count"] == 1
     assert payload["points"][0]["trade_time"] == "14:55:00"
+
+    app.dependency_overrides.clear()
+
+
+def test_trigger_snapshot_route_returns_structured_payload() -> None:
+    """The trigger snapshot route should return structured trigger fields."""
+    app.dependency_overrides[get_trigger_snapshot_service] = (
+        lambda: StubTriggerSnapshotService()
+    )
+
+    response = client.get("/stocks/600519/trigger-snapshot?frequency=5m&limit=30")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600519.SH"
+    assert payload["trigger_state"] == "near_breakout"
+    assert payload["daily_trend_state"] == "up"
 
     app.dependency_overrides.clear()

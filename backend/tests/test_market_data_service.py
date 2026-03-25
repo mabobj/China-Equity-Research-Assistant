@@ -278,6 +278,19 @@ def test_service_parses_datetime_filters_for_intraday_bars() -> None:
     assert response.count == 2
 
 
+def test_service_rejects_unsupported_intraday_frequency() -> None:
+    """Unsupported minute frequency should return a clear request error."""
+    provider = FakeProvider()
+    service = MarketDataService(providers=[provider])
+
+    try:
+        service.get_intraday_bars(symbol="600519.SH", frequency="15m")
+    except Exception as exc:  # noqa: BLE001
+        assert "Unsupported intraday frequency" in str(exc)
+    else:
+        raise AssertionError("Expected invalid intraday frequency error was not raised.")
+
+
 def test_service_returns_cached_daily_bars_when_range_is_covered(tmp_path: Path) -> None:
     """Covered ranges should be served from local storage first."""
     provider = FakeProvider()

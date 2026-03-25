@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, Query
 from app.api.dependencies import (
     get_market_data_service,
     get_technical_analysis_service,
+    get_trigger_snapshot_service,
 )
+from app.schemas.intraday import TriggerSnapshot
 from app.schemas.market_data import (
     DailyBarResponse,
     IntradayBarResponse,
@@ -85,6 +87,21 @@ def get_timeline(
     """返回单只股票最新交易日的分时线预览。"""
     return service.get_timeline(
         symbol=symbol,
+        limit=limit,
+    )
+
+
+@router.get("/{symbol}/trigger-snapshot", response_model=TriggerSnapshot)
+def get_trigger_snapshot(
+    symbol: str,
+    frequency: str = Query(default="1m"),
+    limit: int = Query(default=60, ge=1),
+    service: Any = Depends(get_trigger_snapshot_service),
+) -> TriggerSnapshot:
+    """返回基于日线与盘中快照的轻量触发快照。"""
+    return service.get_trigger_snapshot(
+        symbol=symbol,
+        frequency=frequency,
         limit=limit,
     )
 

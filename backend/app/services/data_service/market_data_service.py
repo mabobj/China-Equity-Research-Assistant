@@ -190,6 +190,7 @@ class MarketDataService:
         limit: Optional[int] = None,
     ) -> IntradayBarResponse:
         canonical_symbol = normalize_symbol(symbol)
+        normalized_frequency = _normalize_intraday_frequency(frequency)
         normalized_start_datetime = _parse_optional_datetime(
             start_datetime,
             "start_datetime",
@@ -210,7 +211,7 @@ class MarketDataService:
 
         bars = self._load_intraday_bars_from_providers(
             canonical_symbol,
-            frequency=frequency,
+            frequency=normalized_frequency,
             start_datetime=normalized_start_datetime,
             end_datetime=normalized_end_datetime,
             limit=limit,
@@ -223,7 +224,7 @@ class MarketDataService:
             )
         return IntradayBarResponse(
             symbol=canonical_symbol,
-            frequency=frequency,
+            frequency=normalized_frequency,
             start_datetime=normalized_start_datetime,
             end_datetime=normalized_end_datetime,
             count=len(bars),
@@ -841,6 +842,17 @@ def _parse_optional_datetime(
     raise InvalidDateError(
         "{field_name} must use YYYY-MM-DDTHH:MM[:SS] format.".format(
             field_name=field_name,
+        ),
+    )
+
+
+def _normalize_intraday_frequency(frequency: str) -> str:
+    cleaned = frequency.strip().lower()
+    if cleaned in {"1m", "5m"}:
+        return cleaned
+    raise InvalidRequestError(
+        "Unsupported intraday frequency '{frequency}'. Supported values: 1m, 5m.".format(
+            frequency=frequency,
         ),
     )
 

@@ -14,8 +14,12 @@ from app.services.data_service.providers.mootdx_provider import MootdxProvider
 
 if TYPE_CHECKING:
     from app.services.data_service.db_inspector_service import DbInspectorService
+    from app.services.data_service.intraday_service import IntradayService
     from app.services.data_service.refresh_service import DataRefreshService
     from app.services.factor_service.snapshot import FactorSnapshotService
+    from app.services.factor_service.trigger_snapshot_service import (
+        TriggerSnapshotService,
+    )
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )
@@ -96,12 +100,35 @@ def get_technical_analysis_service() -> "TechnicalAnalysisService":
 
 
 @lru_cache
+def get_intraday_service() -> "IntradayService":
+    """构建盘中快照 service。"""
+    from app.services.data_service.intraday_service import IntradayService
+
+    return IntradayService(
+        market_data_service=get_market_data_service(),
+    )
+
+
+@lru_cache
 def get_factor_snapshot_service() -> "FactorSnapshotService":
     """构建 factor snapshot service。"""
     from app.services.factor_service.snapshot import FactorSnapshotService
 
     return FactorSnapshotService(
         technical_analysis_service=get_technical_analysis_service(),
+    )
+
+
+@lru_cache
+def get_trigger_snapshot_service() -> "TriggerSnapshotService":
+    """构建轻量触发快照 service。"""
+    from app.services.factor_service.trigger_snapshot_service import (
+        TriggerSnapshotService,
+    )
+
+    return TriggerSnapshotService(
+        technical_analysis_service=get_technical_analysis_service(),
+        intraday_service=get_intraday_service(),
     )
 
 

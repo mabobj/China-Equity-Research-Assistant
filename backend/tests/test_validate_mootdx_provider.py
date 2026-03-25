@@ -1,15 +1,16 @@
-"""Tests for mootdx validation script helpers."""
+"""Tests for mootdx validation helpers."""
 
 from pathlib import Path
 
-from app.scripts.validate_mootdx_provider import (
-    _build_environment_report,
-    _determine_overall_status,
+from app.scripts.mootdx_validation_support import (
+    build_environment_report,
+    determine_overall_status,
 )
+from app.scripts.validate_mootdx_provider import build_argument_parser
 
 
 def test_determine_overall_status_supports_partial_success() -> None:
-    status = _determine_overall_status(
+    status = determine_overall_status(
         provider_available=True,
         daily_status="success",
         minute_status="empty",
@@ -33,10 +34,32 @@ def test_build_environment_report_counts_local_directories(tmp_path: Path) -> No
     (sh_lday / "sh600519.day").write_bytes(b"test")
     (sz_lday / "sz000001.day").write_bytes(b"test")
 
-    report = _build_environment_report(tmp_path)
+    report = build_environment_report(tmp_path)
 
     assert report["tdx_dir_exists"] is True
     assert report["directory_checks"]["sh_lday_file_count"] == 1
     assert report["directory_checks"]["sz_lday_file_count"] == 1
     assert report["directory_checks"]["sh_minline_file_count"] == 0
     assert report["directory_checks"]["sh_fzline_file_count"] == 0
+
+
+def test_single_validation_argument_parser_accepts_expected_flags() -> None:
+    parser = build_argument_parser()
+
+    args = parser.parse_args(
+        [
+            "--tdxdir",
+            "D:/new_tdx64",
+            "--symbol",
+            "600519.SH",
+            "--frequency",
+            "5m",
+            "--minute-limit",
+            "50",
+        ],
+    )
+
+    assert args.tdxdir == "D:/new_tdx64"
+    assert args.symbol == "600519.SH"
+    assert args.frequency == "5m"
+    assert args.minute_limit == 50

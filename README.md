@@ -150,6 +150,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --enable
 - `GET /stocks/{symbol}/daily-bars`
 - `GET /stocks/{symbol}/intraday-bars`
 - `GET /stocks/{symbol}/timeline`
+- `GET /stocks/{symbol}/trigger-snapshot`
 - `GET /stocks/{symbol}/announcements`
 - `GET /stocks/{symbol}/financial-summary`
 - `GET /stocks/{symbol}/technical`
@@ -160,6 +161,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --enable
 - `GET /stocks/{symbol}/daily-bars` 支持 `start_date` / `end_date`，格式为 `YYYY-MM-DD`。
 - `GET /stocks/{symbol}/intraday-bars` 支持 `frequency=1m|5m`，并支持 `start_datetime` / `end_datetime`，格式为 `YYYY-MM-DDTHH:MM[:SS]`。
 - `GET /stocks/{symbol}/timeline` 当前返回最新交易日的分时线预览，支持 `limit` 参数。
+- `GET /stocks/{symbol}/trigger-snapshot` 基于日线技术快照和盘中快照返回轻量触发判断，支持 `frequency` 与 `limit` 参数。
 
 ### 单票研究接口
 
@@ -440,8 +442,8 @@ settings = get_settings()
 
 已支持：
 - 本地通达信目录读取日线
-- 本地通达信目录读取分钟线
-- 本地分时线读取（timeline）
+- 本地通达信目录读取 `1m` / `5m` 分钟线
+- 本地分时线读取（当前基于本地 `lc5` / `fzline` 数据做最新交易日预览）
 - provider capability / health report
 
 当前明确不支持：
@@ -452,6 +454,11 @@ settings = get_settings()
 - 复权默认支持
 - 北交所专门支持
 - 扩展市场 / 商品 / 期货支持
+
+当前限制与说明：
+- 当前以沪深 SH / SZ 本地标准市场为主，不保证北交所、扩展市场、商品、期货可用。
+- 分钟线与 timeline 当前属于“验证版 + 最小可用版”，重点是本地读取、结构化返回和触发层输入，不包含复杂盘中策略。
+- 如本地目录存在但对应 `.day` / `.lc1` / `.lc5` 文件缺失，接口会返回清晰错误。
 
 启用方式：
 
@@ -471,6 +478,7 @@ MOOTDX_TDX_DIR=C:/new_tdx
 
 验证脚本：
 - `backend/app/scripts/validate_mootdx_provider.py`
+- `backend/app/scripts/run_mootdx_validation_matrix.py`
 
 运行示例：
 
@@ -485,6 +493,31 @@ python -m app.scripts.validate_mootdx_provider --tdxdir C:/new_tdx --symbol 6005
 - 日线预览
 - 分钟线预览
 - 分时线预览或失败原因
+
+批量验证示例：
+
+```powershell
+Set-Location backend
+python -m app.scripts.run_mootdx_validation_matrix --tdxdir C:/new_tdx --symbols 600519.SH 000001.SZ 300750.SZ --frequencies 1m 5m --output-json ../data/mootdx_matrix.json --output-csv ../data/mootdx_matrix.csv
+```
+
+如需启用日线对比：
+
+```powershell
+Set-Location backend
+python -m app.scripts.run_mootdx_validation_matrix --tdxdir C:/new_tdx --symbols 600519.SH 000001.SZ --frequencies 1m 5m --compare-provider akshare
+```
+
+批量验证输出包括：
+- `symbol`
+- `capability`
+- `status`
+- `source`
+- `count`
+- `latest_timestamp`
+- `error_type`
+- `error_message`
+- `comparison_summary`
 
 ## 当前开发约束
 

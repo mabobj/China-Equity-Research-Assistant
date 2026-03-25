@@ -9,13 +9,18 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.schemas.market_data import DailyBar, IntradayBar, TimelinePoint
-from app.services.data_service.exceptions import ProviderError
-from app.services.data_service.normalize import convert_symbol_for_provider, parse_symbol
+from app.services.data_service.exceptions import InvalidRequestError, ProviderError
+from app.services.data_service.normalize import SymbolParts, parse_symbol
 from app.services.data_service.providers.base import (
     DAILY_BAR_CAPABILITY,
     INTRADAY_BAR_CAPABILITY,
     TIMELINE_CAPABILITY,
 )
+
+_INTRADAY_FREQUENCY_CONFIG: dict[str, tuple[str, str, int]] = {
+    "1m": ("minline", "lc1", 1),
+    "5m": ("fzline", "lc5", 5),
+}
 
 
 class MootdxProvider:
@@ -29,7 +34,7 @@ class MootdxProvider:
     )
 
     def __init__(self, tdx_dir: Path) -> None:
-        self._tdx_dir = tdx_dir
+        self._tdx_dir = tdx_dir.expanduser()
 
     def is_available(self) -> bool:
         return importlib.util.find_spec("mootdx") is not None and self._tdx_dir.exists()
@@ -37,10 +42,10 @@ class MootdxProvider:
     def get_unavailable_reason(self) -> Optional[str]:
         reasons: list[str] = []
         if importlib.util.find_spec("mootdx") is None:
-            reasons.append("mootdx is not installed.")
+            reasons.append("mootdx is not installed in the current Python environment.")
         if not self._tdx_dir.exists():
             reasons.append(
-                "MOOTDX_TDX_DIR does not exist: {path}".format(path=self._tdx_dir)
+                "MOOTDX_TDX_DIR does not exist: {path}".format(path=self._tdx_dir),
             )
         if not reasons:
             return None
@@ -52,12 +57,12 @@ class MootdxProvider:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> list[DailyBar]:
+        parts = self._parse_supported_symbol(symbol)
+        self._ensure_local_file(parts, dataset="daily_bars")
         reader = self._get_reader()
-        parts = parse_symbol(symbol)
-        local_symbol = convert_symbol_for_provider(symbol, "mootdx")
 
         try:
-            frame = reader.daily(symbol=local_symbol)
+            frame = reader.daily(symbol=parts.code)
         except Exception as exc:  # pragma: no cover - 依赖本地环境
             raise ProviderError("mootdx failed to load daily bars.") from exc
 
@@ -85,7 +90,7 @@ class MootdxProvider:
                     volume=_pick_float(row, ("volume", "vol", "VOLUME")),
                     amount=_pick_float(row, ("amount", "amt", "AMOUNT")),
                     source=self.name,
-                )
+                ),
             )
 
         return sorted(bars, key=lambda item: item.trade_date)
@@ -98,19 +103,18 @@ class MootdxProvider:
         end_datetime: Optional[datetime] = None,
         limit: Optional[int] = None,
     ) -> list[IntradayBar]:
+        parts = self._parse_supported_symbol(symbol)
+        normalized_frequency = _normalize_intraday_frequency(frequency)
+        _, _, suffix = _INTRADAY_FREQUENCY_CONFIG[normalized_frequency]
+        self._ensure_local_file(parts, dataset="intraday_bars", frequency=normalized_frequency)
         reader = self._get_reader()
-        parts = parse_symbol(symbol)
-        local_symbol = convert_symbol_for_provider(symbol, "mootdx")
 
         minute_method = getattr(reader, "minute", None)
         if minute_method is None:
             raise ProviderError("mootdx reader does not support minute data.")
 
         try:
-            try:
-                frame = minute_method(symbol=local_symbol, frequency=frequency)
-            except TypeError:
-                frame = minute_method(symbol=local_symbol)
+            frame = minute_method(symbol=parts.code, suffix=suffix)
         except Exception as exc:  # pragma: no cover - 依赖本地环境
             raise ProviderError("mootdx failed to load intraday bars.") from exc
 
@@ -131,7 +135,7 @@ class MootdxProvider:
                 IntradayBar(
                     symbol=parts.canonical,
                     trade_datetime=trade_datetime,
-                    frequency=frequency,
+                    frequency=normalized_frequency,
                     open=_pick_float(row, ("open", "OPEN")),
                     high=_pick_float(row, ("high", "HIGH")),
                     low=_pick_float(row, ("low", "LOW")),
@@ -139,7 +143,7 @@ class MootdxProvider:
                     volume=_pick_float(row, ("volume", "vol", "VOLUME")),
                     amount=_pick_float(row, ("amount", "amt", "AMOUNT")),
                     source=self.name,
-                )
+                ),
             )
 
         bars = sorted(bars, key=lambda item: item.trade_datetime)
@@ -152,16 +156,16 @@ class MootdxProvider:
         symbol: str,
         limit: Optional[int] = None,
     ) -> list[TimelinePoint]:
+        parts = self._parse_supported_symbol(symbol)
+        self._ensure_local_file(parts, dataset="timeline")
         reader = self._get_reader()
-        parts = parse_symbol(symbol)
-        local_symbol = convert_symbol_for_provider(symbol, "mootdx")
 
         timeline_method = getattr(reader, "fzline", None)
         if timeline_method is None:
             raise ProviderError("mootdx reader does not support timeline data.")
 
         try:
-            frame = timeline_method(symbol=local_symbol)
+            frame = timeline_method(symbol=parts.code)
         except Exception as exc:  # pragma: no cover - 依赖本地环境
             raise ProviderError("mootdx failed to load timeline data.") from exc
 
@@ -186,13 +190,49 @@ class MootdxProvider:
                     volume=_pick_float(row, ("volume", "vol", "VOLUME")),
                     amount=_pick_float(row, ("amount", "amt", "AMOUNT")),
                     source=self.name,
-                )
+                ),
             )
 
         points = sorted(points, key=lambda item: item.trade_time)
         if limit is not None and limit >= 0:
             return points[-limit:]
         return points
+
+    def _parse_supported_symbol(self, symbol: str) -> SymbolParts:
+        cleaned = symbol.strip()
+        if cleaned == "":
+            raise InvalidRequestError("Symbol cannot be empty.")
+
+        upper_symbol = cleaned.upper()
+        if upper_symbol.endswith(".BJ") or upper_symbol.startswith("BJ"):
+            raise InvalidRequestError(
+                "mootdx currently supports only SH/SZ local market symbols. BJ symbols are not supported.",
+            )
+
+        parts = parse_symbol(cleaned)
+        if parts.exchange not in {"SH", "SZ"}:
+            raise InvalidRequestError(
+                "mootdx currently supports only SH/SZ local market symbols.",
+            )
+        return parts
+
+    def _ensure_local_file(
+        self,
+        parts: SymbolParts,
+        *,
+        dataset: str,
+        frequency: Optional[str] = None,
+    ) -> Path:
+        relative_path = _build_relative_data_path(parts, dataset=dataset, frequency=frequency)
+        local_path = self._tdx_dir / relative_path
+        if not local_path.exists():
+            raise ProviderError(
+                "mootdx local file is missing for {symbol}: {path}".format(
+                    symbol=parts.canonical,
+                    path=local_path,
+                ),
+            )
+        return local_path
 
     def _get_reader(self) -> Any:
         unavailable_reason = self.get_unavailable_reason()
@@ -204,6 +244,48 @@ class MootdxProvider:
             return reader_factory.factory(market="std", tdxdir=str(self._tdx_dir))
         except Exception as exc:  # pragma: no cover - 依赖本地环境
             raise ProviderError("Failed to initialize mootdx reader.") from exc
+
+
+def _build_relative_data_path(
+    parts: SymbolParts,
+    *,
+    dataset: str,
+    frequency: Optional[str] = None,
+) -> Path:
+    exchange_dir = parts.exchange.lower()
+    filename_prefix = "{exchange}{code}".format(
+        exchange=exchange_dir,
+        code=parts.code,
+    )
+    if dataset == "daily_bars":
+        return Path("vipdoc") / exchange_dir / "lday" / "{name}.day".format(
+            name=filename_prefix,
+        )
+    if dataset == "intraday_bars":
+        normalized_frequency = _normalize_intraday_frequency(frequency or "1m")
+        subdir, extension, _ = _INTRADAY_FREQUENCY_CONFIG[normalized_frequency]
+        return Path("vipdoc") / exchange_dir / subdir / "{name}.{ext}".format(
+            name=filename_prefix,
+            ext=extension,
+        )
+    if dataset == "timeline":
+        return Path("vipdoc") / exchange_dir / "fzline" / "{name}.lc5".format(
+            name=filename_prefix,
+        )
+    raise InvalidRequestError(
+        "Unsupported mootdx local dataset mapping: {dataset}".format(dataset=dataset),
+    )
+
+
+def _normalize_intraday_frequency(frequency: str) -> str:
+    cleaned = frequency.strip().lower()
+    if cleaned in _INTRADAY_FREQUENCY_CONFIG:
+        return cleaned
+    raise InvalidRequestError(
+        "Unsupported intraday frequency '{frequency}'. Supported values: 1m, 5m.".format(
+            frequency=frequency,
+        ),
+    )
 
 
 def _frame_to_records(frame: Any) -> list[dict[str, Any]]:
