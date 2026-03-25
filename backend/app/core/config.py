@@ -87,7 +87,9 @@ class Settings:
     enable_akshare: bool
     enable_baostock: bool
     enable_cninfo: bool
+    enable_mootdx: bool
     enable_eastmoney: bool
+    mootdx_tdx_dir: Optional[Path]
     screener_lookback_days: int
     screener_progress_log_interval: int
     data_refresh_daily_bar_lookback_days: int
@@ -122,7 +124,13 @@ def get_settings() -> Settings:
         enable_akshare=_read_bool_env("ENABLE_AKSHARE", default=True),
         enable_baostock=_read_bool_env("ENABLE_BAOSTOCK", default=True),
         enable_cninfo=_read_bool_env("ENABLE_CNINFO", default=True),
+        enable_mootdx=_read_bool_env("ENABLE_MOOTDX", default=False),
         enable_eastmoney=_read_bool_env("ENABLE_EASTMONEY", default=True),
+        mootdx_tdx_dir=(
+            _read_path_env("MOOTDX_TDX_DIR", "C:/new_tdx")
+            if _read_optional_env("MOOTDX_TDX_DIR") is not None
+            else None
+        ),
         screener_lookback_days=_read_int_env("SCREENER_LOOKBACK_DAYS", default=400),
         screener_progress_log_interval=_read_int_env(
             "SCREENER_PROGRESS_LOG_INTERVAL",

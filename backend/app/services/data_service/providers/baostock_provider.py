@@ -16,6 +16,11 @@ from app.services.data_service.normalize import (
     convert_symbol_for_provider,
     parse_symbol,
 )
+from app.services.data_service.providers.base import (
+    DAILY_BAR_CAPABILITY,
+    PROFILE_CAPABILITY,
+    UNIVERSE_CAPABILITY,
+)
 
 _BAOSTOCK_LOCK = RLock()
 
@@ -24,6 +29,11 @@ class BaostockProvider:
     """基于 BaoStock 的 provider。"""
 
     name = "baostock"
+    capabilities = (
+        PROFILE_CAPABILITY,
+        DAILY_BAR_CAPABILITY,
+        UNIVERSE_CAPABILITY,
+    )
 
     def __init__(self) -> None:
         self._session_depth = 0
@@ -32,6 +42,11 @@ class BaostockProvider:
     def is_available(self) -> bool:
         """返回 BaoStock 是否可导入。"""
         return importlib.util.find_spec("baostock") is not None
+
+    def get_unavailable_reason(self) -> Optional[str]:
+        if self.is_available():
+            return None
+        return "BaoStock is not installed or unavailable."
 
     @contextmanager
     def session_scope(self) -> Iterator[None]:

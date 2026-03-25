@@ -1,8 +1,9 @@
-"""选股器评分规则。"""
+"""选股评分规则。"""
 
 from dataclasses import dataclass
 from typing import Optional
 
+from app.schemas.factor import FactorSnapshot
 from app.schemas.technical import TechnicalSnapshot
 
 
@@ -16,7 +17,7 @@ class ScreenerScoreResult:
 
 
 def score_technical_snapshot(snapshot: TechnicalSnapshot) -> ScreenerScoreResult:
-    """根据技术快照生成选股评分和分桶。"""
+    """兼容旧逻辑：直接从 technical snapshot 生成评分。"""
     score = float(snapshot.trend_score)
 
     if snapshot.trend_state == "up":
@@ -77,11 +78,64 @@ def score_technical_snapshot(snapshot: TechnicalSnapshot) -> ScreenerScoreResult
     )
 
 
+def score_factor_snapshot(
+    factor_snapshot: FactorSnapshot,
+    technical_snapshot: TechnicalSnapshot,
+) -> ScreenerScoreResult:
+    """新逻辑入口：基于 factor snapshot 评分，同时保持分桶兼容。"""
+    final_score = factor_snapshot.alpha_score.total_score
+    list_type = _determine_list_type_from_factor(
+        score=final_score,
+        trigger_state=factor_snapshot.trigger_score.trigger_state,
+        snapshot=technical_snapshot,
+    )
+
+    support_distance = None
+    if (
+        technical_snapshot.support_level is not None
+        and technical_snapshot.support_level > 0
+    ):
+        support_distance = (
+            technical_snapshot.latest_close - technical_snapshot.support_level
+        ) / technical_snapshot.support_level
+
+    resistance_distance = None
+    if (
+        technical_snapshot.resistance_level is not None
+        and technical_snapshot.latest_close > 0
+    ):
+        resistance_distance = (
+            technical_snapshot.resistance_level - technical_snapshot.latest_close
+        ) / technical_snapshot.latest_close
+
+    return ScreenerScoreResult(
+        screener_score=final_score,
+        list_type=list_type,
+        short_reason=_build_short_reason(
+            snapshot=technical_snapshot,
+            list_type=list_type,
+            support_distance=support_distance,
+            resistance_distance=resistance_distance,
+        ),
+    )
+
+
 def _determine_list_type(score: int, snapshot: TechnicalSnapshot) -> str:
-    """根据评分和趋势状态分桶。"""
     if score >= 75 and snapshot.trend_state == "up":
         return "BUY_CANDIDATE"
     if score >= 50 and snapshot.trend_state != "down":
+        return "WATCHLIST"
+    return "AVOID"
+
+
+def _determine_list_type_from_factor(
+    score: int,
+    trigger_state: str,
+    snapshot: TechnicalSnapshot,
+) -> str:
+    if score >= 75 and snapshot.trend_state == "up" and trigger_state != "avoid":
+        return "BUY_CANDIDATE"
+    if score >= 50 and snapshot.trend_state != "down" and trigger_state in {"ready", "watch"}:
         return "WATCHLIST"
     return "AVOID"
 
@@ -92,7 +146,6 @@ def _build_short_reason(
     support_distance: Optional[float],
     resistance_distance: Optional[float],
 ) -> str:
-    """生成模板化短理由。"""
     if list_type == "BUY_CANDIDATE":
         if resistance_distance is not None and resistance_distance <= 0.03:
             return "上行趋势延续，价格接近突破位，量能结构尚可。"
@@ -107,9 +160,9 @@ def _build_short_reason(
 
     if snapshot.trend_state == "down":
         return "趋势偏弱，当前不适合作为优先候选。"
-    return "价格结构或流动性支撑不足，暂不考虑纳入候选。"
+    return "价格结构或流动性支持不足，暂不考虑纳入候选。"
 
 
 def _clamp_score(score: float) -> int:
-    """将分数限制在 0 到 100。"""
     return max(0, min(100, int(round(score))))
+

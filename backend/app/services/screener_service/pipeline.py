@@ -10,6 +10,7 @@ from app.schemas.market_data import UniverseItem
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.services.data_service.exceptions import DataServiceError
 from app.services.data_service.market_data_service import MarketDataService
+from app.services.factor_service.snapshot import FactorSnapshotService
 from app.services.feature_service.technical_analysis_service import (
     TechnicalAnalysisService,
 )
@@ -18,7 +19,10 @@ from app.services.screener_service.filters import (
     has_acceptable_liquidity,
     has_sufficient_daily_bars,
 )
-from app.services.screener_service.scoring import score_technical_snapshot
+from app.services.screener_service.scoring import (
+    score_factor_snapshot,
+    score_technical_snapshot,
+)
 from app.services.screener_service.universe import load_scan_universe
 
 logger = logging.getLogger(__name__)
@@ -31,11 +35,13 @@ class ScreenerPipeline:
         self,
         market_data_service: MarketDataService,
         technical_analysis_service: TechnicalAnalysisService,
+        factor_snapshot_service: Optional[FactorSnapshotService] = None,
         lookback_days: int = 400,
         progress_log_interval: int = 100,
     ) -> None:
         self._market_data_service = market_data_service
         self._technical_analysis_service = technical_analysis_service
+        self._factor_snapshot_service = factor_snapshot_service
         self._lookback_days = max(lookback_days, 180)
         self._progress_log_interval = max(progress_log_interval, 1)
 
@@ -44,7 +50,6 @@ class ScreenerPipeline:
         max_symbols: Optional[int] = None,
         top_n: Optional[int] = None,
     ) -> ScreenerRunResponse:
-        """运行规则初筛选股器。"""
         started_at = perf_counter()
 
         with self._market_data_service.session_scope():
@@ -84,6 +89,7 @@ class ScreenerPipeline:
                         started_at=started_at,
                     )
                     continue
+
                 candidates.append(scan_result.candidate)
                 if latest_as_of_date is None or scan_result.as_of_date > latest_as_of_date:
                     latest_as_of_date = scan_result.as_of_date
@@ -134,7 +140,6 @@ class ScreenerPipeline:
         item: UniverseItem,
         start_date: str,
     ) -> Optional["_ScanResult"]:
-        """扫描单个 symbol。"""
         try:
             daily_bars = self._market_data_service.get_daily_bars(
                 item.symbol,
@@ -157,31 +162,41 @@ class ScreenerPipeline:
                 None,
             )
             if callable(build_snapshot):
-                snapshot = build_snapshot(
+                technical_snapshot = build_snapshot(
                     symbol=item.symbol,
                     bars=daily_bars.bars,
                 )
             else:
-                snapshot = self._technical_analysis_service.get_technical_snapshot(
+                technical_snapshot = self._technical_analysis_service.get_technical_snapshot(
                     item.symbol,
                 )
         except DataServiceError:
             return None
 
-        score_result = score_technical_snapshot(snapshot)
+        if self._factor_snapshot_service is not None:
+            factor_snapshot = self._factor_snapshot_service.build_from_technical_snapshot(
+                technical_snapshot,
+            )
+            score_result = score_factor_snapshot(
+                factor_snapshot=factor_snapshot,
+                technical_snapshot=technical_snapshot,
+            )
+        else:
+            score_result = score_technical_snapshot(technical_snapshot)
+
         return _ScanResult(
-            as_of_date=snapshot.as_of_date,
+            as_of_date=technical_snapshot.as_of_date,
             candidate=ScreenerCandidate(
                 symbol=item.symbol,
                 name=item.name,
                 list_type=score_result.list_type,
                 rank=1,
                 screener_score=score_result.screener_score,
-                trend_state=snapshot.trend_state,
-                trend_score=snapshot.trend_score,
-                latest_close=snapshot.latest_close,
-                support_level=snapshot.support_level,
-                resistance_level=snapshot.resistance_level,
+                trend_state=technical_snapshot.trend_state,
+                trend_score=technical_snapshot.trend_score,
+                latest_close=technical_snapshot.latest_close,
+                support_level=technical_snapshot.support_level,
+                resistance_level=technical_snapshot.resistance_level,
                 short_reason=score_result.short_reason,
             ),
         )
@@ -195,7 +210,6 @@ class ScreenerPipeline:
         skipped_symbols: int,
         started_at: float,
     ) -> None:
-        """按固定间隔输出初筛进度日志。"""
         if total <= 0:
             return
         if index != total and index % self._progress_log_interval != 0:
@@ -224,7 +238,6 @@ def _rank_candidates(
     candidates: list[ScreenerCandidate],
     top_n: Optional[int] = None,
 ) -> list[ScreenerCandidate]:
-    """按分数排序并重新编号。"""
     sorted_candidates = sorted(
         candidates,
         key=lambda item: (item.screener_score, item.trend_score, item.symbol),
@@ -237,3 +250,4 @@ def _rank_candidates(
     for index, candidate in enumerate(sorted_candidates, start=1):
         ranked_candidates.append(candidate.model_copy(update={"rank": index}))
     return ranked_candidates
+

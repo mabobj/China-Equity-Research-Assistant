@@ -10,5 +10,6 @@ pyarrow
 httpx
 akshare
 baostock
+mootdx
 python-dotenv
 pytest

@@ -1,6 +1,6 @@
 """Schemas for market data responses."""
 
-from datetime import date
+from datetime import date, datetime, time
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,6 +49,57 @@ class DailyBarResponse(BaseModel):
     end_date: Optional[date] = None
     count: int = Field(ge=0)
     bars: list[DailyBar]
+
+
+class IntradayBar(BaseModel):
+    """One intraday OHLCV bar."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    trade_datetime: datetime
+    frequency: str
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
+    volume: Optional[float] = None
+    amount: Optional[float] = None
+    source: str
+
+
+class IntradayBarResponse(BaseModel):
+    """Intraday bars response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    frequency: str
+    count: int = Field(ge=0)
+    bars: list[IntradayBar]
+
+
+class TimelinePoint(BaseModel):
+    """One timeline point."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    trade_time: time
+    price: Optional[float] = None
+    volume: Optional[float] = None
+    amount: Optional[float] = None
+    source: str
+
+
+class TimelineResponse(BaseModel):
+    """Timeline response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    count: int = Field(ge=0)
+    points: list[TimelinePoint]
 
 
 class UniverseItem(BaseModel):

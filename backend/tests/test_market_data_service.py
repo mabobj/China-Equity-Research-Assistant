@@ -100,6 +100,59 @@ class BrokenDailyBarProvider(FakeProvider):
         raise TypeError("'NoneType' object is not iterable")
 
 
+class ProfileOnlyProvider:
+    name = "profile_only"
+    capabilities = ("profile",)
+
+    def __init__(self) -> None:
+        self.called_symbol: Optional[str] = None
+
+    def is_available(self) -> bool:
+        return True
+
+    def get_stock_profile(self, symbol: str) -> Optional[StockProfile]:
+        self.called_symbol = symbol
+        return StockProfile(
+            symbol=symbol,
+            code="600519",
+            exchange="SH",
+            name="Kweichow Moutai",
+            source=self.name,
+        )
+
+
+class DailyOnlyProvider:
+    name = "daily_only"
+    capabilities = ("daily_bars",)
+
+    def __init__(self) -> None:
+        self.called_symbol: Optional[str] = None
+
+    def is_available(self) -> bool:
+        return True
+
+    def get_daily_bars(
+        self,
+        symbol: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> list[DailyBar]:
+        self.called_symbol = symbol
+        return [
+            DailyBar(
+                symbol=symbol,
+                trade_date=date(2024, 1, 2),
+                open=100.0,
+                high=102.0,
+                low=99.5,
+                close=101.0,
+                volume=1000.0,
+                amount=100000.0,
+                source=self.name,
+            )
+        ]
+
+
 def test_service_normalizes_symbol_before_calling_provider() -> None:
     """The service should always use canonical symbols internally."""
     provider = FakeProvider()
@@ -313,3 +366,18 @@ def test_service_wraps_unexpected_provider_daily_bar_error() -> None:
         assert "TypeError: 'NoneType' object is not iterable" in str(exc)
     else:
         raise AssertionError("Expected provider failure was not raised.")
+
+
+def test_service_remains_compatible_with_split_capability_providers() -> None:
+    """拆分 capability 后，service 仍应能组合多个 provider 对外工作。"""
+    profile_provider = ProfileOnlyProvider()
+    daily_provider = DailyOnlyProvider()
+    service = MarketDataService(providers=[profile_provider, daily_provider])
+
+    profile = service.get_stock_profile("600519.SH")
+    daily_bars = service.get_daily_bars("600519.SH", start_date="2024-01-01")
+
+    assert profile.symbol == "600519.SH"
+    assert profile_provider.called_symbol == "600519.SH"
+    assert daily_provider.called_symbol == "600519.SH"
+    assert daily_bars.count == 1

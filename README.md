@@ -152,6 +152,11 @@ powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --enable
 - `GET /stocks/{symbol}/financial-summary`
 - `GET /stocks/{symbol}/technical`
 
+说明：
+- 当前公开 API 仍保持兼容，继续提供 profile / daily-bars / universe / announcements / financial-summary。
+- 数据层内部已重构为 capability-based provider 设计，provider 不再要求一次实现全部能力。
+- 分钟线与分时线能力目前作为内部 service / 验证脚本能力预埋，暂未暴露新的公开 API。
+
 ### 单票研究接口
 
 - `GET /research/{symbol}`
@@ -399,6 +404,83 @@ settings = get_settings()
 - `AKSHARE_DAILY_RETRY_MAX_ATTEMPTS`：AKShare 日线请求最大重试次数，默认 `4`
 - `AKSHARE_DAILY_RETRY_BACKOFF_SECONDS`：AKShare 日线重试指数退避基数（秒），默认 `0.8`
 - `AKSHARE_DAILY_RETRY_JITTER_SECONDS`：AKShare 日线重试抖动（秒），默认 `0.2`
+- `ENABLE_MOOTDX`：是否启用 mootdx 本地行情 provider，默认 `false`
+- `MOOTDX_TDX_DIR`：通达信本地目录，例如 `C:/new_tdx`
+
+## 数据层结构
+
+当前数据层已从“大一统 provider 协议”收敛为 capability-based 设计。
+
+核心 capability：
+- `profile`
+- `daily_bars`
+- `universe`
+- `announcements`
+- `financial_summary`
+- `intraday_bars`
+- `timeline`
+
+当前关键组件：
+- `backend/app/services/data_service/providers/base.py`
+- `backend/app/services/data_service/provider_registry.py`
+- `backend/app/services/data_service/market_data_service.py`
+
+设计说明：
+- provider registry 会按 capability 选择 provider，而不是要求每个 provider 实现所有能力
+- `MarketDataService` 仍作为统一入口，对现有 API/service 保持兼容
+- 现有 provider 通过适配器接入 registry，因此这轮重构不要求一次性重写所有调用层
+
+## mootdx 接入说明
+
+当前 `mootdx` 只作为“本地行情验证版 provider”接入。
+
+已支持：
+- 本地通达信目录读取日线
+- 本地通达信目录读取分钟线
+- 本地分时线读取（timeline）
+- provider capability / health report
+
+当前明确不支持：
+- 财务数据
+- 公告
+- 股票池
+- 在线 quotes 默认通路
+- 复权默认支持
+- 北交所专门支持
+- 扩展市场 / 商品 / 期货支持
+
+启用方式：
+
+```powershell
+$env:ENABLE_MOOTDX = "true"
+$env:MOOTDX_TDX_DIR = "C:/new_tdx"
+```
+
+或写入 `.env`：
+
+```env
+ENABLE_MOOTDX=true
+MOOTDX_TDX_DIR=C:/new_tdx
+```
+
+## mootdx 验证脚本
+
+验证脚本：
+- `backend/app/scripts/validate_mootdx_provider.py`
+
+运行示例：
+
+```powershell
+Set-Location backend
+python -m app.scripts.validate_mootdx_provider --tdxdir C:/new_tdx --symbol 600519.SH --frequency 1m
+```
+
+输出内容包括：
+- provider capability report
+- provider health report
+- 日线预览
+- 分钟线预览
+- 分时线预览或失败原因
 
 ## 当前开发约束
 

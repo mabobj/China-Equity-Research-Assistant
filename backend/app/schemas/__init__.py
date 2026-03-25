@@ -3,7 +3,11 @@
 from app.schemas.market_data import (
     DailyBar,
     DailyBarResponse,
+    IntradayBar,
+    IntradayBarResponse,
     StockProfile,
+    TimelinePoint,
+    TimelineResponse,
     UniverseItem,
     UniverseResponse,
 )
@@ -25,6 +29,13 @@ from app.schemas.research import (
     ResearchReport,
     TechnicalResearchResult,
 )
+from app.schemas.factor import (
+    AlphaScore,
+    FactorScoreBreakdown,
+    FactorSnapshot,
+    TriggerScore,
+)
+from app.schemas.provider import ProviderCapabilityReport, ProviderHealthReport
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.schemas.technical import (
     BollingerSnapshot,
@@ -35,11 +46,13 @@ from app.schemas.technical import (
     VolumeMetricsSnapshot,
 )
 from app.schemas.strategy import PriceRange, StrategyPlan
+from app.schemas.workflow import WorkflowNodeRequest, WorkflowNodeResult
 
 __all__ = [
     "AnnouncementItem",
     "AnnouncementListResponse",
     "BollingerSnapshot",
+    "AlphaScore",
     "DataRefreshRequest",
     "DataRefreshStatus",
     "DailyBar",
@@ -50,11 +63,17 @@ __all__ = [
     "DbTablesResponse",
     "EmaSnapshot",
     "EventResearchResult",
+    "FactorScoreBreakdown",
+    "FactorSnapshot",
     "FinancialSummary",
     "FundamentalResearchResult",
+    "IntradayBar",
+    "IntradayBarResponse",
     "MacdSnapshot",
     "MovingAverageSnapshot",
     "PriceRange",
+    "ProviderCapabilityReport",
+    "ProviderHealthReport",
     "ResearchReport",
     "ScreenerCandidate",
     "ScreenerRunResponse",
@@ -62,7 +81,12 @@ __all__ = [
     "StrategyPlan",
     "TechnicalResearchResult",
     "TechnicalSnapshot",
+    "TimelinePoint",
+    "TimelineResponse",
+    "TriggerScore",
     "UniverseItem",
     "UniverseResponse",
     "VolumeMetricsSnapshot",
+    "WorkflowNodeRequest",
+    "WorkflowNodeResult",
 ]

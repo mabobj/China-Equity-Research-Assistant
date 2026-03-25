@@ -6,13 +6,16 @@ from typing import TYPE_CHECKING
 from app.core.config import get_settings
 from app.db.market_data_store import LocalMarketDataStore
 from app.services.data_service.market_data_service import MarketDataService
+from app.services.data_service.provider_registry import ProviderRegistry
 from app.services.data_service.providers.akshare_provider import AkshareProvider
 from app.services.data_service.providers.baostock_provider import BaostockProvider
 from app.services.data_service.providers.cninfo_provider import CninfoProvider
+from app.services.data_service.providers.mootdx_provider import MootdxProvider
 
 if TYPE_CHECKING:
     from app.services.data_service.db_inspector_service import DbInspectorService
     from app.services.data_service.refresh_service import DataRefreshService
+    from app.services.factor_service.snapshot import FactorSnapshotService
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )
@@ -35,6 +38,8 @@ def get_market_data_service() -> MarketDataService:
     settings = get_settings()
     providers = []
 
+    if settings.enable_mootdx and settings.mootdx_tdx_dir is not None:
+        providers.append(MootdxProvider(tdx_dir=settings.mootdx_tdx_dir))
     if settings.enable_akshare:
         providers.append(
             AkshareProvider(
@@ -49,7 +54,7 @@ def get_market_data_service() -> MarketDataService:
         providers.append(CninfoProvider())
 
     return MarketDataService(
-        providers=providers,
+        providers=ProviderRegistry(providers),
         local_store=get_local_market_data_store(),
     )
 
@@ -91,6 +96,16 @@ def get_technical_analysis_service() -> "TechnicalAnalysisService":
 
 
 @lru_cache
+def get_factor_snapshot_service() -> "FactorSnapshotService":
+    """构建 factor snapshot service。"""
+    from app.services.factor_service.snapshot import FactorSnapshotService
+
+    return FactorSnapshotService(
+        technical_analysis_service=get_technical_analysis_service(),
+    )
+
+
+@lru_cache
 def get_research_manager() -> "ResearchManager":
     """构建单票研究 manager。"""
     from app.services.research_service.research_manager import ResearchManager
@@ -122,6 +137,7 @@ def get_screener_pipeline() -> "ScreenerPipeline":
     return ScreenerPipeline(
         market_data_service=get_market_data_service(),
         technical_analysis_service=get_technical_analysis_service(),
+        factor_snapshot_service=get_factor_snapshot_service(),
         lookback_days=settings.screener_lookback_days,
         progress_log_interval=settings.screener_progress_log_interval,
     )

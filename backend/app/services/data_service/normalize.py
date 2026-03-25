@@ -6,7 +6,7 @@ from typing import Literal
 
 from app.services.data_service.exceptions import InvalidSymbolError
 
-ProviderName = Literal["akshare", "baostock", "cninfo"]
+ProviderName = Literal["akshare", "baostock", "cninfo", "mootdx"]
 Exchange = Literal["SH", "SZ"]
 
 _CANONICAL_PATTERN = re.compile(r"^(?P<code>\d{6})\.(?P<exchange>SH|SZ)$")
@@ -97,6 +97,8 @@ def convert_symbol_for_provider(symbol: str, provider: ProviderName) -> str:
         return parts.baostock_symbol
     if provider == "cninfo":
         return parts.cninfo_symbol
+    if provider == "mootdx":
+        return parts.code
     raise InvalidSymbolError(
         "Unsupported provider symbol conversion: {provider}".format(provider=provider),
     )

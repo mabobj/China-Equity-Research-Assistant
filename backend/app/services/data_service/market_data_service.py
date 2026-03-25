@@ -1,5 +1,7 @@
 """A 股数据 service 层。"""
 
+from __future__ import annotations
+
 from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timedelta
 from typing import Iterator, Optional, Sequence
@@ -12,10 +14,15 @@ from app.db.market_data_store import (
 from app.schemas.market_data import (
     DailyBar,
     DailyBarResponse,
+    IntradayBar,
+    IntradayBarResponse,
     StockProfile,
+    TimelinePoint,
+    TimelineResponse,
     UniverseItem,
     UniverseResponse,
 )
+from app.schemas.provider import ProviderCapabilityReport, ProviderHealthReport
 from app.schemas.research_inputs import (
     AnnouncementItem,
     AnnouncementListResponse,
@@ -28,22 +35,33 @@ from app.services.data_service.exceptions import (
     ProviderError,
 )
 from app.services.data_service.normalize import normalize_symbol
-from app.services.data_service.providers.base import MarketDataProvider
+from app.services.data_service.provider_registry import ProviderRegistry
+from app.services.data_service.providers.base import (
+    ANNOUNCEMENT_CAPABILITY,
+    DAILY_BAR_CAPABILITY,
+    FINANCIAL_SUMMARY_CAPABILITY,
+    INTRADAY_BAR_CAPABILITY,
+    PROFILE_CAPABILITY,
+    TIMELINE_CAPABILITY,
+    UNIVERSE_CAPABILITY,
+)
 
 
 class MarketDataService:
-    """统一封装 A 股数据访问、本地落盘与简单 fallback。"""
+    """统一封装 A 股数据访问、本地落盘与 provider 选择。"""
 
     def __init__(
         self,
-        providers: Sequence[MarketDataProvider],
+        providers: Sequence[object] | ProviderRegistry,
         local_store: Optional[LocalMarketDataStore] = None,
     ) -> None:
-        self._providers = list(providers)
+        if isinstance(providers, ProviderRegistry):
+            self._provider_registry = providers
+        else:
+            self._provider_registry = ProviderRegistry(providers)
         self._local_store = local_store
 
     def get_stock_profile(self, symbol: str) -> StockProfile:
-        """获取单只股票基础信息。"""
         canonical_symbol = normalize_symbol(symbol)
 
         if self._local_store is not None:
@@ -62,7 +80,6 @@ class MarketDataService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> DailyBarResponse:
-        """获取单只股票日线行情。"""
         canonical_symbol = normalize_symbol(symbol)
         normalized_start_date = _parse_optional_date(start_date, "start_date")
         normalized_end_date = _parse_optional_date(end_date, "end_date")
@@ -152,7 +169,6 @@ class MarketDataService:
                 normalized_end_date,
                 merged_bars,
             )
-
         if cached_bars:
             return _build_daily_bar_response(
                 canonical_symbol,
@@ -165,8 +181,54 @@ class MarketDataService:
             "No daily bars found for symbol {symbol}.".format(symbol=canonical_symbol),
         )
 
+    def get_intraday_bars(
+        self,
+        symbol: str,
+        frequency: str = "1m",
+        limit: Optional[int] = None,
+    ) -> IntradayBarResponse:
+        canonical_symbol = normalize_symbol(symbol)
+        bars = self._load_intraday_bars_from_providers(
+            canonical_symbol,
+            frequency=frequency,
+            limit=limit,
+        )
+        if not bars:
+            raise DataNotFoundError(
+                "No intraday bars found for symbol {symbol}.".format(
+                    symbol=canonical_symbol,
+                ),
+            )
+        return IntradayBarResponse(
+            symbol=canonical_symbol,
+            frequency=frequency,
+            count=len(bars),
+            bars=bars,
+        )
+
+    def get_timeline(
+        self,
+        symbol: str,
+        limit: Optional[int] = None,
+    ) -> TimelineResponse:
+        canonical_symbol = normalize_symbol(symbol)
+        points = self._load_timeline_from_providers(
+            canonical_symbol,
+            limit=limit,
+        )
+        if not points:
+            raise DataNotFoundError(
+                "No timeline data found for symbol {symbol}.".format(
+                    symbol=canonical_symbol,
+                ),
+            )
+        return TimelineResponse(
+            symbol=canonical_symbol,
+            count=len(points),
+            points=points,
+        )
+
     def get_stock_universe(self) -> UniverseResponse:
-        """获取基础股票池。"""
         if self._local_store is not None:
             cached_items = self._local_store.get_stock_universe()
             if cached_items:
@@ -178,7 +240,6 @@ class MarketDataService:
         return UniverseResponse(count=len(items), items=items)
 
     def refresh_stock_universe(self) -> UniverseResponse:
-        """强制从线上刷新股票池，并回写本地存储。"""
         items = self._load_stock_universe_from_providers()
         if self._local_store is not None:
             self._local_store.replace_stock_universe(items)
@@ -191,7 +252,6 @@ class MarketDataService:
         end_date: Optional[str] = None,
         limit: int = 20,
     ) -> AnnouncementListResponse:
-        """获取单只股票公告列表。"""
         if limit <= 0:
             raise InvalidRequestError("limit must be greater than 0.")
 
@@ -262,7 +322,6 @@ class MarketDataService:
         )
 
     def get_stock_financial_summary(self, symbol: str) -> FinancialSummary:
-        """获取单只股票基础财务摘要。"""
         canonical_symbol = normalize_symbol(symbol)
 
         if self._local_store is not None:
@@ -278,7 +337,6 @@ class MarketDataService:
         return summary
 
     def refresh_stock_profile(self, symbol: str) -> StockProfile:
-        """强制从线上刷新股票基础信息。"""
         canonical_symbol = normalize_symbol(symbol)
         profile = self._load_stock_profile_from_providers(canonical_symbol)
         if self._local_store is not None:
@@ -286,7 +344,6 @@ class MarketDataService:
         return profile
 
     def refresh_daily_bars(self, symbol: str, lookback_days: int = 400) -> int:
-        """强制从线上补齐近期日线，并回写本地存储。"""
         if lookback_days <= 0:
             raise InvalidRequestError("lookback_days must be greater than 0.")
 
@@ -300,9 +357,7 @@ class MarketDataService:
             )
             if latest_local_trade_date is not None:
                 if latest_local_trade_date >= sync_end_date:
-                    # 今日数据已经在本地，直接跳过本次增量请求。
                     return 0
-                # 已有本地日线后，增量补全查询“本地最新下一天”到今日。
                 sync_start_date = latest_local_trade_date + timedelta(days=1)
 
         if sync_start_date > sync_end_date:
@@ -328,13 +383,11 @@ class MarketDataService:
         return len(remote_bars)
 
     def get_refresh_cursor(self, cursor_key: str) -> Optional[str]:
-        """读取本地补全游标。"""
         if self._local_store is None:
             return None
         return self._local_store.get_refresh_cursor(cursor_key)
 
     def set_refresh_cursor(self, cursor_key: str, cursor_value: Optional[str]) -> None:
-        """写入本地补全游标。"""
         if self._local_store is None:
             return
         self._local_store.set_refresh_cursor(cursor_key, cursor_value)
@@ -345,7 +398,6 @@ class MarketDataService:
         lookback_days: int = 90,
         limit: int = 2000,
     ) -> int:
-        """强制从线上增量刷新近期公告，并回写本地存储。"""
         if lookback_days <= 0:
             raise InvalidRequestError("lookback_days must be greater than 0.")
         if limit <= 0:
@@ -359,7 +411,6 @@ class MarketDataService:
                 canonical_symbol,
             )
             if latest_publish_date is not None:
-                # 往前回补 3 天，兼容公告延迟发布和数据修订。
                 start_date = max(start_date, latest_publish_date - timedelta(days=3))
 
         items = self._load_stock_announcements_from_providers(
@@ -389,70 +440,61 @@ class MarketDataService:
         return len(items)
 
     def refresh_stock_financial_summary(self, symbol: str) -> FinancialSummary:
-        """强制从线上刷新基础财务摘要。"""
         canonical_symbol = normalize_symbol(symbol)
         summary = self._load_stock_financial_summary_from_providers(canonical_symbol)
         if self._local_store is not None:
             self._local_store.upsert_stock_financial_summary(summary)
         return summary
 
+    def get_provider_capability_reports(self) -> list[ProviderCapabilityReport]:
+        return self._provider_registry.get_capability_reports()
+
+    def get_provider_health_reports(self) -> list[ProviderHealthReport]:
+        return self._provider_registry.get_health_reports()
+
     @contextmanager
     def session_scope(self) -> Iterator[None]:
-        """在一次批量流程里复用 provider 会话。"""
         with ExitStack() as stack:
-            for provider in self._iter_available_providers():
+            for provider in self._provider_registry.get_all_available_providers():
                 session_scope = getattr(provider, "session_scope", None)
                 if callable(session_scope):
                     stack.enter_context(session_scope())
             yield
 
     def _load_stock_profile_from_providers(self, symbol: str) -> StockProfile:
-        """从 provider 加载股票基础信息。"""
+        providers = self._iter_available_providers(PROFILE_CAPABILITY)
         last_error = None
         provider_errors: list[str] = []
 
-        for provider in self._iter_available_providers():
-            provider_name = getattr(provider, "name", "provider")
+        for provider in providers:
             try:
                 profile = provider.get_stock_profile(symbol)
             except ProviderError as exc:
                 last_error = exc
-                provider_errors.append(
-                    "{provider}: {message}".format(
-                        provider=provider_name,
-                        message=str(exc),
-                    ),
-                )
+                provider_errors.append("{provider}: {message}".format(provider=provider.name, message=str(exc)))
                 continue
-            except Exception as exc:  # pragma: no cover - 兜底保护
+            except Exception as exc:  # pragma: no cover
                 last_error = ProviderError(
-                    "{provider} failed to load stock profile.".format(
-                        provider=provider_name,
-                    ),
+                    "{provider} failed to load stock profile.".format(provider=provider.name),
                 )
                 provider_errors.append(
                     "{provider}: {error_type}: {message}".format(
-                        provider=provider_name,
+                        provider=provider.name,
                         error_type=type(exc).__name__,
                         message=str(exc),
-                    ),
+                    )
                 )
                 continue
-
             if profile is not None:
                 return profile
 
         if last_error is not None:
             raise ProviderError(
-                (
-                    "Failed to load stock profile for {symbol} from data providers. "
-                    "Details: {details}"
-                ).format(
+                "Failed to load stock profile for {symbol} from data providers. Details: {details}".format(
                     symbol=symbol,
                     details=" | ".join(provider_errors) if provider_errors else str(last_error),
                 ),
             ) from last_error
-
         raise DataNotFoundError(
             "No stock profile found for symbol {symbol}.".format(symbol=symbol),
         )
@@ -463,12 +505,11 @@ class MarketDataService:
         start_date: Optional[date],
         end_date: Optional[date],
     ) -> list[DailyBar]:
-        """从 provider 加载日线数据。"""
+        providers = self._iter_available_providers(DAILY_BAR_CAPABILITY)
         last_error = None
         provider_errors: list[str] = []
 
-        for provider in self._iter_available_providers():
-            provider_name = getattr(provider, "name", "provider")
+        for provider in providers:
             try:
                 bars = provider.get_daily_bars(
                     symbol,
@@ -477,89 +518,153 @@ class MarketDataService:
                 )
             except ProviderError as exc:
                 last_error = exc
-                provider_errors.append(
-                    "{provider}: {message}".format(
-                        provider=provider_name,
-                        message=str(exc),
-                    ),
-                )
+                provider_errors.append("{provider}: {message}".format(provider=provider.name, message=str(exc)))
                 continue
-            except Exception as exc:  # pragma: no cover - 兜底保护
+            except Exception as exc:  # pragma: no cover
                 last_error = ProviderError(
-                    "{provider} failed to load daily bars.".format(
-                        provider=provider_name,
-                    ),
+                    "{provider} failed to load daily bars.".format(provider=provider.name),
                 )
                 provider_errors.append(
                     "{provider}: {error_type}: {message}".format(
-                        provider=provider_name,
+                        provider=provider.name,
                         error_type=type(exc).__name__,
                         message=str(exc),
-                    ),
+                    )
                 )
                 continue
-
             if bars:
                 return bars
 
         if last_error is not None:
             raise ProviderError(
-                (
-                    "Failed to load daily bars for {symbol} from data providers. "
-                    "Details: {details}"
-                ).format(
+                "Failed to load daily bars for {symbol} from data providers. Details: {details}".format(
                     symbol=symbol,
                     details=" | ".join(provider_errors) if provider_errors else str(last_error),
                 ),
             ) from last_error
-
         return []
 
-    def _load_stock_universe_from_providers(self) -> list[UniverseItem]:
-        """从 provider 加载股票池。"""
+    def _load_intraday_bars_from_providers(
+        self,
+        symbol: str,
+        frequency: str,
+        limit: Optional[int],
+    ) -> list[IntradayBar]:
+        providers = self._iter_available_providers(INTRADAY_BAR_CAPABILITY)
         last_error = None
         provider_errors: list[str] = []
 
-        for provider in self._iter_available_providers():
-            provider_name = getattr(provider, "name", "provider")
+        for provider in providers:
+            try:
+                bars = provider.get_intraday_bars(
+                    symbol,
+                    frequency=frequency,
+                    limit=limit,
+                )
+            except ProviderError as exc:
+                last_error = exc
+                provider_errors.append("{provider}: {message}".format(provider=provider.name, message=str(exc)))
+                continue
+            except Exception as exc:  # pragma: no cover
+                last_error = ProviderError(
+                    "{provider} failed to load intraday bars.".format(provider=provider.name),
+                )
+                provider_errors.append(
+                    "{provider}: {error_type}: {message}".format(
+                        provider=provider.name,
+                        error_type=type(exc).__name__,
+                        message=str(exc),
+                    )
+                )
+                continue
+            if bars:
+                return bars
+
+        if last_error is not None:
+            raise ProviderError(
+                "Failed to load intraday bars for {symbol} from data providers. Details: {details}".format(
+                    symbol=symbol,
+                    details=" | ".join(provider_errors) if provider_errors else str(last_error),
+                ),
+            ) from last_error
+        return []
+
+    def _load_timeline_from_providers(
+        self,
+        symbol: str,
+        limit: Optional[int],
+    ) -> list[TimelinePoint]:
+        providers = self._iter_available_providers(TIMELINE_CAPABILITY)
+        last_error = None
+        provider_errors: list[str] = []
+
+        for provider in providers:
+            try:
+                points = provider.get_timeline(
+                    symbol,
+                    limit=limit,
+                )
+            except ProviderError as exc:
+                last_error = exc
+                provider_errors.append("{provider}: {message}".format(provider=provider.name, message=str(exc)))
+                continue
+            except Exception as exc:  # pragma: no cover
+                last_error = ProviderError(
+                    "{provider} failed to load timeline.".format(provider=provider.name),
+                )
+                provider_errors.append(
+                    "{provider}: {error_type}: {message}".format(
+                        provider=provider.name,
+                        error_type=type(exc).__name__,
+                        message=str(exc),
+                    )
+                )
+                continue
+            if points:
+                return points
+
+        if last_error is not None:
+            raise ProviderError(
+                "Failed to load timeline for {symbol} from data providers. Details: {details}".format(
+                    symbol=symbol,
+                    details=" | ".join(provider_errors) if provider_errors else str(last_error),
+                ),
+            ) from last_error
+        return []
+
+    def _load_stock_universe_from_providers(self) -> list[UniverseItem]:
+        providers = self._iter_available_providers(UNIVERSE_CAPABILITY)
+        last_error = None
+        provider_errors: list[str] = []
+
+        for provider in providers:
             try:
                 items = provider.get_stock_universe()
             except ProviderError as exc:
                 last_error = exc
-                provider_errors.append(
-                    "{provider}: {message}".format(
-                        provider=provider_name,
-                        message=str(exc),
-                    ),
-                )
+                provider_errors.append("{provider}: {message}".format(provider=provider.name, message=str(exc)))
                 continue
-            except Exception as exc:  # pragma: no cover - 兜底保护
+            except Exception as exc:  # pragma: no cover
                 last_error = ProviderError(
-                    "{provider} failed to load stock universe.".format(
-                        provider=provider_name,
-                    ),
+                    "{provider} failed to load stock universe.".format(provider=provider.name),
                 )
                 provider_errors.append(
                     "{provider}: {error_type}: {message}".format(
-                        provider=provider_name,
+                        provider=provider.name,
                         error_type=type(exc).__name__,
                         message=str(exc),
-                    ),
+                    )
                 )
                 continue
-
             if items:
                 return items
 
         if last_error is not None:
             raise ProviderError(
                 "Failed to load stock universe from data providers. Details: {details}".format(
-                    details=" | ".join(provider_errors)
-                    if provider_errors
-                    else str(last_error),
+                    details=" | ".join(provider_errors) if provider_errors else str(last_error),
                 ),
             ) from last_error
-
         raise DataNotFoundError("No stock universe data is currently available.")
 
     def _load_stock_announcements_from_providers(
@@ -569,12 +674,11 @@ class MarketDataService:
         end_date: date,
         limit: int,
     ) -> list[AnnouncementItem]:
-        """从 provider 加载公告列表。"""
+        providers = self._iter_available_providers(ANNOUNCEMENT_CAPABILITY)
         last_error = None
         provider_errors: list[str] = []
 
-        for provider in self._iter_available_providers():
-            provider_name = getattr(provider, "name", "provider")
+        for provider in providers:
             try:
                 items = provider.get_stock_announcements(
                     symbol,
@@ -584,103 +688,79 @@ class MarketDataService:
                 )
             except ProviderError as exc:
                 last_error = exc
-                provider_errors.append(
-                    "{provider}: {message}".format(
-                        provider=provider_name,
-                        message=str(exc),
-                    ),
-                )
+                provider_errors.append("{provider}: {message}".format(provider=provider.name, message=str(exc)))
                 continue
-            except Exception as exc:  # pragma: no cover - 兜底保护
+            except Exception as exc:  # pragma: no cover
                 last_error = ProviderError(
-                    "{provider} failed to load announcements.".format(
-                        provider=provider_name,
-                    ),
+                    "{provider} failed to load announcements.".format(provider=provider.name),
                 )
                 provider_errors.append(
                     "{provider}: {error_type}: {message}".format(
-                        provider=provider_name,
+                        provider=provider.name,
                         error_type=type(exc).__name__,
                         message=str(exc),
-                    ),
+                    )
                 )
                 continue
-
             if items:
                 return items
 
         if last_error is not None:
             raise ProviderError(
-                (
-                    "Failed to load announcements for {symbol} from data providers. "
-                    "Details: {details}"
-                ).format(
+                "Failed to load announcements for {symbol} from data providers. Details: {details}".format(
                     symbol=symbol,
                     details=" | ".join(provider_errors) if provider_errors else str(last_error),
                 ),
             ) from last_error
-
         return []
 
     def _load_stock_financial_summary_from_providers(self, symbol: str) -> FinancialSummary:
-        """从 provider 加载财务摘要。"""
+        providers = self._iter_available_providers(FINANCIAL_SUMMARY_CAPABILITY)
         last_error = None
         provider_errors: list[str] = []
 
-        for provider in self._iter_available_providers():
-            provider_name = getattr(provider, "name", "provider")
+        for provider in providers:
             try:
                 summary = provider.get_stock_financial_summary(symbol)
             except ProviderError as exc:
                 last_error = exc
-                provider_errors.append(
-                    "{provider}: {message}".format(
-                        provider=provider_name,
-                        message=str(exc),
-                    ),
-                )
+                provider_errors.append("{provider}: {message}".format(provider=provider.name, message=str(exc)))
                 continue
-            except Exception as exc:  # pragma: no cover - 兜底保护
+            except Exception as exc:  # pragma: no cover
                 last_error = ProviderError(
-                    "{provider} failed to load financial summary.".format(
-                        provider=provider_name,
-                    ),
+                    "{provider} failed to load financial summary.".format(provider=provider.name),
                 )
                 provider_errors.append(
                     "{provider}: {error_type}: {message}".format(
-                        provider=provider_name,
+                        provider=provider.name,
                         error_type=type(exc).__name__,
                         message=str(exc),
-                    ),
+                    )
                 )
                 continue
-
             if summary is not None:
                 return summary
 
         if last_error is not None:
             raise ProviderError(
-                (
-                    "Failed to load financial summary for {symbol} from data providers. "
-                    "Details: {details}"
-                ).format(
+                "Failed to load financial summary for {symbol} from data providers. Details: {details}".format(
                     symbol=symbol,
                     details=" | ".join(provider_errors) if provider_errors else str(last_error),
                 ),
             ) from last_error
-
         raise DataNotFoundError(
             "No financial summary found for symbol {symbol}.".format(symbol=symbol),
         )
 
-    def _iter_available_providers(self) -> list[MarketDataProvider]:
-        """返回当前启用且可用的 provider 列表。"""
-        available_providers = [
-            provider for provider in self._providers if provider.is_available()
-        ]
-        if not available_providers:
-            raise ProviderError("No enabled market data providers are available.")
-        return available_providers
+    def _iter_available_providers(self, capability: str) -> list[object]:
+        providers = self._provider_registry.get_providers(capability, available_only=True)
+        if not providers:
+            raise ProviderError(
+                "No enabled market data providers are available for capability '{capability}'.".format(
+                    capability=capability,
+                ),
+            )
+        return providers
 
 
 def _build_daily_bar_response(
@@ -689,7 +769,6 @@ def _build_daily_bar_response(
     end_date: Optional[date],
     bars: list[DailyBar],
 ) -> DailyBarResponse:
-    """构造统一的日线响应。"""
     return DailyBarResponse(
         symbol=symbol,
         start_date=start_date,
@@ -700,7 +779,6 @@ def _build_daily_bar_response(
 
 
 def _parse_optional_date(value: Optional[str], field_name: str) -> Optional[date]:
-    """解析可选的 ISO 日期字符串。"""
     if value is None or value.strip() == "":
         return None
 
@@ -716,7 +794,6 @@ def _resolve_announcement_date_range(
     start_date: Optional[str],
     end_date: Optional[str],
 ) -> tuple[date, date]:
-    """解析公告列表日期范围。"""
     normalized_start_date = _parse_optional_date(start_date, "start_date")
     normalized_end_date = _parse_optional_date(end_date, "end_date")
 
@@ -728,3 +805,4 @@ def _resolve_announcement_date_range(
         raise InvalidDateError("start_date cannot be later than end_date.")
 
     return normalized_start_date, normalized_end_date
+

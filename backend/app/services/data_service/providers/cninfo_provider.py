@@ -10,6 +10,7 @@ from app.schemas.market_data import DailyBar, StockProfile, UniverseItem
 from app.schemas.research_inputs import AnnouncementItem, FinancialSummary
 from app.services.data_service.exceptions import ProviderError
 from app.services.data_service.normalize import convert_symbol_for_provider, parse_symbol
+from app.services.data_service.providers.base import ANNOUNCEMENT_CAPABILITY
 
 _CNINFO_BASE_URL = "https://www.cninfo.com.cn"
 _CNINFO_HEADERS = {
@@ -33,10 +34,14 @@ class CninfoProvider:
     """基于 CNINFO 的公告 provider。"""
 
     name = "cninfo"
+    capabilities = (ANNOUNCEMENT_CAPABILITY,)
 
     def is_available(self) -> bool:
         """CNINFO provider 不依赖额外三方包，默认可用。"""
         return True
+
+    def get_unavailable_reason(self) -> Optional[str]:
+        return None
 
     def get_stock_profile(self, symbol: str) -> Optional[StockProfile]:
         """当前 provider 不负责股票基础信息。"""

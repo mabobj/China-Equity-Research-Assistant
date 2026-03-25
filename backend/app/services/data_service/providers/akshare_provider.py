@@ -12,12 +12,24 @@ from app.schemas.market_data import DailyBar, StockProfile, UniverseItem
 from app.schemas.research_inputs import AnnouncementItem, FinancialSummary
 from app.services.data_service.exceptions import ProviderError
 from app.services.data_service.normalize import convert_symbol_for_provider, parse_symbol
+from app.services.data_service.providers.base import (
+    DAILY_BAR_CAPABILITY,
+    FINANCIAL_SUMMARY_CAPABILITY,
+    PROFILE_CAPABILITY,
+    UNIVERSE_CAPABILITY,
+)
 
 
 class AkshareProvider:
     """基于 AKShare 的 provider。"""
 
     name = "akshare"
+    capabilities = (
+        PROFILE_CAPABILITY,
+        DAILY_BAR_CAPABILITY,
+        UNIVERSE_CAPABILITY,
+        FINANCIAL_SUMMARY_CAPABILITY,
+    )
 
     def __init__(
         self,
@@ -32,6 +44,11 @@ class AkshareProvider:
     def is_available(self) -> bool:
         """返回 AKShare 是否可导入。"""
         return importlib.util.find_spec("akshare") is not None
+
+    def get_unavailable_reason(self) -> Optional[str]:
+        if self.is_available():
+            return None
+        return "AKShare is not installed or unavailable."
 
     def get_stock_profile(self, symbol: str) -> Optional[StockProfile]:
         """获取单只股票基础信息。"""
