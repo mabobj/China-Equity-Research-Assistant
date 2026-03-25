@@ -644,3 +644,81 @@ python -m app.scripts.run_mootdx_validation_matrix --tdxdir C:/new_tdx --symbols
 - 只负责提炼“为什么要谨慎、回避或延后执行”的最强 2-3 条理由
 - `final_judgement`
 - 作为首席裁决层，综合多空分歧与现有策略计划，给出简洁结论与执行重点
+
+## debate-review 角色化裁决骨架
+
+本轮在 `review-report` 之上新增了 `debate_service`，目标不是引入真正的 LLM 多轮辩论，而是先把角色边界、节点流和结构化输出固定下来。
+
+核心目录：
+- `backend/app/services/debate_service/analyst_views_builder.py`
+- `backend/app/services/debate_service/technical_analyst.py`
+- `backend/app/services/debate_service/fundamental_analyst.py`
+- `backend/app/services/debate_service/event_analyst.py`
+- `backend/app/services/debate_service/sentiment_analyst.py`
+- `backend/app/services/debate_service/bull_researcher.py`
+- `backend/app/services/debate_service/bear_researcher.py`
+- `backend/app/services/debate_service/chief_analyst.py`
+- `backend/app/services/debate_service/risk_reviewer.py`
+- `backend/app/services/debate_service/debate_orchestrator.py`
+
+### 与 review-report 的关系
+
+- `GET /stocks/{symbol}/review-report`
+- 多维研判 v2，重点是静态聚合后的结构化画像
+- `GET /stocks/{symbol}/debate-review`
+- 角色化裁决骨架版，重点是 analyst 观点、多空研究员、首席裁决与风险复核
+
+### 当前仍不是 LLM 运行时
+
+- 当前所有角色输出都来自规则和模板化 builder
+- 当前没有真正多轮循环对话
+- 当前没有 OpenAI/LLM 调用
+- 当前只是为未来有限轮多 agent 裁决预埋正式结构
+
+### /stocks/{symbol}/debate-review
+
+- `GET /stocks/{symbol}/debate-review`
+
+返回字段概要：
+- `symbol`
+- `name`
+- `as_of_date`
+- `analyst_views`
+- `bull_case`
+- `bear_case`
+- `key_disagreements`
+- `chief_judgement`
+- `risk_review`
+- `final_action`
+- `strategy_summary`
+- `confidence`
+
+### 角色边界
+
+- `technical_analyst`
+- 负责技术面观点、关键价位、入场和失效提示
+- `fundamental_analyst`
+- 负责质量、成长和财务风险提示
+- `event_analyst`
+- 负责近期催化、近期风险和事件温度
+- `sentiment_analyst`
+- 负责市场偏好、拥挤度提示和动量环境
+- `bull_researcher`
+- 负责提炼支持交易的最强 2-3 条理由
+- `bear_researcher`
+- 负责提炼反对交易或建议谨慎的最强 2-3 条理由
+- `chief_analyst`
+- 负责最终裁决、核心分歧点和 final_action
+- `risk_reviewer`
+- 负责风险结论和执行提醒
+
+### workflow 节点骨架
+
+当前单票角色化链路已显式拆成以下节点：
+- `SingleStockResearchInputs`
+- `AnalystViewsBuild`
+- `BullBearDebateBuild`
+- `ChiefJudgementBuild`
+- `StrategyFinalize`
+
+这些节点目前由轻量 `debate_orchestrator` 串联，后续可以从中间节点继续扩展，而不需要推翻现有 schema。

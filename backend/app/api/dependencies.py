@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.services.data_service.db_inspector_service import DbInspectorService
     from app.services.data_service.intraday_service import IntradayService
     from app.services.data_service.refresh_service import DataRefreshService
+    from app.services.debate_service.debate_orchestrator import DebateOrchestrator
     from app.services.factor_service.factor_snapshot_service import (
         FactorSnapshotService,
     )
@@ -172,6 +173,19 @@ def get_stock_review_service() -> "StockReviewService":
         factor_snapshot_service=get_factor_snapshot_service(),
         trigger_snapshot_service=get_trigger_snapshot_service(),
         strategy_planner=get_strategy_planner(),
+    )
+
+
+@lru_cache
+def get_debate_orchestrator() -> "DebateOrchestrator":
+    """构建角色化裁决骨架编排器。"""
+    from app.services.debate_service.debate_orchestrator import DebateOrchestrator
+
+    return DebateOrchestrator(
+        stock_review_service=get_stock_review_service(),
+        factor_snapshot_service=get_factor_snapshot_service(),
+        strategy_planner=get_strategy_planner(),
+        trigger_snapshot_service=get_trigger_snapshot_service(),
     )
 
 

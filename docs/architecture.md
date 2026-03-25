@@ -479,3 +479,66 @@
 - 旧前端和旧调用方不需要立刻迁移
 - 新的研判结构已经可以单独消费
 - 后续若接入多 agent，有了天然的角色输出边界，而不需要重写底层 schema
+
+## workflow 节点化与角色化裁决骨架
+
+本轮目标不是引入真正的多 agent runtime，而是把“单票角色化裁决”收敛成显式节点流和明确角色边界。
+
+### debate_service 分层
+
+当前新增目录：
+- `backend/app/services/debate_service/analyst_views_builder.py`
+- `backend/app/services/debate_service/technical_analyst.py`
+- `backend/app/services/debate_service/fundamental_analyst.py`
+- `backend/app/services/debate_service/event_analyst.py`
+- `backend/app/services/debate_service/sentiment_analyst.py`
+- `backend/app/services/debate_service/bull_researcher.py`
+- `backend/app/services/debate_service/bear_researcher.py`
+- `backend/app/services/debate_service/chief_analyst.py`
+- `backend/app/services/debate_service/risk_reviewer.py`
+- `backend/app/services/debate_service/debate_orchestrator.py`
+
+职责划分：
+- `technical_analyst`
+- 读取技术画像与触发快照，输出技术面观点、关键价位和失效提示
+- `fundamental_analyst`
+- 读取基本面画像，输出质量、成长和财务风险提示
+- `event_analyst`
+- 读取事件画像，输出催化、风险和事件温度
+- `sentiment_analyst`
+- 读取轻量情绪画像，输出市场偏好、拥挤度和动量环境
+- `bull_researcher`
+- 汇总支持交易的最强理由
+- `bear_researcher`
+- 汇总反对交易或建议谨慎的最强理由
+- `chief_analyst`
+- 基于多空分歧、因子画像和策略摘要输出最终裁决
+- `risk_reviewer`
+- 基于风险分、技术失效条件和策略边界输出风险复核
+
+### workflow 节点骨架
+
+当前单票角色化流程被拆成以下结构化节点：
+- `SingleStockResearchInputs`
+- `AnalystViewsBuild`
+- `BullBearDebateBuild`
+- `ChiefJudgementBuild`
+- `StrategyFinalize`
+
+这些节点的目标是：
+- 让未来可以从中间节点启动
+- 让每个节点输入输出保持机器可读
+- 为后续有限轮多 agent 裁决预留稳定接口
+
+### debate-review 与 review-report 的关系
+
+- `review-report`
+- 是多维研判 v2，强调静态聚合后的结构化画像
+- `debate-review`
+- 是在 `review-report` 之上的角色化裁决骨架，强调 analyst 角色、多空研究员、首席裁决和风险复核
+
+这意味着：
+- 当前公开 API 继续兼容
+- 旧调用方仍可使用 `review-report`
+- 新调用方可以直接消费 `debate-review`
+- 当前仍然不是 LLM 版 agent runtime，只是非 LLM 的结构化骨架

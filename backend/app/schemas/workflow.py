@@ -12,6 +12,11 @@ WorkflowNodeType = Literal[
     "ScreenerRun",
     "CandidateDeepReview",
     "SingleStockResearch",
+    "SingleStockResearchInputs",
+    "AnalystViewsBuild",
+    "BullBearDebateBuild",
+    "ChiefJudgementBuild",
+    "StrategyFinalize",
     "SingleStockStrategy",
 ]
 
@@ -37,4 +42,3 @@ class WorkflowNodeResult(BaseModel):
     message: Optional[str] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-

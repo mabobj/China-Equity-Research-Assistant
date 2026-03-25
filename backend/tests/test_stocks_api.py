@@ -6,10 +6,21 @@ from typing import Optional
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import (
+    get_debate_orchestrator,
     get_factor_snapshot_service,
     get_market_data_service,
     get_stock_review_service,
     get_trigger_snapshot_service,
+)
+from app.schemas.debate import (
+    AnalystView,
+    AnalystViewsBundle,
+    BearCase,
+    BullCase,
+    ChiefJudgement,
+    DebatePoint,
+    DebateReviewReport,
+    RiskReview,
 )
 from app.main import app
 from app.schemas.factor import (
@@ -284,6 +295,81 @@ class StubStockReviewService:
         )
 
 
+class StubDebateOrchestrator:
+    def get_debate_review_report(self, symbol: str) -> DebateReviewReport:
+        return DebateReviewReport(
+            symbol="600519.SH",
+            name="Kweichow Moutai",
+            as_of_date=date(2024, 1, 2),
+            analyst_views=AnalystViewsBundle(
+                technical=AnalystView(
+                    role="technical_analyst",
+                    summary="技术偏强。",
+                    action_bias="supportive",
+                    positive_points=[DebatePoint(title="趋势", detail="趋势偏强")],
+                    caution_points=[DebatePoint(title="失效条件", detail="跌破支撑位")],
+                    key_levels=["支撑位 100.00"],
+                ),
+                fundamental=AnalystView(
+                    role="fundamental_analyst",
+                    summary="基本面中性偏稳。",
+                    action_bias="neutral",
+                    positive_points=[DebatePoint(title="质量判断", detail="盈利质量可接受")],
+                    caution_points=[],
+                    key_levels=[],
+                ),
+                event=AnalystView(
+                    role="event_analyst",
+                    summary="事件偏暖。",
+                    action_bias="supportive",
+                    positive_points=[DebatePoint(title="近期催化", detail="回购公告")],
+                    caution_points=[],
+                    key_levels=[],
+                ),
+                sentiment=AnalystView(
+                    role="sentiment_analyst",
+                    summary="情绪偏多。",
+                    action_bias="supportive",
+                    positive_points=[DebatePoint(title="动量环境", detail="20 日与 60 日相对强弱均偏正")],
+                    caution_points=[DebatePoint(title="拥挤度提示", detail="当前拥挤度中性")],
+                    key_levels=[],
+                ),
+            ),
+            bull_case=BullCase(
+                summary="多头理由主要来自趋势、事件与动量。",
+                reasons=[DebatePoint(title="趋势", detail="趋势偏强")],
+            ),
+            bear_case=BearCase(
+                summary="空头约束主要来自位置与纪律。",
+                reasons=[DebatePoint(title="失效条件", detail="跌破支撑位")],
+            ),
+            key_disagreements=["当前分歧集中在执行时点。"],
+            chief_judgement=ChiefJudgement(
+                final_action="WATCH",
+                summary="当前更适合先观察。",
+                decisive_points=["alpha 分 73"],
+                key_disagreements=["当前分歧集中在执行时点。"],
+            ),
+            risk_review=RiskReview(
+                risk_level="medium",
+                summary="风险可控但需要纪律。",
+                execution_reminders=["严格观察止损参考位 98.00。"],
+            ),
+            final_action="WATCH",
+            strategy_summary=StrategySummary(
+                action="WATCH",
+                strategy_type="wait",
+                entry_window="next_3_to_5_trading_days",
+                ideal_entry_range=PriceRange(low=100.0, high=101.0),
+                stop_loss_price=98.0,
+                take_profit_range=PriceRange(low=104.0, high=106.0),
+                review_timeframe="daily_close_review",
+                concise_summary="策略层仍以观察为主。",
+            ),
+            confidence=67,
+        )
+
+
 def test_get_stock_profile_route_returns_structured_payload() -> None:
     """The stock profile endpoint should return the schema payload."""
     app.dependency_overrides[get_market_data_service] = lambda: StubMarketDataService()
@@ -388,5 +474,23 @@ def test_review_report_route_returns_structured_payload() -> None:
     assert payload["factor_profile"]["alpha_score"] == 73
     assert payload["technical_view"]["trigger_state"] == "near_breakout"
     assert payload["final_judgement"]["action"] == "WATCH"
+
+    app.dependency_overrides.clear()
+
+
+def test_debate_review_route_returns_structured_payload() -> None:
+    """The debate-review route should expose debate-role payloads."""
+    app.dependency_overrides[get_debate_orchestrator] = (
+        lambda: StubDebateOrchestrator()
+    )
+
+    response = client.get("/stocks/600519/debate-review")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600519.SH"
+    assert payload["analyst_views"]["technical"]["role"] == "technical_analyst"
+    assert payload["chief_judgement"]["final_action"] == "WATCH"
+    assert payload["risk_review"]["risk_level"] == "medium"
 
     app.dependency_overrides.clear()
