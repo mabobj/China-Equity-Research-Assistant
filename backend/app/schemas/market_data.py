@@ -75,6 +75,8 @@ class IntradayBarResponse(BaseModel):
 
     symbol: str
     frequency: str
+    start_datetime: Optional[datetime] = None
+    end_datetime: Optional[datetime] = None
     count: int = Field(ge=0)
     bars: list[IntradayBar]
 

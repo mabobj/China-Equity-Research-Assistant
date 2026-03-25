@@ -185,12 +185,34 @@ class MarketDataService:
         self,
         symbol: str,
         frequency: str = "1m",
+        start_datetime: Optional[str] = None,
+        end_datetime: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> IntradayBarResponse:
         canonical_symbol = normalize_symbol(symbol)
+        normalized_start_datetime = _parse_optional_datetime(
+            start_datetime,
+            "start_datetime",
+        )
+        normalized_end_datetime = _parse_optional_datetime(
+            end_datetime,
+            "end_datetime",
+        )
+
+        if (
+            normalized_start_datetime is not None
+            and normalized_end_datetime is not None
+            and normalized_start_datetime > normalized_end_datetime
+        ):
+            raise InvalidDateError(
+                "start_datetime cannot be later than end_datetime.",
+            )
+
         bars = self._load_intraday_bars_from_providers(
             canonical_symbol,
             frequency=frequency,
+            start_datetime=normalized_start_datetime,
+            end_datetime=normalized_end_datetime,
             limit=limit,
         )
         if not bars:
@@ -202,6 +224,8 @@ class MarketDataService:
         return IntradayBarResponse(
             symbol=canonical_symbol,
             frequency=frequency,
+            start_datetime=normalized_start_datetime,
+            end_datetime=normalized_end_datetime,
             count=len(bars),
             bars=bars,
         )
@@ -548,6 +572,8 @@ class MarketDataService:
         self,
         symbol: str,
         frequency: str,
+        start_datetime: Optional[datetime],
+        end_datetime: Optional[datetime],
         limit: Optional[int],
     ) -> list[IntradayBar]:
         providers = self._iter_available_providers(INTRADAY_BAR_CAPABILITY)
@@ -559,6 +585,8 @@ class MarketDataService:
                 bars = provider.get_intraday_bars(
                     symbol,
                     frequency=frequency,
+                    start_datetime=start_datetime,
+                    end_datetime=end_datetime,
                     limit=limit,
                 )
             except ProviderError as exc:
@@ -790,6 +818,33 @@ def _parse_optional_date(value: Optional[str], field_name: str) -> Optional[date
         ) from exc
 
 
+def _parse_optional_datetime(
+    value: Optional[str],
+    field_name: str,
+) -> Optional[datetime]:
+    if value is None or value.strip() == "":
+        return None
+
+    text = value.strip()
+    datetime_patterns = (
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+    )
+    for pattern in datetime_patterns:
+        try:
+            return datetime.strptime(text, pattern)
+        except ValueError:
+            continue
+
+    raise InvalidDateError(
+        "{field_name} must use YYYY-MM-DDTHH:MM[:SS] format.".format(
+            field_name=field_name,
+        ),
+    )
+
+
 def _resolve_announcement_date_range(
     start_date: Optional[str],
     end_date: Optional[str],
@@ -805,4 +860,3 @@ def _resolve_announcement_date_range(
         raise InvalidDateError("start_date cannot be later than end_date.")
 
     return normalized_start_date, normalized_end_date
-

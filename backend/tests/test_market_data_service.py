@@ -1,11 +1,11 @@
 """Tests for the market data service layer."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 from app.db.market_data_store import DATASET_DAILY_BARS, LocalMarketDataStore
-from app.schemas.market_data import DailyBar, StockProfile, UniverseItem
+from app.schemas.market_data import DailyBar, IntradayBar, StockProfile, UniverseItem
 from app.services.data_service.market_data_service import MarketDataService
 
 
@@ -18,8 +18,13 @@ class FakeProvider:
         self.bar_symbol: Optional[str] = None
         self.bar_start_date: Optional[date] = None
         self.bar_end_date: Optional[date] = None
+        self.intraday_symbol: Optional[str] = None
+        self.intraday_frequency: Optional[str] = None
+        self.intraday_start_datetime: Optional[datetime] = None
+        self.intraday_end_datetime: Optional[datetime] = None
         self.profile_call_count = 0
         self.daily_bar_call_count = 0
+        self.intraday_call_count = 0
 
     def is_available(self) -> bool:
         return True
@@ -80,6 +85,39 @@ class FakeProvider:
                 source=self.name,
             )
         ]
+
+    def get_intraday_bars(
+        self,
+        symbol: str,
+        frequency: str = "1m",
+        start_datetime: Optional[datetime] = None,
+        end_datetime: Optional[datetime] = None,
+        limit: Optional[int] = None,
+    ) -> list[IntradayBar]:
+        self.intraday_call_count += 1
+        self.intraday_symbol = symbol
+        self.intraday_frequency = frequency
+        self.intraday_start_datetime = start_datetime
+        self.intraday_end_datetime = end_datetime
+        bars = [
+            IntradayBar(
+                symbol=symbol,
+                trade_datetime=datetime(2024, 1, 2, 9, 31, 0),
+                frequency=frequency,
+                close=100.2,
+                source=self.name,
+            ),
+            IntradayBar(
+                symbol=symbol,
+                trade_datetime=datetime(2024, 1, 2, 9, 35, 0),
+                frequency=frequency,
+                close=100.8,
+                source=self.name,
+            ),
+        ]
+        if limit is not None:
+            return bars[-limit:]
+        return bars
 
     def get_stock_announcements(self, *args, **kwargs) -> list:
         return []
@@ -153,6 +191,42 @@ class DailyOnlyProvider:
         ]
 
 
+class IntradayOnlyProvider:
+    name = "intraday_only"
+    capabilities = ("intraday_bars",)
+
+    def __init__(self) -> None:
+        self.called_symbol: Optional[str] = None
+        self.called_frequency: Optional[str] = None
+        self.called_start_datetime: Optional[datetime] = None
+        self.called_end_datetime: Optional[datetime] = None
+
+    def is_available(self) -> bool:
+        return True
+
+    def get_intraday_bars(
+        self,
+        symbol: str,
+        frequency: str = "1m",
+        start_datetime: Optional[datetime] = None,
+        end_datetime: Optional[datetime] = None,
+        limit: Optional[int] = None,
+    ) -> list[IntradayBar]:
+        self.called_symbol = symbol
+        self.called_frequency = frequency
+        self.called_start_datetime = start_datetime
+        self.called_end_datetime = end_datetime
+        return [
+            IntradayBar(
+                symbol=symbol,
+                trade_datetime=datetime(2024, 1, 2, 9, 31, 0),
+                frequency=frequency,
+                close=100.2,
+                source=self.name,
+            )
+        ]
+
+
 def test_service_normalizes_symbol_before_calling_provider() -> None:
     """The service should always use canonical symbols internally."""
     provider = FakeProvider()
@@ -178,6 +252,29 @@ def test_service_parses_date_filters_for_daily_bars() -> None:
     assert provider.bar_symbol == "600519.SH"
     assert provider.bar_start_date == date(2024, 1, 1)
     assert provider.bar_end_date == date(2024, 1, 31)
+    assert response.count == 2
+
+
+def test_service_parses_datetime_filters_for_intraday_bars() -> None:
+    """The service should parse intraday datetime filters before calling providers."""
+    provider = FakeProvider()
+    service = MarketDataService(providers=[provider])
+
+    response = service.get_intraday_bars(
+        symbol="600519",
+        frequency="5m",
+        start_datetime="2024-01-02T09:30:00",
+        end_datetime="2024-01-02T10:00:00",
+        limit=10,
+    )
+
+    assert provider.intraday_symbol == "600519.SH"
+    assert provider.intraday_frequency == "5m"
+    assert provider.intraday_start_datetime == datetime(2024, 1, 2, 9, 30, 0)
+    assert provider.intraday_end_datetime == datetime(2024, 1, 2, 10, 0, 0)
+    assert response.frequency == "5m"
+    assert response.start_datetime == datetime(2024, 1, 2, 9, 30, 0)
+    assert response.end_datetime == datetime(2024, 1, 2, 10, 0, 0)
     assert response.count == 2
 
 
@@ -381,3 +478,22 @@ def test_service_remains_compatible_with_split_capability_providers() -> None:
     assert profile_provider.called_symbol == "600519.SH"
     assert daily_provider.called_symbol == "600519.SH"
     assert daily_bars.count == 1
+
+
+def test_service_supports_split_intraday_provider() -> None:
+    """拆分 capability 后，分钟线 provider 应可独立接入 service。"""
+    intraday_provider = IntradayOnlyProvider()
+    service = MarketDataService(providers=[intraday_provider])
+
+    response = service.get_intraday_bars(
+        "600519.SH",
+        frequency="1m",
+        start_datetime="2024-01-02T09:30:00",
+        end_datetime="2024-01-02T09:40:00",
+    )
+
+    assert intraday_provider.called_symbol == "600519.SH"
+    assert intraday_provider.called_frequency == "1m"
+    assert intraday_provider.called_start_datetime == datetime(2024, 1, 2, 9, 30, 0)
+    assert intraday_provider.called_end_datetime == datetime(2024, 1, 2, 9, 40, 0)
+    assert response.count == 1

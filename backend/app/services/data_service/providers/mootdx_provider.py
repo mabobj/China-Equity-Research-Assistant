@@ -94,6 +94,8 @@ class MootdxProvider:
         self,
         symbol: str,
         frequency: str = "1m",
+        start_datetime: Optional[datetime] = None,
+        end_datetime: Optional[datetime] = None,
         limit: Optional[int] = None,
     ) -> list[IntradayBar]:
         reader = self._get_reader()
@@ -120,6 +122,10 @@ class MootdxProvider:
         for row in rows:
             trade_datetime = _parse_row_datetime(row)
             if trade_datetime is None:
+                continue
+            if start_datetime is not None and trade_datetime < start_datetime:
+                continue
+            if end_datetime is not None and trade_datetime > end_datetime:
                 continue
             bars.append(
                 IntradayBar(
@@ -164,7 +170,11 @@ class MootdxProvider:
 
         points: list[TimelinePoint] = []
         rows = _frame_to_records(frame)
+        latest_trade_date = _detect_latest_trade_date(rows)
         for row in rows:
+            row_trade_date = _parse_row_date(row)
+            if latest_trade_date is not None and row_trade_date != latest_trade_date:
+                continue
             trade_time = _parse_row_time(row)
             if trade_time is None:
                 continue
@@ -240,12 +250,19 @@ def _parse_row_datetime(row: dict[str, Any]) -> Optional[datetime]:
 
 
 def _parse_row_time(row: dict[str, Any]) -> Optional[time]:
-    for key in ("time", "trade_time", "datetime", "index"):
+    for key in ("time", "trade_time", "datetime", "date", "index"):
         value = row.get(key)
         parsed = _parse_time_value(value)
         if parsed is not None:
             return parsed
     return None
+
+
+def _detect_latest_trade_date(rows: list[dict[str, Any]]) -> Optional[date]:
+    dates = [parsed for row in rows if (parsed := _parse_row_date(row)) is not None]
+    if not dates:
+        return None
+    return max(dates)
 
 
 def _parse_date_value(value: Any) -> Optional[date]:

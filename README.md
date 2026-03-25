@@ -148,6 +148,8 @@ powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --enable
 - `GET /stocks/universe`
 - `GET /stocks/{symbol}/profile`
 - `GET /stocks/{symbol}/daily-bars`
+- `GET /stocks/{symbol}/intraday-bars`
+- `GET /stocks/{symbol}/timeline`
 - `GET /stocks/{symbol}/announcements`
 - `GET /stocks/{symbol}/financial-summary`
 - `GET /stocks/{symbol}/technical`
@@ -155,7 +157,9 @@ powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --enable
 说明：
 - 当前公开 API 仍保持兼容，继续提供 profile / daily-bars / universe / announcements / financial-summary。
 - 数据层内部已重构为 capability-based provider 设计，provider 不再要求一次实现全部能力。
-- 分钟线与分时线能力目前作为内部 service / 验证脚本能力预埋，暂未暴露新的公开 API。
+- `GET /stocks/{symbol}/daily-bars` 支持 `start_date` / `end_date`，格式为 `YYYY-MM-DD`。
+- `GET /stocks/{symbol}/intraday-bars` 支持 `frequency=1m|5m`，并支持 `start_datetime` / `end_datetime`，格式为 `YYYY-MM-DDTHH:MM[:SS]`。
+- `GET /stocks/{symbol}/timeline` 当前返回最新交易日的分时线预览，支持 `limit` 参数。
 
 ### 单票研究接口
 

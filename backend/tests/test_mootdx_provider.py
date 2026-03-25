@@ -56,6 +56,33 @@ class FakeReader:
         )
 
 
+class FakeReaderWithDateTimeline:
+    def fzline(self, symbol: str):
+        assert symbol == "605255"
+        return pd.DataFrame(
+            [
+                {
+                    "date": "2026-03-24 15:00:00",
+                    "close": 99.8,
+                    "volume": 40000.0,
+                    "amount": 4000000.0,
+                },
+                {
+                    "date": "2026-03-25 14:55:00",
+                    "close": 100.88,
+                    "volume": 44200.0,
+                    "amount": 4455702.0,
+                },
+                {
+                    "date": "2026-03-25 15:00:00",
+                    "close": 100.8,
+                    "volume": 47500.0,
+                    "amount": 4787212.0,
+                }
+            ]
+        )
+
+
 def test_mootdx_provider_maps_daily_and_intraday_data() -> None:
     provider = MootdxProvider(tdx_dir=Path("C:/mock_tdx"))
     provider._get_reader = lambda: FakeReader()  # type: ignore[method-assign]
@@ -82,3 +109,14 @@ def test_mootdx_provider_reports_missing_dir() -> None:
     assert provider.is_available() is False
     assert "MOOTDX_TDX_DIR does not exist" in str(provider.get_unavailable_reason())
 
+
+def test_mootdx_provider_parses_timeline_date_column() -> None:
+    provider = MootdxProvider(tdx_dir=Path("C:/mock_tdx"))
+    provider._get_reader = lambda: FakeReaderWithDateTimeline()  # type: ignore[method-assign]
+
+    timeline = provider.get_timeline("605255.SH", limit=10)
+
+    assert len(timeline) == 2
+    assert timeline[0].trade_time.isoformat() == "14:55:00"
+    assert timeline[1].trade_time.isoformat() == "15:00:00"
+    assert timeline[0].price == 100.88

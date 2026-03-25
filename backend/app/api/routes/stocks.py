@@ -8,7 +8,13 @@ from app.api.dependencies import (
     get_market_data_service,
     get_technical_analysis_service,
 )
-from app.schemas.market_data import DailyBarResponse, StockProfile, UniverseResponse
+from app.schemas.market_data import (
+    DailyBarResponse,
+    IntradayBarResponse,
+    StockProfile,
+    TimelineResponse,
+    UniverseResponse,
+)
 from app.schemas.research_inputs import (
     AnnouncementListResponse,
     FinancialSummary,
@@ -48,6 +54,38 @@ def get_daily_bars(
         symbol=symbol,
         start_date=start_date,
         end_date=end_date,
+    )
+
+
+@router.get("/{symbol}/intraday-bars", response_model=IntradayBarResponse)
+def get_intraday_bars(
+    symbol: str,
+    frequency: str = Query(default="1m"),
+    start_datetime: Optional[str] = Query(default=None),
+    end_datetime: Optional[str] = Query(default=None),
+    limit: Optional[int] = Query(default=None, ge=1),
+    service: MarketDataService = Depends(get_market_data_service),
+) -> IntradayBarResponse:
+    """返回单只股票分钟线行情，支持 1 分钟和 5 分钟频率。"""
+    return service.get_intraday_bars(
+        symbol=symbol,
+        frequency=frequency,
+        start_datetime=start_datetime,
+        end_datetime=end_datetime,
+        limit=limit,
+    )
+
+
+@router.get("/{symbol}/timeline", response_model=TimelineResponse)
+def get_timeline(
+    symbol: str,
+    limit: Optional[int] = Query(default=None, ge=1),
+    service: MarketDataService = Depends(get_market_data_service),
+) -> TimelineResponse:
+    """返回单只股票最新交易日的分时线预览。"""
+    return service.get_timeline(
+        symbol=symbol,
+        limit=limit,
     )
 
 

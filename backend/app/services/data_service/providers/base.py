@@ -1,7 +1,7 @@
 """数据 provider capability 协议。"""
 
 from contextlib import AbstractContextManager
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, Protocol, runtime_checkable
 
 from app.schemas.market_data import (
@@ -105,6 +105,8 @@ class IntradayBarProvider(ProviderBase, Protocol):
         self,
         symbol: str,
         frequency: str = "1m",
+        start_datetime: Optional[datetime] = None,
+        end_datetime: Optional[datetime] = None,
         limit: Optional[int] = None,
     ) -> list[IntradayBar]:
         """获取单只股票分钟线。"""
@@ -155,4 +157,3 @@ def infer_provider_capabilities(provider: object) -> tuple[MarketDataCapability,
     if hasattr(provider, "get_timeline"):
         inferred.append(TIMELINE_CAPABILITY)
     return tuple(inferred)
-
