@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     )
     from app.services.research_service.research_manager import ResearchManager
     from app.services.research_service.strategy_planner import StrategyPlanner
+    from app.services.review_service.stock_review_service import StockReviewService
     from app.services.screener_service.deep_pipeline import DeepScreenerPipeline
     from app.services.screener_service.pipeline import ScreenerPipeline
 
@@ -157,6 +158,20 @@ def get_strategy_planner() -> "StrategyPlanner":
         market_data_service=get_market_data_service(),
         technical_analysis_service=get_technical_analysis_service(),
         research_manager=get_research_manager(),
+    )
+
+
+@lru_cache
+def get_stock_review_service() -> "StockReviewService":
+    """构建个股研判 v2 service。"""
+    from app.services.review_service.stock_review_service import StockReviewService
+
+    return StockReviewService(
+        market_data_service=get_market_data_service(),
+        technical_analysis_service=get_technical_analysis_service(),
+        factor_snapshot_service=get_factor_snapshot_service(),
+        trigger_snapshot_service=get_trigger_snapshot_service(),
+        strategy_planner=get_strategy_planner(),
     )
 
 

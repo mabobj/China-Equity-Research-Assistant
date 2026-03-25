@@ -410,3 +410,72 @@
 - 旧前端和深筛流程可以继续工作
 - 新的因子分数和理由字段已经能被上层消费
 - 后续可以继续演进为真正的横截面多因子排序，而不必再次推翻 screener 结构
+
+## 个股研判 v2 结构化地基
+
+本轮没有删除原有 `research_service`，而是在其旁边新增 `review_service`，用于承载更清晰的多维研判框架，并为后续有限轮多 agent 裁决预埋角色边界。
+
+核心文件：
+- `backend/app/services/review_service/factor_profile_builder.py`
+- `backend/app/services/review_service/technical_view_builder.py`
+- `backend/app/services/review_service/fundamental_view_builder.py`
+- `backend/app/services/review_service/event_view_builder.py`
+- `backend/app/services/review_service/sentiment_view_builder.py`
+- `backend/app/services/review_service/bull_bear_builder.py`
+- `backend/app/services/review_service/chief_judgement_builder.py`
+- `backend/app/services/review_service/stock_review_service.py`
+- `backend/app/schemas/review.py`
+
+### 输入复用
+
+`StockReviewService` 不新增外部数据面，只复用现有能力：
+- `get_stock_profile`
+- `get_technical_snapshot`
+- `get_trigger_snapshot`
+- `get_stock_financial_summary`
+- `get_stock_announcements`
+- `get_factor_snapshot`
+- `get_strategy_plan`
+
+### 六块固定输出
+
+`StockReviewReport` 当前固定包含：
+- `factor_profile`
+- `technical_view`
+- `fundamental_view`
+- `event_view`
+- `sentiment_view`
+- `bull_case / bear_case / key_disagreements / final_judgement`
+
+其设计目标不是生成长文，而是把后续 agent 化之前的角色边界先固定下来。
+
+### 角色边界
+
+- `factor_profile`
+- 更像因子分析员输出，负责总结强弱因子组与 `alpha / trigger / risk`
+- `technical_view`
+- 更像技术分析员输出，负责趋势、触发与关键位
+- `fundamental_view`
+- 更像基本面分析员输出，负责质量、成长、杠杆与财务完整度
+- `event_view`
+- 更像事件分析员输出，负责公告催化与风险扰动
+- `sentiment_view`
+- 是当前的轻量情绪占位层，先用已有强弱、量能、波动和位置数据构造
+- `bull_case`
+- 只提炼支持继续关注或买入的最强理由
+- `bear_case`
+- 只提炼反对交易或要求谨慎的最强理由
+- `final_judgement`
+- 作为首席裁决层，整合多空分歧与现有策略计划
+
+### 与旧 research 接口的关系
+
+- `GET /research/{symbol}`
+- 保留，继续作为轻量研究接口
+- `GET /stocks/{symbol}/review-report`
+- 新增，作为多维结构化研判接口
+
+这意味着：
+- 旧前端和旧调用方不需要立刻迁移
+- 新的研判结构已经可以单独消费
+- 后续若接入多 agent，有了天然的角色输出边界，而不需要重写底层 schema

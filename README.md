@@ -579,3 +579,68 @@ python -m app.scripts.run_mootdx_validation_matrix --tdxdir C:/new_tdx --symbols
 - `READY_TO_BUY` -> `BUY_CANDIDATE`
 - `WATCH_PULLBACK` / `WATCH_BREAKOUT` / `RESEARCH_ONLY` -> `WATCHLIST`
 - `AVOID` -> `AVOID`
+
+## 个股研判 v2 结构化地基
+
+本轮新增了独立的 `review_service`，用于把单票研判从轻量 `research report v1` 升级为多维结构化输出，但不删除旧接口。
+
+核心目录：
+- `backend/app/services/review_service/factor_profile_builder.py`
+- `backend/app/services/review_service/technical_view_builder.py`
+- `backend/app/services/review_service/fundamental_view_builder.py`
+- `backend/app/services/review_service/event_view_builder.py`
+- `backend/app/services/review_service/sentiment_view_builder.py`
+- `backend/app/services/review_service/bull_bear_builder.py`
+- `backend/app/services/review_service/chief_judgement_builder.py`
+- `backend/app/services/review_service/stock_review_service.py`
+
+### 新旧研究接口关系
+
+- `GET /research/{symbol}`
+- 现有轻量研究接口，输出 `technical_score / fundamental_score / event_score / overall_score / action / thesis`
+- `GET /stocks/{symbol}/review-report`
+- 新的多维研判接口，输出六块固定画像、多空分歧、最终裁决和策略摘要
+
+### /stocks/{symbol}/review-report
+
+- `GET /stocks/{symbol}/review-report`
+
+返回字段概要：
+- `symbol`
+- `name`
+- `as_of_date`
+- `factor_profile`
+- `technical_view`
+- `fundamental_view`
+- `event_view`
+- `sentiment_view`
+- `bull_case`
+- `bear_case`
+- `key_disagreements`
+- `final_judgement`
+- `strategy_summary`
+- `confidence`
+
+### 六块研判输出含义
+
+- `factor_profile`
+- 因子层总结，聚焦 `alpha_score / trigger_score / risk_score` 与最强、最弱因子组
+- `technical_view`
+- 日线趋势、盘中触发状态、关键价位和技术失效提示
+- `fundamental_view`
+- 质量、成长、杠杆和财务字段完整度的结构化解读
+- `event_view`
+- 最近公告催化、风险扰动、事件热度和简短事件摘要
+- `sentiment_view`
+- 基于相对强弱、量能、波动和关键位置构造的轻量情绪画像
+- `bull_case / bear_case / final_judgement`
+- 分别承载看多理由、看空理由和最终裁决，全部由规则和模板化输出生成，不依赖 LLM
+
+### 角色边界
+
+- `bull_case`
+- 只负责提炼“为什么值得继续关注或买入”的最强 2-3 条理由
+- `bear_case`
+- 只负责提炼“为什么要谨慎、回避或延后执行”的最强 2-3 条理由
+- `final_judgement`
+- 作为首席裁决层，综合多空分歧与现有策略计划，给出简洁结论与执行重点

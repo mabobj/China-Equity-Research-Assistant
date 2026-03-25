@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from app.api.dependencies import (
     get_factor_snapshot_service,
     get_market_data_service,
+    get_stock_review_service,
     get_technical_analysis_service,
     get_trigger_snapshot_service,
 )
@@ -23,6 +24,7 @@ from app.schemas.research_inputs import (
     AnnouncementListResponse,
     FinancialSummary,
 )
+from app.schemas.review import StockReviewReport
 from app.schemas.technical import TechnicalSnapshot
 from app.services.data_service.market_data_service import MarketDataService
 
@@ -162,3 +164,12 @@ def get_technical_snapshot(
         start_date=start_date,
         end_date=end_date,
     )
+
+
+@router.get("/{symbol}/review-report", response_model=StockReviewReport)
+def get_stock_review_report(
+    symbol: str,
+    service: Any = Depends(get_stock_review_service),
+) -> StockReviewReport:
+    """返回个股研判 v2 的多维结构化输出。"""
+    return service.get_stock_review_report(symbol)

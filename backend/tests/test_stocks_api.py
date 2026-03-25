@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.api.dependencies import (
     get_factor_snapshot_service,
     get_market_data_service,
+    get_stock_review_service,
     get_trigger_snapshot_service,
 )
 from app.main import app
@@ -31,6 +32,18 @@ from app.schemas.market_data import (
     UniverseResponse,
 )
 from app.schemas.research_inputs import AnnouncementListResponse, FinancialSummary
+from app.schemas.review import (
+    BullBearCase,
+    EventView,
+    FactorProfileView,
+    FinalJudgement,
+    FundamentalView,
+    SentimentView,
+    StockReviewReport,
+    StrategySummary,
+    TechnicalView,
+)
+from app.schemas.strategy import PriceRange
 
 
 class StubMarketDataService:
@@ -201,6 +214,76 @@ class StubFactorSnapshotService:
         )
 
 
+class StubStockReviewService:
+    def get_stock_review_report(self, symbol: str) -> StockReviewReport:
+        return StockReviewReport(
+            symbol="600519.SH",
+            name="Kweichow Moutai",
+            as_of_date=date(2024, 1, 2),
+            factor_profile=FactorProfileView(
+                strongest_factor_groups=["趋势", "事件"],
+                weakest_factor_groups=["质量"],
+                alpha_score=73,
+                trigger_score=68,
+                risk_score=35,
+                concise_summary="alpha 分 73；触发分 68；风险分 35",
+            ),
+            technical_view=TechnicalView(
+                trend_state="up",
+                trigger_state="near_breakout",
+                key_levels=["支撑位 100.00", "压力位 102.00"],
+                tactical_read="价格靠近日线压力区。",
+                invalidation_hint="若跌破支撑位则判断下修。",
+            ),
+            fundamental_view=FundamentalView(
+                quality_read="盈利质量处于可接受区间。",
+                growth_read="收入与利润维持正增长。",
+                leverage_read="负债率可控。",
+                data_completeness_note="关键财务字段大体可用。",
+                key_financial_flags=["当前未出现明显财务红旗"],
+            ),
+            event_view=EventView(
+                recent_catalysts=["关于回购股份方案的公告"],
+                recent_risks=[],
+                event_temperature="warm",
+                concise_summary="近 30 日事件热度偏暖。",
+            ),
+            sentiment_view=SentimentView(
+                sentiment_bias="bullish",
+                crowding_hint="当前拥挤度信号中性。",
+                momentum_context="20 日与 60 日相对强弱均偏正。",
+                concise_summary="情绪偏多。",
+            ),
+            bull_case=BullBearCase(
+                stance="bull",
+                summary="多头论点主要来自趋势与事件。",
+                reasons=["趋势占优", "事件偏正向"],
+            ),
+            bear_case=BullBearCase(
+                stance="bear",
+                summary="空头约束主要来自位置和风险控制。",
+                reasons=["靠近压力位"],
+            ),
+            key_disagreements=["趋势偏强，但当前触发位置并不便宜。"],
+            final_judgement=FinalJudgement(
+                action="WATCH",
+                summary="当前更适合先观察。",
+                key_points=["next_3_to_5_trading_days"],
+            ),
+            strategy_summary=StrategySummary(
+                action="WATCH",
+                strategy_type="wait",
+                entry_window="next_3_to_5_trading_days",
+                ideal_entry_range=PriceRange(low=100.0, high=101.0),
+                stop_loss_price=98.0,
+                take_profit_range=PriceRange(low=104.0, high=106.0),
+                review_timeframe="daily_close_review",
+                concise_summary="策略层仍以观察为主。",
+            ),
+            confidence=69,
+        )
+
+
 def test_get_stock_profile_route_returns_structured_payload() -> None:
     """The stock profile endpoint should return the schema payload."""
     app.dependency_overrides[get_market_data_service] = lambda: StubMarketDataService()
@@ -287,5 +370,23 @@ def test_factor_snapshot_route_returns_structured_payload() -> None:
     assert payload["alpha_score"]["total_score"] == 73
     assert payload["trigger_score"]["trigger_state"] == "pullback"
     assert payload["risk_score"]["total_score"] == 35
+
+    app.dependency_overrides.clear()
+
+
+def test_review_report_route_returns_structured_payload() -> None:
+    """The review-report route should expose review v2 payloads."""
+    app.dependency_overrides[get_stock_review_service] = (
+        lambda: StubStockReviewService()
+    )
+
+    response = client.get("/stocks/600519/review-report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600519.SH"
+    assert payload["factor_profile"]["alpha_score"] == 73
+    assert payload["technical_view"]["trigger_state"] == "near_breakout"
+    assert payload["final_judgement"]["action"] == "WATCH"
 
     app.dependency_overrides.clear()
