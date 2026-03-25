@@ -16,7 +16,9 @@ if TYPE_CHECKING:
     from app.services.data_service.db_inspector_service import DbInspectorService
     from app.services.data_service.intraday_service import IntradayService
     from app.services.data_service.refresh_service import DataRefreshService
-    from app.services.factor_service.snapshot import FactorSnapshotService
+    from app.services.factor_service.factor_snapshot_service import (
+        FactorSnapshotService,
+    )
     from app.services.factor_service.trigger_snapshot_service import (
         TriggerSnapshotService,
     )
@@ -112,10 +114,13 @@ def get_intraday_service() -> "IntradayService":
 @lru_cache
 def get_factor_snapshot_service() -> "FactorSnapshotService":
     """构建 factor snapshot service。"""
-    from app.services.factor_service.snapshot import FactorSnapshotService
+    from app.services.factor_service.factor_snapshot_service import (
+        FactorSnapshotService,
+    )
 
     return FactorSnapshotService(
         technical_analysis_service=get_technical_analysis_service(),
+        market_data_service=get_market_data_service(),
     )
 
 

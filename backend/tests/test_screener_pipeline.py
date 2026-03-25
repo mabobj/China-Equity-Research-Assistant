@@ -4,7 +4,15 @@ from contextlib import contextmanager
 from datetime import date, timedelta
 from typing import Iterator, Optional
 
+from app.schemas.factor import (
+    AlphaScore,
+    FactorGroupScore,
+    FactorSnapshot,
+    RiskScore,
+    TriggerScore,
+)
 from app.schemas.market_data import DailyBar, DailyBarResponse, UniverseItem, UniverseResponse
+from app.schemas.research_inputs import AnnouncementListResponse, FinancialSummary
 from app.schemas.screener import ScreenerRunResponse
 from app.schemas.technical import (
     BollingerSnapshot,
@@ -88,7 +96,7 @@ class FakeMarketDataService:
                     symbol=symbol,
                     length=40,
                     close_start=8.0,
-                    amount=8_000_000.0,
+                    amount=25_000_000.0,
                 ),
             )
 
@@ -101,6 +109,33 @@ class FakeMarketDataService:
                 close_start=100.0,
                 amount=60_000_000.0,
             ),
+        )
+
+    def get_stock_financial_summary(self, symbol: str) -> FinancialSummary:
+        return FinancialSummary(
+            symbol=symbol,
+            name="测试股票",
+            revenue=100.0,
+            revenue_yoy=15.0,
+            net_profit=20.0,
+            net_profit_yoy=18.0,
+            roe=16.0,
+            debt_ratio=35.0,
+            eps=2.0,
+            source="fake",
+        )
+
+    def get_stock_announcements(
+        self,
+        symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 20,
+    ) -> AnnouncementListResponse:
+        return AnnouncementListResponse(
+            symbol=symbol,
+            count=1,
+            items=[],
         )
 
 
@@ -134,13 +169,73 @@ class FakeTechnicalAnalysisService:
             volume_ratio_to_ma20=0.95,
         )
 
+    def build_snapshot_from_bars(self, symbol: str, bars: list[DailyBar]) -> TechnicalSnapshot:
+        return self.get_technical_snapshot(symbol)
 
-def test_run_screener_returns_bucketed_candidates() -> None:
-    """pipeline 应返回按分桶组织的结构化结果。"""
+
+class FakeFactorSnapshotService:
+    """用于选股器测试的假因子服务。"""
+
+    def build_from_inputs(self, inputs) -> FactorSnapshot:
+        if inputs.symbol == "600519.SH":
+            return FactorSnapshot(
+                symbol=inputs.symbol,
+                as_of_date=date(2024, 3, 25),
+                raw_factors={"return_20d": 0.12},
+                normalized_factors={"return_20d": 82.0},
+                factor_group_scores=[
+                    FactorGroupScore(
+                        group_name="trend",
+                        score=82.0,
+                        top_positive_signals=["20日收益率保持正向，短期相对强弱仍在改善"],
+                        top_negative_signals=[],
+                    ),
+                    FactorGroupScore(
+                        group_name="quality",
+                        score=75.0,
+                        top_positive_signals=["ROE 高于常见阈值，资本回报质量较好"],
+                        top_negative_signals=[],
+                    ),
+                ],
+                alpha_score=AlphaScore(total_score=80, breakdown=[]),
+                trigger_score=TriggerScore(
+                    total_score=74,
+                    trigger_state="pullback",
+                    breakdown=[],
+                ),
+                risk_score=RiskScore(total_score=32, breakdown=[]),
+            )
+
+        return FactorSnapshot(
+            symbol=inputs.symbol,
+            as_of_date=date(2024, 3, 25),
+            raw_factors={"return_20d": 0.02},
+            normalized_factors={"return_20d": 55.0},
+            factor_group_scores=[
+                FactorGroupScore(
+                    group_name="trend",
+                    score=55.0,
+                    top_positive_signals=[],
+                    top_negative_signals=["20日收益率偏弱，短期相对强弱不足"],
+                ),
+            ],
+            alpha_score=AlphaScore(total_score=56, breakdown=[]),
+            trigger_score=TriggerScore(
+                total_score=52,
+                trigger_state="neutral",
+                breakdown=[],
+            ),
+            risk_score=RiskScore(total_score=58, breakdown=[]),
+        )
+
+
+def test_run_screener_returns_compatible_and_v2_candidates() -> None:
+    """pipeline 应同时返回兼容字段与 v2 分桶。"""
     market_data_service = FakeMarketDataService()
     pipeline = ScreenerPipeline(
         market_data_service=market_data_service,
         technical_analysis_service=FakeTechnicalAnalysisService(),
+        factor_snapshot_service=FakeFactorSnapshotService(),
     )
 
     response = pipeline.run_screener()
@@ -150,8 +245,12 @@ def test_run_screener_returns_bucketed_candidates() -> None:
     assert response.scanned_symbols == 3
     assert len(response.buy_candidates) == 1
     assert response.buy_candidates[0].symbol == "600519.SH"
-    assert response.buy_candidates[0].rank == 1
-    assert len(response.watch_candidates) == 0
+    assert response.buy_candidates[0].list_type == "BUY_CANDIDATE"
+    assert response.buy_candidates[0].v2_list_type == "READY_TO_BUY"
+    assert response.buy_candidates[0].alpha_score == 80
+    assert len(response.ready_to_buy_candidates) == 1
+    assert len(response.research_only_candidates) == 1
+    assert len(response.watch_candidates) == 1
     assert len(response.avoid_candidates) == 0
     assert market_data_service.session_scope_entered == 1
     assert len(market_data_service.requested_start_dates) == 3

@@ -32,8 +32,10 @@ from app.schemas.research import (
 )
 from app.schemas.factor import (
     AlphaScore,
+    FactorGroupScore,
     FactorScoreBreakdown,
     FactorSnapshot,
+    RiskScore,
     TriggerScore,
 )
 from app.schemas.provider import ProviderCapabilityReport, ProviderHealthReport
@@ -65,6 +67,7 @@ __all__ = [
     "EmaSnapshot",
     "EventResearchResult",
     "FactorScoreBreakdown",
+    "FactorGroupScore",
     "FactorSnapshot",
     "FinancialSummary",
     "FundamentalResearchResult",
@@ -87,6 +90,7 @@ __all__ = [
     "TimelineResponse",
     "TriggerSnapshot",
     "TriggerScore",
+    "RiskScore",
     "UniverseItem",
     "UniverseResponse",
     "VolumeMetricsSnapshot",

@@ -26,8 +26,12 @@ class StubScreenerPipeline:
                     symbol="600519.SH",
                     name="贵州茅台",
                     list_type="BUY_CANDIDATE",
+                    v2_list_type="READY_TO_BUY",
                     rank=1,
                     screener_score=82,
+                    alpha_score=80,
+                    trigger_score=72,
+                    risk_score=35,
                     trend_state="up",
                     trend_score=79,
                     latest_close=1688.0,
@@ -54,5 +58,6 @@ def test_run_screener_route_returns_structured_payload() -> None:
     assert response.json()["total_symbols"] == 3
     assert response.json()["buy_candidates"][0]["symbol"] == "600519.SH"
     assert response.json()["buy_candidates"][0]["list_type"] == "BUY_CANDIDATE"
+    assert response.json()["buy_candidates"][0]["v2_list_type"] == "READY_TO_BUY"
 
     app.dependency_overrides.clear()

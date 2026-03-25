@@ -154,6 +154,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --enable
 - `GET /stocks/{symbol}/announcements`
 - `GET /stocks/{symbol}/financial-summary`
 - `GET /stocks/{symbol}/technical`
+- `GET /stocks/{symbol}/factor-snapshot`
 
 说明：
 - 当前公开 API 仍保持兼容，继续提供 profile / daily-bars / universe / announcements / financial-summary。
@@ -162,6 +163,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_full_data_init.ps1 --enable
 - `GET /stocks/{symbol}/intraday-bars` 支持 `frequency=1m|5m`，并支持 `start_datetime` / `end_datetime`，格式为 `YYYY-MM-DDTHH:MM[:SS]`。
 - `GET /stocks/{symbol}/timeline` 当前返回最新交易日的分时线预览，支持 `limit` 参数。
 - `GET /stocks/{symbol}/trigger-snapshot` 基于日线技术快照和盘中快照返回轻量触发判断，支持 `frequency` 与 `limit` 参数。
+- `GET /stocks/{symbol}/factor-snapshot` 返回结构化因子快照，供选股 v2 与后续研究工作流复用。
 
 ### 单票研究接口
 
@@ -526,3 +528,54 @@ python -m app.scripts.run_mootdx_validation_matrix --tdxdir C:/new_tdx --symbols
 - 复杂业务逻辑放在 service 层
 - 关键输出优先结构化，避免把核心结果放进自由文本
 - 测试不依赖实时外网，优先用 fake provider、stub service 和 mock 验证
+
+## 选股 v2 因子框架地基
+
+本轮开始把选股器从“技术规则初筛”收敛为“可扩展的多因子横截面框架”，但仍保持当前公开 API 尽量兼容。
+
+当前新增的核心目录：
+- `backend/app/services/factor_service/factor_snapshot_service.py`
+- `backend/app/services/factor_service/reason_builder.py`
+- `backend/app/services/factor_service/factor_library/`
+
+当前最小因子集合：
+- 趋势与相对强弱：`20日收益率`、`60日收益率`、`距52周高点距离`
+- 质量：`ROE`、`净利率`、`负债率`、`EPS`、`财务数据完整度`
+- 成长：`revenue_yoy`、`net_profit_yoy`
+- 低波动与风险效率：`20日波动率`、`60日波动率`、`ATR/close`、`最近60日最大回撤`
+- 事件：`最近30日公告数量`、`公告关键词打分`、`事件新鲜度`
+
+当前分数语义：
+- `alpha_score`：这只股票值不值得进入优先候选池
+- `trigger_score`：当前是否接近回踩或突破这类可观察买点
+- `risk_score`：风险分，数值越高表示风险越高
+
+### Factor Snapshot API
+
+- `GET /stocks/{symbol}/factor-snapshot`
+
+返回字段概要：
+- `symbol`
+- `as_of_date`
+- `raw_factors`
+- `normalized_factors`
+- `factor_group_scores`
+- `alpha_score`
+- `trigger_score`
+- `risk_score`
+
+### /screener/run 兼容过渡说明
+
+`/screener/run` 继续保留旧字段，便于当前前端和深筛链路继续工作：
+- 旧字段继续保留：`buy_candidates`、`watch_candidates`、`avoid_candidates`
+- 旧候选字段继续保留：`list_type`、`screener_score`
+
+同时新增 v2 字段：
+- 新分桶：`ready_to_buy_candidates`、`watch_pullback_candidates`、`watch_breakout_candidates`、`research_only_candidates`
+- 新候选字段：`v2_list_type`、`alpha_score`、`trigger_score`、`risk_score`
+- 新理由字段：`top_positive_factors`、`top_negative_factors`、`risk_notes`、`short_reason`
+
+当前兼容映射关系：
+- `READY_TO_BUY` -> `BUY_CANDIDATE`
+- `WATCH_PULLBACK` / `WATCH_BREAKOUT` / `RESEARCH_ONLY` -> `WATCHLIST`
+- `AVOID` -> `AVOID`

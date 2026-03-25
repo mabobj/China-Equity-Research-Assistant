@@ -10,6 +10,7 @@ from app.schemas.market_data import UniverseItem
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.services.data_service.exceptions import DataServiceError
 from app.services.data_service.market_data_service import MarketDataService
+from app.services.factor_service.base import FactorBuildInputs
 from app.services.factor_service.snapshot import FactorSnapshotService
 from app.services.feature_service.technical_analysis_service import (
     TechnicalAnalysisService,
@@ -102,25 +103,42 @@ class ScreenerPipeline:
                     started_at=started_at,
                 )
 
-        buy_candidates = _rank_candidates(
-            [item for item in candidates if item.list_type == "BUY_CANDIDATE"],
+        ready_to_buy_candidates = _rank_candidates(
+            [item for item in candidates if item.v2_list_type == "READY_TO_BUY"],
             top_n=top_n,
         )
+        watch_pullback_candidates = _rank_candidates(
+            [item for item in candidates if item.v2_list_type == "WATCH_PULLBACK"],
+            top_n=top_n,
+        )
+        watch_breakout_candidates = _rank_candidates(
+            [item for item in candidates if item.v2_list_type == "WATCH_BREAKOUT"],
+            top_n=top_n,
+        )
+        research_only_candidates = _rank_candidates(
+            [item for item in candidates if item.v2_list_type == "RESEARCH_ONLY"],
+            top_n=top_n,
+        )
+        buy_candidates = list(ready_to_buy_candidates)
         watch_candidates = _rank_candidates(
-            [item for item in candidates if item.list_type == "WATCHLIST"],
+            [
+                item
+                for item in candidates
+                if item.v2_list_type in {"WATCH_PULLBACK", "WATCH_BREAKOUT", "RESEARCH_ONLY"}
+            ],
             top_n=top_n,
         )
         avoid_candidates = _rank_candidates(
-            [item for item in candidates if item.list_type == "AVOID"],
+            [item for item in candidates if item.v2_list_type == "AVOID"],
             top_n=top_n,
         )
 
         logger.info(
-            "初筛完成：实际扫描=%s，产出=%s，跳过=%s，BUY=%s，WATCH=%s，AVOID=%s，耗时=%.1fs",
+            "初筛完成：实际扫描=%s，产出=%s，跳过=%s，READY=%s，WATCH=%s，AVOID=%s，耗时=%.1fs",
             scanned_symbols,
             len(candidates),
             skipped_symbols,
-            len(buy_candidates),
+            len(ready_to_buy_candidates),
             len(watch_candidates),
             len(avoid_candidates),
             perf_counter() - started_at,
@@ -133,6 +151,10 @@ class ScreenerPipeline:
             buy_candidates=buy_candidates,
             watch_candidates=watch_candidates,
             avoid_candidates=avoid_candidates,
+            ready_to_buy_candidates=ready_to_buy_candidates,
+            watch_pullback_candidates=watch_pullback_candidates,
+            watch_breakout_candidates=watch_breakout_candidates,
+            research_only_candidates=research_only_candidates,
         )
 
     def _scan_one_symbol(
@@ -141,18 +163,19 @@ class ScreenerPipeline:
         start_date: str,
     ) -> Optional["_ScanResult"]:
         try:
-            daily_bars = self._market_data_service.get_daily_bars(
+            daily_bars_response = self._market_data_service.get_daily_bars(
                 item.symbol,
                 start_date=start_date,
             )
         except DataServiceError:
             return None
 
-        if not has_sufficient_daily_bars(daily_bars):
+        daily_bars = daily_bars_response.bars
+        if not has_sufficient_daily_bars(daily_bars_response):
             return None
-        if not has_acceptable_liquidity(daily_bars):
+        if not has_acceptable_liquidity(daily_bars_response):
             return None
-        if has_abnormal_price_data(daily_bars):
+        if has_abnormal_price_data(daily_bars_response):
             return None
 
         try:
@@ -164,7 +187,7 @@ class ScreenerPipeline:
             if callable(build_snapshot):
                 technical_snapshot = build_snapshot(
                     symbol=item.symbol,
-                    bars=daily_bars.bars,
+                    bars=daily_bars,
                 )
             else:
                 technical_snapshot = self._technical_analysis_service.get_technical_snapshot(
@@ -174,8 +197,21 @@ class ScreenerPipeline:
             return None
 
         if self._factor_snapshot_service is not None:
-            factor_snapshot = self._factor_snapshot_service.build_from_technical_snapshot(
-                technical_snapshot,
+            factor_snapshot = self._factor_snapshot_service.build_from_inputs(
+                FactorBuildInputs(
+                    symbol=item.symbol,
+                    technical_snapshot=technical_snapshot,
+                    daily_bars=daily_bars,
+                    financial_summary=_safe_get_financial_summary(
+                        self._market_data_service,
+                        item.symbol,
+                    ),
+                    announcements=_safe_get_recent_announcements(
+                        self._market_data_service,
+                        item.symbol,
+                        technical_snapshot.as_of_date,
+                    ),
+                )
             )
             score_result = score_factor_snapshot(
                 factor_snapshot=factor_snapshot,
@@ -190,13 +226,20 @@ class ScreenerPipeline:
                 symbol=item.symbol,
                 name=item.name,
                 list_type=score_result.list_type,
+                v2_list_type=score_result.v2_list_type,
                 rank=1,
                 screener_score=score_result.screener_score,
+                alpha_score=score_result.alpha_score,
+                trigger_score=score_result.trigger_score,
+                risk_score=score_result.risk_score,
                 trend_state=technical_snapshot.trend_state,
                 trend_score=technical_snapshot.trend_score,
                 latest_close=technical_snapshot.latest_close,
                 support_level=technical_snapshot.support_level,
                 resistance_level=technical_snapshot.resistance_level,
+                top_positive_factors=score_result.top_positive_factors,
+                top_negative_factors=score_result.top_negative_factors,
+                risk_notes=score_result.risk_notes,
                 short_reason=score_result.short_reason,
             ),
         )
@@ -240,7 +283,13 @@ def _rank_candidates(
 ) -> list[ScreenerCandidate]:
     sorted_candidates = sorted(
         candidates,
-        key=lambda item: (item.screener_score, item.trend_score, item.symbol),
+        key=lambda item: (
+            item.screener_score,
+            item.alpha_score,
+            -item.risk_score,
+            item.trend_score,
+            item.symbol,
+        ),
         reverse=True,
     )
     if top_n is not None:
@@ -251,3 +300,29 @@ def _rank_candidates(
         ranked_candidates.append(candidate.model_copy(update={"rank": index}))
     return ranked_candidates
 
+
+def _safe_get_financial_summary(
+    market_data_service: MarketDataService,
+    symbol: str,
+):
+    try:
+        return market_data_service.get_stock_financial_summary(symbol)
+    except DataServiceError:
+        return None
+
+
+def _safe_get_recent_announcements(
+    market_data_service: MarketDataService,
+    symbol: str,
+    as_of_date: date,
+):
+    try:
+        response = market_data_service.get_stock_announcements(
+            symbol,
+            start_date=(as_of_date - timedelta(days=30)).isoformat(),
+            end_date=as_of_date.isoformat(),
+            limit=50,
+        )
+    except DataServiceError:
+        return []
+    return response.items

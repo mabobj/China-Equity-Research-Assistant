@@ -8,6 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.strategy import PriceRange
 
 
+LegacyScreenerListType = Literal["BUY_CANDIDATE", "WATCHLIST", "AVOID"]
+ScreenerListType = Literal[
+    "READY_TO_BUY",
+    "WATCH_PULLBACK",
+    "WATCH_BREAKOUT",
+    "RESEARCH_ONLY",
+    "AVOID",
+]
+
+
 class ScreenerCandidate(BaseModel):
     """单个选股候选结果。"""
 
@@ -15,14 +25,21 @@ class ScreenerCandidate(BaseModel):
 
     symbol: str
     name: str
-    list_type: Literal["BUY_CANDIDATE", "WATCHLIST", "AVOID"]
+    list_type: LegacyScreenerListType
+    v2_list_type: ScreenerListType = "RESEARCH_ONLY"
     rank: int = Field(ge=1)
     screener_score: int = Field(ge=0, le=100)
+    alpha_score: int = Field(default=50, ge=0, le=100)
+    trigger_score: int = Field(default=50, ge=0, le=100)
+    risk_score: int = Field(default=50, ge=0, le=100)
     trend_state: Literal["up", "neutral", "down"]
     trend_score: int = Field(ge=0, le=100)
     latest_close: float
     support_level: Optional[float] = None
     resistance_level: Optional[float] = None
+    top_positive_factors: list[str] = Field(default_factory=list)
+    top_negative_factors: list[str] = Field(default_factory=list)
+    risk_notes: list[str] = Field(default_factory=list)
     short_reason: str
 
 
@@ -34,9 +51,13 @@ class ScreenerRunResponse(BaseModel):
     as_of_date: date
     total_symbols: int = Field(ge=0)
     scanned_symbols: int = Field(ge=0)
-    buy_candidates: list[ScreenerCandidate]
-    watch_candidates: list[ScreenerCandidate]
-    avoid_candidates: list[ScreenerCandidate]
+    buy_candidates: list[ScreenerCandidate] = Field(default_factory=list)
+    watch_candidates: list[ScreenerCandidate] = Field(default_factory=list)
+    avoid_candidates: list[ScreenerCandidate] = Field(default_factory=list)
+    ready_to_buy_candidates: list[ScreenerCandidate] = Field(default_factory=list)
+    watch_pullback_candidates: list[ScreenerCandidate] = Field(default_factory=list)
+    watch_breakout_candidates: list[ScreenerCandidate] = Field(default_factory=list)
+    research_only_candidates: list[ScreenerCandidate] = Field(default_factory=list)
 
 
 class DeepScreenerCandidate(BaseModel):
@@ -46,7 +67,7 @@ class DeepScreenerCandidate(BaseModel):
 
     symbol: str
     name: str
-    base_list_type: Literal["BUY_CANDIDATE", "WATCHLIST", "AVOID"]
+    base_list_type: LegacyScreenerListType
     base_rank: int = Field(ge=1)
     base_screener_score: int = Field(ge=0, le=100)
     research_action: Literal["BUY", "WATCH", "AVOID"]

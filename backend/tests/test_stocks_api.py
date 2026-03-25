@@ -5,9 +5,20 @@ from typing import Optional
 
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_market_data_service, get_trigger_snapshot_service
-from app.schemas.intraday import TriggerSnapshot
+from app.api.dependencies import (
+    get_factor_snapshot_service,
+    get_market_data_service,
+    get_trigger_snapshot_service,
+)
 from app.main import app
+from app.schemas.factor import (
+    AlphaScore,
+    FactorGroupScore,
+    FactorSnapshot,
+    RiskScore,
+    TriggerScore,
+)
+from app.schemas.intraday import TriggerSnapshot
 from app.schemas.market_data import (
     DailyBar,
     DailyBarResponse,
@@ -19,6 +30,7 @@ from app.schemas.market_data import (
     UniverseItem,
     UniverseResponse,
 )
+from app.schemas.research_inputs import AnnouncementListResponse, FinancialSummary
 
 
 class StubMarketDataService:
@@ -111,6 +123,29 @@ class StubMarketDataService:
             ],
         )
 
+    def get_stock_financial_summary(self, symbol: str) -> FinancialSummary:
+        return FinancialSummary(
+            symbol="600519.SH",
+            name="Kweichow Moutai",
+            revenue=100.0,
+            revenue_yoy=12.0,
+            net_profit=20.0,
+            net_profit_yoy=15.0,
+            roe=18.0,
+            debt_ratio=30.0,
+            eps=2.5,
+            source="stub",
+        )
+
+    def get_stock_announcements(
+        self,
+        symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 20,
+    ) -> AnnouncementListResponse:
+        return AnnouncementListResponse(symbol="600519.SH", count=0, items=[])
+
 
 client = TestClient(app)
 
@@ -133,6 +168,36 @@ class StubTriggerSnapshotService:
             distance_to_resistance_pct=0.69,
             trigger_state="near_breakout",
             trigger_note="盘中价格接近日线压力位，上行趋势下处于突破观察区。",
+        )
+
+
+class StubFactorSnapshotService:
+    def get_factor_snapshot(
+        self,
+        symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> FactorSnapshot:
+        return FactorSnapshot(
+            symbol="600519.SH",
+            as_of_date=date(2024, 1, 2),
+            raw_factors={"return_20d": 0.08},
+            normalized_factors={"return_20d": 72.0},
+            factor_group_scores=[
+                FactorGroupScore(
+                    group_name="trend",
+                    score=72.0,
+                    top_positive_signals=["20日收益率保持正向，短期相对强弱仍在改善"],
+                    top_negative_signals=[],
+                )
+            ],
+            alpha_score=AlphaScore(total_score=73, breakdown=[]),
+            trigger_score=TriggerScore(
+                total_score=68,
+                trigger_state="pullback",
+                breakdown=[],
+            ),
+            risk_score=RiskScore(total_score=35, breakdown=[]),
         )
 
 
@@ -204,5 +269,23 @@ def test_trigger_snapshot_route_returns_structured_payload() -> None:
     assert payload["symbol"] == "600519.SH"
     assert payload["trigger_state"] == "near_breakout"
     assert payload["daily_trend_state"] == "up"
+
+    app.dependency_overrides.clear()
+
+
+def test_factor_snapshot_route_returns_structured_payload() -> None:
+    """The factor snapshot route should return structured factor fields."""
+    app.dependency_overrides[get_factor_snapshot_service] = (
+        lambda: StubFactorSnapshotService()
+    )
+
+    response = client.get("/stocks/600519/factor-snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600519.SH"
+    assert payload["alpha_score"]["total_score"] == 73
+    assert payload["trigger_score"]["trigger_state"] == "pullback"
+    assert payload["risk_score"]["total_score"] == 35
 
     app.dependency_overrides.clear()

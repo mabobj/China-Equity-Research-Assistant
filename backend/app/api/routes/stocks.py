@@ -5,10 +5,12 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies import (
+    get_factor_snapshot_service,
     get_market_data_service,
     get_technical_analysis_service,
     get_trigger_snapshot_service,
 )
+from app.schemas.factor import FactorSnapshot
 from app.schemas.intraday import TriggerSnapshot
 from app.schemas.market_data import (
     DailyBarResponse,
@@ -103,6 +105,21 @@ def get_trigger_snapshot(
         symbol=symbol,
         frequency=frequency,
         limit=limit,
+    )
+
+
+@router.get("/{symbol}/factor-snapshot", response_model=FactorSnapshot)
+def get_factor_snapshot(
+    symbol: str,
+    start_date: Optional[str] = Query(default=None),
+    end_date: Optional[str] = Query(default=None),
+    service: Any = Depends(get_factor_snapshot_service),
+) -> FactorSnapshot:
+    """返回单只股票的结构化因子快照。"""
+    return service.get_factor_snapshot(
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 

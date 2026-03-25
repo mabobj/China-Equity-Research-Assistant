@@ -1,178 +1,148 @@
-"""Build lightweight factor and trigger scores from technical snapshots."""
+"""因子分数组合逻辑。"""
 
 from __future__ import annotations
 
-from app.schemas.factor import AlphaScore, FactorScoreBreakdown, TriggerScore
+from app.schemas.factor import (
+    AlphaScore,
+    FactorGroupScore,
+    FactorScoreBreakdown,
+    RiskScore,
+    TriggerScore,
+)
 from app.schemas.technical import TechnicalSnapshot
-from app.services.factor_service.preprocess import clamp_score
+from app.services.factor_service.preprocess import clamp_score, weighted_average_scores
 
 
-def build_alpha_score(snapshot: TechnicalSnapshot) -> AlphaScore:
-    """Build a placeholder alpha score while keeping current screener behavior stable."""
-    score = float(snapshot.trend_score)
-    breakdown: list[FactorScoreBreakdown] = [
-        FactorScoreBreakdown(
-            factor_name="trend_core",
-            raw_value=float(snapshot.trend_score),
-            score=float(snapshot.trend_score),
-            weight=1.0,
-            note="直接复用当前 trend_score 作为过渡版 alpha 核心。",
-        )
-    ]
-
-    trend_adjustment = 0.0
-    if snapshot.trend_state == "up":
-        trend_adjustment = 10.0
-    elif snapshot.trend_state == "down":
-        trend_adjustment = -18.0
-    score += trend_adjustment
-    breakdown.append(
-        FactorScoreBreakdown(
-            factor_name="trend_state_adjustment",
-            raw_value=trend_adjustment,
-            score=clamp_score(50 + trend_adjustment),
-            weight=0.0,
-            note="趋势状态对 alpha 的加减分。",
-        )
-    )
-
-    volatility_adjustment = 0.0
-    if snapshot.volatility_state == "low":
-        volatility_adjustment = 4.0
-    elif snapshot.volatility_state == "high":
-        volatility_adjustment = -10.0
-    score += volatility_adjustment
-    breakdown.append(
-        FactorScoreBreakdown(
-            factor_name="volatility_adjustment",
-            raw_value=volatility_adjustment,
-            score=clamp_score(50 + volatility_adjustment),
-            weight=0.0,
-            note="低波动加分，高波动减分。",
-        )
-    )
-
-    ma20 = snapshot.moving_averages.ma20
-    ma20_adjustment = 0.0
-    if ma20 is not None:
-        ma20_adjustment = 6.0 if snapshot.latest_close >= ma20 else -8.0
-        score += ma20_adjustment
-    breakdown.append(
-        FactorScoreBreakdown(
-            factor_name="price_vs_ma20",
-            raw_value=ma20,
-            score=clamp_score(50 + ma20_adjustment),
-            weight=0.0,
-            note="价格相对 MA20 的位置。",
-        )
-    )
-
-    volume_ratio = snapshot.volume_metrics.volume_ratio_to_ma20
-    volume_adjustment = 0.0
-    if volume_ratio is not None:
-        if volume_ratio >= 1.1:
-            volume_adjustment = 6.0
-        elif volume_ratio < 0.8:
-            volume_adjustment = -5.0
-        score += volume_adjustment
-    breakdown.append(
-        FactorScoreBreakdown(
-            factor_name="volume_ratio_to_ma20",
-            raw_value=volume_ratio,
-            score=clamp_score(50 + volume_adjustment),
-            weight=0.0,
-            note="量能对 alpha 的辅助加减分。",
-        )
-    )
-
-    support_adjustment = 0.0
-    if snapshot.support_level is not None and snapshot.support_level > 0:
-        support_distance = (
-            snapshot.latest_close - snapshot.support_level
-        ) / snapshot.support_level
-        if snapshot.latest_close < snapshot.support_level:
-            support_adjustment = -12.0
-        elif support_distance <= 0.05:
-            support_adjustment = 4.0
-        score += support_adjustment
-    breakdown.append(
-        FactorScoreBreakdown(
-            factor_name="support_distance",
-            raw_value=snapshot.support_level,
-            score=clamp_score(50 + support_adjustment),
-            weight=0.0,
-            note="支撑位附近加分，跌破支撑减分。",
-        )
-    )
-
-    resistance_adjustment = 0.0
-    if snapshot.resistance_level is not None and snapshot.latest_close > 0:
-        resistance_distance = (
-            snapshot.resistance_level - snapshot.latest_close
-        ) / snapshot.latest_close
-        if 0 <= resistance_distance <= 0.03 and snapshot.trend_state == "up":
-            resistance_adjustment = 5.0
-            score += resistance_adjustment
-    breakdown.append(
-        FactorScoreBreakdown(
-            factor_name="resistance_distance",
-            raw_value=snapshot.resistance_level,
-            score=clamp_score(50 + resistance_adjustment),
-            weight=0.0,
-            note="接近突破位时给予加分。",
-        )
+def build_alpha_score(group_scores: list[FactorGroupScore]) -> AlphaScore:
+    """构建 alpha 分数。"""
+    score_map = {item.group_name: item.score for item in group_scores}
+    weights = {
+        "trend": 0.30,
+        "quality": 0.25,
+        "growth": 0.20,
+        "low_vol": 0.15,
+        "event": 0.10,
+    }
+    score = weighted_average_scores(
+        [(score_map.get(group_name), weight) for group_name, weight in weights.items()],
     )
 
     return AlphaScore(
         total_score=clamp_score(score),
-        breakdown=breakdown,
+        breakdown=_build_group_breakdown(
+            group_scores=group_scores,
+            weights=weights,
+            reverse=False,
+        ),
     )
 
 
-def build_trigger_score(snapshot: TechnicalSnapshot) -> TriggerScore:
-    """Build a lightweight trigger score reserved for future trigger engine."""
+def build_trigger_score(
+    technical_snapshot: TechnicalSnapshot,
+    *,
+    alpha_score: int,
+    risk_score: int,
+) -> TriggerScore:
+    """构建触发分数。"""
     score = 50.0
     breakdown: list[FactorScoreBreakdown] = []
 
-    if snapshot.trend_state == "up":
-        score += 15.0
-    elif snapshot.trend_state == "down":
-        score -= 20.0
+    trend_bonus = (
+        12.0
+        if technical_snapshot.trend_state == "up"
+        else -15.0 if technical_snapshot.trend_state == "down" else 0.0
+    )
+    score += trend_bonus
     breakdown.append(
         FactorScoreBreakdown(
-            factor_name="trend_trigger",
-            raw_value=float(snapshot.trend_score),
-            score=clamp_score(score),
-            weight=1.0,
-            note="趋势方向对触发优先级的影响。",
+            factor_name="daily_trend_state",
+            raw_value=float(technical_snapshot.trend_score),
+            score=clamp_score(50 + trend_bonus),
+            weight=0.25,
+            contribution=round(trend_bonus, 2),
+            note="日线趋势对触发分数的影响。",
         )
     )
 
-    if snapshot.support_level is not None and snapshot.support_level > 0:
-        support_distance = (
-            snapshot.latest_close - snapshot.support_level
-        ) / snapshot.support_level
-        if support_distance <= 0.05:
-            score += 10.0
-    if snapshot.resistance_level is not None and snapshot.latest_close > 0:
-        resistance_distance = (
-            snapshot.resistance_level - snapshot.latest_close
-        ) / snapshot.latest_close
-        if 0 <= resistance_distance <= 0.03:
-            score += 8.0
+    volume_ratio = technical_snapshot.volume_metrics.volume_ratio_to_ma20
+    volume_bonus = 0.0
+    if volume_ratio is not None:
+        if volume_ratio >= 1.1:
+            volume_bonus = 8.0
+        elif volume_ratio < 0.8:
+            volume_bonus = -8.0
+    score += volume_bonus
+    breakdown.append(
+        FactorScoreBreakdown(
+            factor_name="volume_ratio_to_ma20",
+            raw_value=volume_ratio,
+            score=clamp_score(50 + volume_bonus),
+            weight=0.20,
+            contribution=round(volume_bonus, 2),
+            note="量能配合度。",
+        )
+    )
 
-    volume_ratio = snapshot.volume_metrics.volume_ratio_to_ma20
-    if volume_ratio is not None and volume_ratio >= 1.1:
-        score += 6.0
-    elif volume_ratio is not None and volume_ratio < 0.8:
-        score -= 8.0
+    support_distance_pct = None
+    support_bonus = 0.0
+    if technical_snapshot.support_level is not None and technical_snapshot.support_level > 0:
+        support_distance_pct = (
+            (technical_snapshot.latest_close - technical_snapshot.support_level)
+            / technical_snapshot.support_level
+            * 100.0
+        )
+        if 0.0 <= support_distance_pct <= 4.0:
+            support_bonus = 12.0
+        elif support_distance_pct > 8.0:
+            support_bonus = -4.0
+    score += support_bonus
+    breakdown.append(
+        FactorScoreBreakdown(
+            factor_name="distance_to_support_pct",
+            raw_value=support_distance_pct,
+            score=clamp_score(50 + support_bonus),
+            weight=0.25,
+            contribution=round(support_bonus, 2),
+            note="靠近支撑有助于形成回踩触发。",
+        )
+    )
+
+    resistance_distance_pct = None
+    breakout_bonus = 0.0
+    if technical_snapshot.resistance_level is not None and technical_snapshot.latest_close > 0:
+        resistance_distance_pct = (
+            (technical_snapshot.resistance_level - technical_snapshot.latest_close)
+            / technical_snapshot.latest_close
+            * 100.0
+        )
+        if 0.0 <= resistance_distance_pct <= 2.5:
+            breakout_bonus = 10.0
+        elif resistance_distance_pct > 7.0:
+            breakout_bonus = -4.0
+    score += breakout_bonus
+    breakdown.append(
+        FactorScoreBreakdown(
+            factor_name="distance_to_resistance_pct",
+            raw_value=resistance_distance_pct,
+            score=clamp_score(50 + breakout_bonus),
+            weight=0.20,
+            contribution=round(breakout_bonus, 2),
+            note="靠近压力位有助于形成突破观察。",
+        )
+    )
+
+    score += (alpha_score - 50.0) * 0.10
+    score -= max(0.0, risk_score - 50.0) * 0.12
 
     total_score = clamp_score(score)
-    if total_score >= 70 and snapshot.trend_state == "up":
-        trigger_state = "ready"
-    elif total_score >= 45 and snapshot.trend_state != "down":
-        trigger_state = "watch"
-    else:
+    trigger_state = "neutral"
+    if technical_snapshot.trend_state == "down" or risk_score >= 75:
+        trigger_state = "avoid"
+    elif support_distance_pct is not None and 0.0 <= support_distance_pct <= 4.0 and total_score >= 65:
+        trigger_state = "pullback"
+    elif resistance_distance_pct is not None and 0.0 <= resistance_distance_pct <= 2.5 and total_score >= 65:
+        trigger_state = "breakout"
+    elif total_score < 45:
         trigger_state = "avoid"
 
     return TriggerScore(
@@ -181,3 +151,75 @@ def build_trigger_score(snapshot: TechnicalSnapshot) -> TriggerScore:
         breakdown=breakdown,
     )
 
+
+def build_risk_score(
+    group_scores: list[FactorGroupScore],
+    technical_snapshot: TechnicalSnapshot,
+) -> RiskScore:
+    """构建风险分数，越高表示风险越大。"""
+    score_map = {item.group_name: item.score for item in group_scores}
+    base_risk = 50.0
+
+    low_vol_score = score_map.get("low_vol")
+    quality_score = score_map.get("quality")
+    growth_score = score_map.get("growth")
+    event_score = score_map.get("event")
+
+    if low_vol_score is not None:
+        base_risk += (50.0 - low_vol_score) * 0.45
+    if quality_score is not None:
+        base_risk += (50.0 - quality_score) * 0.25
+    if growth_score is not None:
+        base_risk += (50.0 - growth_score) * 0.15
+    if event_score is not None:
+        base_risk += (50.0 - event_score) * 0.10
+    if technical_snapshot.trend_state == "down":
+        base_risk += 12.0
+    elif technical_snapshot.trend_state == "up":
+        base_risk -= 6.0
+    if technical_snapshot.volatility_state == "high":
+        base_risk += 12.0
+
+    return RiskScore(
+        total_score=clamp_score(base_risk),
+        breakdown=_build_group_breakdown(
+            group_scores=group_scores,
+            weights={
+                "low_vol": 0.45,
+                "quality": 0.25,
+                "growth": 0.15,
+                "event": 0.10,
+            },
+            reverse=True,
+        ),
+    )
+
+
+def _build_group_breakdown(
+    *,
+    group_scores: list[FactorGroupScore],
+    weights: dict[str, float],
+    reverse: bool,
+) -> list[FactorScoreBreakdown]:
+    breakdown: list[FactorScoreBreakdown] = []
+    for item in group_scores:
+        weight = weights.get(item.group_name, 0.0)
+        normalized_score = None
+        contribution = None
+        if item.score is not None:
+            normalized_score = (100.0 - item.score) if reverse else item.score
+            contribution = round(normalized_score * weight, 2)
+
+        breakdown.append(
+            FactorScoreBreakdown(
+                factor_name=item.group_name,
+                raw_value=item.score,
+                score=normalized_score,
+                weight=weight,
+                contribution=contribution,
+                note="因子组 {group_name} 的组合贡献。".format(
+                    group_name=item.group_name,
+                ),
+            )
+        )
+    return breakdown

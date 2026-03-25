@@ -299,3 +299,114 @@
 - 一次性堆很多新功能
 - 为了“智能感”牺牲可维护性
 - 让数据层继续膨胀成所有逻辑的汇集点
+
+## 选股 v2 因子框架
+
+本轮开始把 `factor_service` 从“预埋占位”升级为“最小可用因子框架”。
+
+当前核心文件：
+- `backend/app/services/factor_service/base.py`
+- `backend/app/services/factor_service/preprocess.py`
+- `backend/app/services/factor_service/factor_snapshot_service.py`
+- `backend/app/services/factor_service/composite.py`
+- `backend/app/services/factor_service/reason_builder.py`
+- `backend/app/services/factor_service/factor_library/trend_factors.py`
+- `backend/app/services/factor_service/factor_library/quality_factors.py`
+- `backend/app/services/factor_service/factor_library/growth_factors.py`
+- `backend/app/services/factor_service/factor_library/low_vol_factors.py`
+- `backend/app/services/factor_service/factor_library/event_factors.py`
+
+### 输入来源
+
+本轮因子框架只复用现有输入，不扩外部数据面：
+- `DailyBarResponse`
+- `TechnicalSnapshot`
+- `FinancialSummary`
+- `AnnouncementListResponse`
+
+### 输出结构
+
+当前统一输出 `FactorSnapshot`，至少包含：
+- `raw_factors`
+- `normalized_factors`
+- `factor_group_scores`
+- `alpha_score`
+- `trigger_score`
+- `risk_score`
+
+其中：
+- `alpha_score` 表示横截面优先级
+- `trigger_score` 表示当前是否接近“回踩/突破”型观察点
+- `risk_score` 是风险分，数值越高表示风险越高
+
+### 当前最小因子集合
+
+当前已落地的因子组：
+- `trend`
+  - `return_20d`
+  - `return_60d`
+  - `distance_to_52w_high`
+  - `relative_hs300_strength` 预留
+  - `relative_industry_strength` 预留
+- `quality`
+  - `roe`
+  - `net_margin`
+  - `debt_ratio`
+  - `eps`
+  - `financial_data_completeness`
+- `growth`
+  - `revenue_yoy`
+  - `net_profit_yoy`
+  - `revenue_acceleration` 预留
+  - `net_profit_acceleration` 预留
+- `low_vol`
+  - `volatility_20d`
+  - `volatility_60d`
+  - `atr_to_close`
+  - `max_drawdown_60d`
+- `event`
+  - `announcement_count_30d`
+  - `announcement_keyword_score`
+  - `event_freshness_score`
+
+### 推荐理由生成
+
+`reason_builder.py` 的职责是把因子贡献收敛为结构化短理由，而不是生成自由文本长文。
+
+当前输出：
+- `top_positive_factors`
+- `top_negative_factors`
+- `short_reason`
+- `risk_notes`
+
+这些字段直接来自因子组信号，不依赖 LLM。
+
+## Screener v2 兼容收敛
+
+当前 `ScreenerPipeline` 已切换为以下结构：
+- `universe constraints`
+- `technical snapshot`
+- `factor snapshot`
+- `alpha / trigger / risk scoring`
+- `list classification`
+
+当前新版分桶：
+- `READY_TO_BUY`
+- `WATCH_PULLBACK`
+- `WATCH_BREAKOUT`
+- `RESEARCH_ONLY`
+- `AVOID`
+
+为了兼容现有前端与深筛链路，公开响应暂时同时保留：
+- 旧字段：`buy_candidates`、`watch_candidates`、`avoid_candidates`
+- 新字段：`ready_to_buy_candidates`、`watch_pullback_candidates`、`watch_breakout_candidates`、`research_only_candidates`
+
+映射关系：
+- `READY_TO_BUY` -> `BUY_CANDIDATE`
+- `WATCH_PULLBACK` / `WATCH_BREAKOUT` / `RESEARCH_ONLY` -> `WATCHLIST`
+- `AVOID` -> `AVOID`
+
+这意味着：
+- 旧前端和深筛流程可以继续工作
+- 新的因子分数和理由字段已经能被上层消费
+- 后续可以继续演进为真正的横截面多因子排序，而不必再次推翻 screener 结构

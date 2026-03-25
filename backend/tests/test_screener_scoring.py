@@ -1,4 +1,4 @@
-"""选股器评分测试。"""
+"""选股评分测试。"""
 
 from datetime import date
 
@@ -13,8 +13,8 @@ from app.schemas.technical import (
 from app.services.screener_service.scoring import score_technical_snapshot
 
 
-def test_score_technical_snapshot_returns_buy_candidate_for_strong_setup() -> None:
-    """强势技术结构应被分到 BUY_CANDIDATE。"""
+def test_score_technical_snapshot_returns_ready_candidate_for_strong_setup() -> None:
+    """强势技术结构应落入可交易候选分桶。"""
     snapshot = TechnicalSnapshot(
         symbol="600519.SH",
         as_of_date=date(2024, 3, 25),
@@ -59,6 +59,7 @@ def test_score_technical_snapshot_returns_buy_candidate_for_strong_setup() -> No
     result = score_technical_snapshot(snapshot)
 
     assert result.list_type == "BUY_CANDIDATE"
-    assert result.screener_score >= 75
-    assert "趋势" in result.short_reason or "突破" in result.short_reason
-
+    assert result.v2_list_type == "READY_TO_BUY"
+    assert result.alpha_score >= 75
+    assert result.screener_score >= 70
+    assert "趋势" in result.short_reason or "候选" in result.short_reason
