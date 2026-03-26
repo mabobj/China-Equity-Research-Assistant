@@ -1,19 +1,27 @@
 import { PageShell } from "@/components/page-shell";
 import { SectionCard } from "@/components/section-card";
+import { StatusBlock } from "@/components/status-block";
 
 export default function TradesPage() {
   return (
     <PageShell
       title="交易记录"
-      description="本页当前只保留清晰占位，后续阶段再接入交易录入、记录查询和策略快照。"
+      description="当前页面仍为清晰占位页。本阶段不伪造交易录入、持仓或复盘能力，只明确告诉你现在还没上线什么。"
     >
       <SectionCard
-        title="功能状态"
-        description="Phase 5-A 不实现交易记录表单、存储或统计逻辑。"
+        title="当前状态"
+        description="交易记录、持仓快照、卖出归因和复盘统计尚未进入本轮范围。"
       >
-        <p className="text-sm leading-7 text-slate-700">
-          当前页面只用于保留导航入口和未来扩展位置，避免把尚未完成的交易闭环能力混入本轮前端范围。
-        </p>
+        <div className="space-y-4">
+          <StatusBlock
+            title="当前未上线"
+            description="交易记录录入、持仓管理、收益统计和自动复盘还没有接入，不建议把这里当成已可用功能。"
+          />
+          <StatusBlock
+            title="下一步会做什么"
+            description="后续阶段会优先补齐结构化交易记录、策略快照留存和基础复盘入口，再决定是否扩展更多统计视图。"
+          />
+        </div>
       </SectionCard>
     </PageShell>
   );

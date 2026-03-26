@@ -2,10 +2,19 @@ import type {
   DataRefreshStatus,
   DbQueryResponse,
   DbTablesResponse,
+  DebateReviewReport,
+  DeepReviewWorkflowRunRequest,
   DeepScreenerRunResponse,
+  FactorSnapshot,
   ResearchReport,
   ScreenerRunResponse,
+  SingleStockWorkflowRunRequest,
+  StockProfile,
+  StockReviewReport,
   StrategyPlan,
+  TriggerSnapshot,
+  WorkflowRunDetailResponse,
+  WorkflowRunResponse,
 } from "@/types/api";
 
 const API_PREFIX = "/api/backend";
@@ -15,8 +24,11 @@ const MIN_SCREENER_TIMEOUT_MS = 120_000;
 const MAX_SCREENER_TIMEOUT_MS = 1_800_000;
 const MIN_DEEP_SCREENER_TIMEOUT_MS = 180_000;
 const MAX_DEEP_SCREENER_TIMEOUT_MS = 2_700_000;
+const MIN_WORKFLOW_TIMEOUT_MS = 90_000;
+const MAX_WORKFLOW_TIMEOUT_MS = 3_600_000;
 const SCREENER_TIMEOUT_PER_SYMBOL_MS = 250;
 const DEEP_SCREENER_TIMEOUT_PER_SYMBOL_MS = 350;
+const WORKFLOW_TIMEOUT_PER_SYMBOL_MS = 500;
 
 export class ApiError extends Error {
   status: number;
@@ -28,7 +40,7 @@ export class ApiError extends Error {
   }
 }
 
-type QueryValue = string | number | undefined;
+type QueryValue = string | number | boolean | undefined;
 
 type ScreenerParams = {
   maxSymbols?: number;
@@ -41,6 +53,10 @@ type DeepScreenerParams = ScreenerParams & {
 
 type DataRefreshParams = {
   maxSymbols?: number;
+};
+
+type DebateReviewParams = {
+  useLlm?: boolean;
 };
 
 type FetchOptions = {
@@ -82,6 +98,53 @@ export async function getDeepScreenerRun(
   );
 }
 
+export async function getStockProfile(symbol: string): Promise<StockProfile> {
+  return fetchBackend<StockProfile>(
+    `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/profile`,
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function getFactorSnapshot(symbol: string): Promise<FactorSnapshot> {
+  return fetchBackend<FactorSnapshot>(
+    `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/factor-snapshot`,
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function getStockReviewReport(
+  symbol: string,
+): Promise<StockReviewReport> {
+  return fetchBackend<StockReviewReport>(
+    `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/review-report`,
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function getDebateReview(
+  symbol: string,
+  params: DebateReviewParams = {},
+): Promise<DebateReviewReport> {
+  return fetchBackend<DebateReviewReport>(
+    buildPath(
+      `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/debate-review`,
+      {
+        use_llm: params.useLlm,
+      },
+    ),
+    { timeoutMs: resolveSingleStockWorkflowTimeoutMs() },
+  );
+}
+
+export async function getTriggerSnapshot(
+  symbol: string,
+): Promise<TriggerSnapshot> {
+  return fetchBackend<TriggerSnapshot>(
+    `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/trigger-snapshot`,
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
 export async function getResearchReport(symbol: string): Promise<ResearchReport> {
   return fetchBackend<ResearchReport>(
     `/research/${encodeURIComponent(normalizeSymbolInput(symbol))}`,
@@ -92,6 +155,35 @@ export async function getResearchReport(symbol: string): Promise<ResearchReport>
 export async function getStrategyPlan(symbol: string): Promise<StrategyPlan> {
   return fetchBackend<StrategyPlan>(
     `/strategy/${encodeURIComponent(normalizeSymbolInput(symbol))}`,
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function runSingleStockWorkflow(
+  payload: SingleStockWorkflowRunRequest,
+): Promise<WorkflowRunResponse> {
+  return fetchBackend<WorkflowRunResponse>("/workflows/single-stock/run", {
+    timeoutMs: resolveSingleStockWorkflowTimeoutMs(),
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function runDeepReviewWorkflow(
+  payload: DeepReviewWorkflowRunRequest,
+): Promise<WorkflowRunResponse> {
+  return fetchBackend<WorkflowRunResponse>("/workflows/deep-review/run", {
+    timeoutMs: resolveDeepWorkflowTimeoutMs(payload.max_symbols),
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function getWorkflowRunDetail(
+  runId: string,
+): Promise<WorkflowRunDetailResponse> {
+  return fetchBackend<WorkflowRunDetailResponse>(
+    `/workflows/runs/${encodeURIComponent(runId)}`,
     { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
   );
 }
@@ -191,10 +283,7 @@ function buildPath(path: string, query: Record<string, QueryValue>): string {
   });
 
   const queryString = searchParams.toString();
-  if (!queryString) {
-    return path;
-  }
-  return `${path}?${queryString}`;
+  return queryString ? `${path}?${queryString}` : path;
 }
 
 async function parseErrorMessage(response: Response): Promise<string> {
@@ -236,6 +325,21 @@ function resolveDeepScreenerTimeoutMs(maxSymbols?: number): number {
   return clampTimeout(
     MIN_DEEP_SCREENER_TIMEOUT_MS + maxSymbols * DEEP_SCREENER_TIMEOUT_PER_SYMBOL_MS,
     MAX_DEEP_SCREENER_TIMEOUT_MS,
+  );
+}
+
+function resolveSingleStockWorkflowTimeoutMs(): number {
+  return MIN_WORKFLOW_TIMEOUT_MS;
+}
+
+function resolveDeepWorkflowTimeoutMs(maxSymbols?: number): number {
+  if (maxSymbols === undefined) {
+    return 240_000;
+  }
+
+  return clampTimeout(
+    240_000 + maxSymbols * WORKFLOW_TIMEOUT_PER_SYMBOL_MS,
+    MAX_WORKFLOW_TIMEOUT_MS,
   );
 }
 

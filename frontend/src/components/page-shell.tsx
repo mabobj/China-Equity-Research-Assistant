@@ -14,10 +14,10 @@ type PageShellProps = {
 
 const NAV_ITEMS: readonly NavItem[] = [
   { href: "/", label: "首页" },
-  { href: "/screener", label: "选股器" },
-  { href: "/stocks/600519.SH", label: "单票研究" },
+  { href: "/screener", label: "选股工作台" },
+  { href: "/stocks/600519.SH", label: "单票工作台" },
   { href: "/trades", label: "交易记录" },
-  { href: "/reviews", label: "数据排查" },
+  { href: "/reviews", label: "复盘记录" },
 ];
 
 export function PageShell({ title, description, children }: PageShellProps) {
@@ -27,7 +27,7 @@ export function PageShell({ title, description, children }: PageShellProps) {
         <div className="flex flex-col gap-6">
           <div className="space-y-2">
             <p className="text-sm font-medium uppercase tracking-[0.28em] text-emerald-700">
-              Phase 5-A
+              Stability Phase
             </p>
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
               {title}

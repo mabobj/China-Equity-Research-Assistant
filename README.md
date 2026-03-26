@@ -2,16 +2,107 @@
 
 面向中国大陆 A 股市场的研究与交易决策辅助系统。
 
-当前阶段重点是把数据接入、技术分析、结构化研究、结构化策略、规则选股和轻量前端链路做稳。当前阶段不包含自动实盘交易、券商下单集成和高频交易。
+当前阶段已经具备的核心能力：
 
-## 当前能力
-
-- 股票基础信息、日线行情、公告、财务摘要
-- 技术分析与因子快照
-- 单票研究报告与交易策略
-- 规则版 `debate-review`
-- 受控 LLM 版 `debate-review`
 - 全市场初筛与深筛
+- 单票结构化研究
+- 角色化 debate 裁决
+- 结构化 strategy plan
+- 显式 workflow 执行
+- 轻量前端工作台
+
+当前阶段明确不做：
+
+- 自动实盘交易
+- 券商下单集成
+- 高频交易
+- 复杂调度系统或通用 DAG 平台
+
+## 如何使用系统
+
+推荐先看这些文档：
+
+- [快速开始](docs/manuals/quickstart.md)
+- [日常使用说明](docs/manuals/daily-usage.md)
+- [数据源与边界说明](docs/manuals/data-and-limitations.md)
+- [故障排查](docs/manuals/troubleshooting.md)
+- [系统架构](docs/architecture.md)
+- [稳定性审计 v1](docs/audits/stability-review-v1.md)
+
+## 当前推荐主链路
+
+如果你是第一次使用，推荐按下面顺序验证：
+
+1. 按 [快速开始](docs/manuals/quickstart.md) 启动后端和前端。
+2. 在首页输入 `600519.SH`，进入单票工作台。
+3. 在单票页依次查看：
+   - 股票基础信息
+   - factor snapshot
+   - review-report v2
+   - debate-review
+   - strategy plan
+   - trigger snapshot
+4. 在单票页运行 `single_stock_full_review` workflow。
+5. 打开 `/screener`，运行规则初筛、深筛和 `deep_candidate_review` workflow。
+
+## 前端工作台
+
+当前前端不是原始 API 的简单展示，而是三个可用入口：
+
+- `/`
+  - 首页
+  - 系统能力说明
+  - 股票代码输入
+  - workflow 执行入口导航
+- `/stocks/[symbol]`
+  - 单票工作台
+  - 串联基础信息、factor、review、debate、strategy、trigger
+  - 内置 `single_stock_full_review` workflow 入口
+- `/screener`
+  - 选股工作台
+  - 串联数据补全、规则初筛、深筛结果
+  - 内置 `deep_candidate_review` workflow 入口
+
+`/trades` 和 `/reviews` 当前仍为诚实占位页，不伪造未上线业务。
+
+## Workflow 执行器 v1
+
+当前已支持两个同步 workflow：
+
+### 1. `single_stock_full_review`
+
+节点顺序：
+
+1. `SingleStockResearchInputs`
+2. `FactorSnapshotBuild`
+3. `ReviewReportBuild`
+4. `DebateReviewBuild`
+5. `StrategyPlanBuild`
+
+### 2. `deep_candidate_review`
+
+节点顺序：
+
+1. `ScreenerRun`
+2. `DeepCandidateSelect`
+3. `CandidateReviewBuild`
+4. `CandidateDebateBuild`
+5. `CandidateStrategyBuild`
+
+当前 workflow 的边界：
+
+- 只做同步执行
+- 支持 `start_from`
+- 支持 `stop_after`
+- 支持 `use_llm`（如对应节点适用）
+- 每次运行都会生成 `run_id`
+- 会记录输入摘要、步骤摘要、最终输出摘要和运行状态
+
+运行记录当前存放在：
+
+```text
+data/workflow_runs/{run_id}.json
+```
 
 ## 本地启动
 
@@ -43,18 +134,21 @@ Set-Location ..
 powershell -ExecutionPolicy Bypass -File scripts\run_backend.ps1
 ```
 
-默认地址：
-
-- 健康检查：[http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
-- Swagger：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-
 ### 5. 启动前端
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
 ```
 
+默认地址：
+
+- 后端健康检查：[http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
+- 后端文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- 前端页面：[http://127.0.0.1:3000](http://127.0.0.1:3000)
+
 ## 关键环境变量
+
+最常用的变量如下：
 
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
@@ -63,79 +157,38 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 LLM_PROVIDER=auto
 ENABLE_LLM_DEBATE=false
 LLM_DEBATE_TIMEOUT_SECONDS=20
+ENABLE_MOOTDX=false
+MOOTDX_TDX_DIR=C:/new_tdx
 ```
 
 说明：
 
-- `LLM_PROVIDER=auto` 表示按 `OPENAI_BASE_URL` 自动识别 provider。
-- 当前内置 provider：
-  - `openai_compatible`
-  - `volcengine_ark`
-- 如果你接的是火山方舟 coding/plan 套餐，建议保留：
+- `LLM_PROVIDER=auto` 会根据 `OPENAI_BASE_URL` 自动识别 provider。
+- 如果接的是火山方舟 coding/plan 套餐，建议至少设置：
   - `OPENAI_BASE_URL=https://ark.cn-beijing.volces.com/api/coding/v3`
   - `LLM_PROVIDER=auto`
-  - `LLM_DEBATE_TIMEOUT_SECONDS` 建议至少 `60`
+  - `LLM_DEBATE_TIMEOUT_SECONDS=60`
+- `ENABLE_MOOTDX=true` 时，需要正确设置 `MOOTDX_TDX_DIR`。
 
-## LLM 裁决运行时
+## LLM debate 说明
 
-`GET /stocks/{symbol}/debate-review` 当前支持两种运行时：
+`GET /stocks/{symbol}/debate-review` 支持两种运行模式：
 
 - `rule_based`
 - `llm`
 
-可通过 `use_llm=true/false` 显式控制；如果未传，则由 `ENABLE_LLM_DEBATE` 决定。
+控制方式：
 
-### 当前 LLM 设计边界
+- 显式传 `use_llm=true/false`
+- 或由 `ENABLE_LLM_DEBATE` 决定默认行为
 
-- 只允许固定角色、固定轮次、固定 schema
-- LLM 只负责结构化文本判断
-- 数据抓取、技术指标、因子计算、风险边界仍由代码负责
-- 任一角色输出未通过 schema 校验时，会自动回退规则版
+当前边界：
 
-### 火山方舟适配说明
+- LLM 只做结构化判断与说明
+- 指标计算、因子分数、风险边界仍由代码负责
+- 当 LLM 调用失败、超时或 schema 校验失败时，会自动回退到规则版
 
-火山方舟 coding/plan 套餐不支持 `response_format=json_schema/json_object`。项目已经把这部分兼容逻辑独立为 provider 适配层：
-
-- `backend/app/services/llm_debate_service/providers/openai_compatible_provider.py`
-- `backend/app/services/llm_debate_service/providers/volcengine_ark_provider.py`
-- `backend/app/services/llm_debate_service/providers/registry.py`
-
-其中：
-
-- 标准 OpenAI 兼容网关会按 `json_schema -> json_object -> prompt_only_json` 依次尝试
-- 火山方舟会直接进入 `prompt_only_json`，避免无意义的 `400 Bad Request`
-- 火山方舟会把实际超时下限提升到 `60s`，并关闭 SDK 自动重试，避免深度思考模型被 20 秒过早打断
-
-后续如果接入新的 LLM，只需要新增一个 provider 适配模块，再在 registry 中注册即可，不需要再改核心角色执行器。
-
-## Agent 提示词配置
-
-各个角色的系统提示词已经统一改为独立配置文件，目录如下：
-
-```text
-backend/app/services/llm_debate_service/prompts/
-  TECHNICAL_ANALYST_AGENT.md
-  FUNDAMENTAL_ANALYST_AGENT.md
-  EVENT_ANALYST_AGENT.md
-  SENTIMENT_ANALYST_AGENT.md
-  BULL_RESEARCHER_AGENT.md
-  BEAR_RESEARCHER_AGENT.md
-  CHIEF_ANALYST_AGENT.md
-  RISK_REVIEWER_AGENT.md
-```
-
-这些文件既是角色说明文件，也是当前的提示词配置入口。后续如果要调整角色边界、输出约束或新增角色，优先改这里。
-
-## 目录结构
-
-```text
-backend/   FastAPI 后端
-frontend/  Next.js 前端
-docs/      架构与路线说明
-scripts/   本地运行与测试脚本
-```
-
-## 测试
+## 测试与校验
 
 ### 后端测试
 
@@ -148,121 +201,39 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 ```powershell
 Set-Location frontend
 npm.cmd run lint
-npx.cmd tsc --noEmit
+npm.cmd run type-check
 ```
 
 ## 主要接口
 
 - `GET /health`
 - `GET /stocks/{symbol}/profile`
-- `GET /stocks/{symbol}/daily-bars`
-- `GET /stocks/{symbol}/announcements`
-- `GET /stocks/{symbol}/financial-summary`
 - `GET /stocks/{symbol}/factor-snapshot`
 - `GET /stocks/{symbol}/review-report`
 - `GET /stocks/{symbol}/debate-review`
-- `GET /research/{symbol}`
 - `GET /strategy/{symbol}`
 - `GET /screener/run`
 - `GET /screener/deep-run`
+- `POST /workflows/single-stock/run`
+- `POST /workflows/deep-review/run`
+- `GET /workflows/runs/{run_id}`
 
 ## 设计原则
 
 - 研究优先于炫技
 - 结构化优先于自由文本
 - 规则与模型分工明确
-- API 层只负责接收与返回
+- route 层只做请求接收与响应返回
 - 外部数据源统一走 provider
-- 免费 provider 必须允许失败和回退
+- 免费 provider 必须允许失效与回退
 
-## Workflow 执行器 v1
-
-当前版本新增了一个轻量、同步、可从中间节点启动的 workflow 执行器层，目录位于：
+## 目录结构
 
 ```text
-backend/app/services/workflow_runtime/
+backend/   FastAPI 后端
+frontend/  Next.js 前端
+docs/      架构、路线图、使用手册、审计报告
+scripts/   本地启动与测试脚本
+data/      DuckDB、workflow run records 等本地数据
+logs/      后端日志
 ```
-
-设计边界：
-
-- 只做显式顺序执行，不引入队列、调度器或 DAG 平台
-- 每个节点都有明确的 `name / input contract / output contract`
-- 每次运行都会生成 `run_id`
-- 会记录输入摘要、节点摘要、最终输出摘要和运行状态
-- 公开 API 仍保持轻量，不引入认证和后台任务
-
-### 已支持的 workflow
-
-#### 1. `single_stock_full_review`
-
-节点顺序：
-
-1. `SingleStockResearchInputs`
-2. `FactorSnapshotBuild`
-3. `ReviewReportBuild`
-4. `DebateReviewBuild`
-5. `StrategyPlanBuild`
-
-能力说明：
-
-- 复用现有 `review_service / debate_service / llm_debate_service / strategy_planner / factor_service`
-- `DebateReviewBuild` 支持 `use_llm=true/false`
-- 可通过 `start_from` 从中间节点启动
-- 即使从中间节点启动，也会用现有 service 自动补齐前置输入
-
-#### 2. `deep_candidate_review`
-
-节点顺序：
-
-1. `ScreenerRun`
-2. `DeepCandidateSelect`
-3. `CandidateReviewBuild`
-4. `CandidateDebateBuild`
-5. `CandidateStrategyBuild`
-
-能力说明：
-
-- 复用现有 `screener / review / debate / strategy`
-- 第一版只做同步执行
-- 支持 `max_symbols / top_n / deep_top_k / use_llm`
-- 个别 symbol 失败时会跳过，但会在最终结果和步骤摘要中记录失败信息
-
-### `start_from` 与 `stop_after`
-
-- `start_from`：指定从哪个节点开始正式执行，之前节点会标记为 `skipped`
-- `stop_after`：指定执行到哪个节点后停止，之后节点会标记为 `skipped`
-- 二者都不会改变节点定义顺序，只影响本次运行边界
-- 如果从中间节点启动，workflow 会按需要自动补齐前置输入，但不会把前置节点记为已执行完成
-
-### 运行记录
-
-当前版本会把 workflow 运行记录持久化到：
-
-```text
-data/workflow_runs/
-```
-
-每次运行至少记录：
-
-- `run_id`
-- `workflow_name`
-- `started_at`
-- `finished_at`
-- `input_summary`
-- `step summaries`
-- `final_output_summary`
-- `status`
-
-### Workflow API
-
-新增接口：
-
-- `POST /workflows/single-stock/run`
-- `POST /workflows/deep-review/run`
-- `GET /workflows/runs/{run_id}`
-
-这些接口与现有 `review / debate / strategy / screener` 的关系是：
-
-- 现有接口继续保留，适合单能力直接调用
-- workflow 接口负责把这些既有能力按显式节点组织起来
-- workflow 本身不是新的研究算法层，而是一个薄编排层

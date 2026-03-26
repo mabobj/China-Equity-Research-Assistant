@@ -9,15 +9,25 @@ import {
   getScreenerRun,
   startDataRefresh,
 } from "@/lib/api";
-import { formatDate, formatPrice, formatRange, formatScore } from "@/lib/format";
+import {
+  formatAction,
+  formatDate,
+  formatDateTime,
+  formatListType,
+  formatPrice,
+  formatRange,
+  formatScore,
+} from "@/lib/format";
 import type {
   DataRefreshStatus,
   DeepScreenerCandidate,
   DeepScreenerRunResponse,
   ScreenerCandidate,
   ScreenerRunResponse,
+  ScreenerListType,
 } from "@/types/api";
 
+import { DeepReviewWorkflowPanel } from "./deep-review-workflow-panel";
 import { SectionCard } from "./section-card";
 import { StatusBlock } from "./status-block";
 
@@ -35,14 +45,14 @@ type RefreshFormState = {
 };
 
 const INITIAL_FORM_STATE: FormState = {
-  maxSymbols: "5",
-  topN: "3",
+  maxSymbols: "50",
+  topN: "20",
 };
 
 const INITIAL_DEEP_FORM_STATE: DeepFormState = {
-  maxSymbols: "5",
-  topN: "3",
-  deepTopK: "2",
+  maxSymbols: "50",
+  topN: "20",
+  deepTopK: "8",
 };
 
 const INITIAL_REFRESH_FORM_STATE: RefreshFormState = {
@@ -50,6 +60,22 @@ const INITIAL_REFRESH_FORM_STATE: RefreshFormState = {
 };
 
 const REFRESH_POLL_INTERVAL_MS = 3_000;
+
+const V2_BUCKETS: Array<{
+  key:
+    | "ready_to_buy_candidates"
+    | "watch_pullback_candidates"
+    | "watch_breakout_candidates"
+    | "research_only_candidates"
+    | "avoid_candidates";
+  listType: ScreenerListType;
+}> = [
+  { key: "ready_to_buy_candidates", listType: "READY_TO_BUY" },
+  { key: "watch_pullback_candidates", listType: "WATCH_PULLBACK" },
+  { key: "watch_breakout_candidates", listType: "WATCH_BREAKOUT" },
+  { key: "research_only_candidates", listType: "RESEARCH_ONLY" },
+  { key: "avoid_candidates", listType: "AVOID" },
+];
 
 export function ScreenerWorkspace() {
   const [refreshForm, setRefreshForm] = useState<RefreshFormState>(
@@ -167,27 +193,27 @@ export function ScreenerWorkspace() {
     <div className="space-y-6">
       <SectionCard
         title="数据补全"
-        description="点击后会在后端启动一次手动数据补全任务，统一刷新股票池、基础信息、日线、财务摘要和近期公告，后续分析会优先使用本地数据。"
+        description="先刷新本地股票池和基础数据，再运行规则初筛或 deep review，可以明显降低空结果和旧数据问题。"
       >
         <form className="grid gap-4 md:grid-cols-4" onSubmit={handleRefreshSubmit}>
           <Field
             label="max_symbols"
             value={refreshForm.maxSymbols}
-            placeholder="留空为全量"
+            placeholder="留空表示按默认范围执行"
             onChange={(value) =>
               setRefreshForm((current) => ({ ...current, maxSymbols: value }))
             }
           />
-          <div className="md:col-span-3 flex items-end gap-3">
+          <div className="md:col-span-3 flex flex-wrap items-end gap-3">
             <button
               type="submit"
               disabled={refreshLoading || refreshStatus?.is_running === true}
               className="min-h-11 rounded-2xl bg-amber-600 px-5 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
             >
               {refreshLoading
-                ? "正在启动补全任务..."
+                ? "正在启动数据补全..."
                 : refreshStatus?.is_running
-                  ? "补全任务执行中"
+                  ? "数据补全执行中"
                   : "开始数据补全"}
             </button>
             <button
@@ -214,7 +240,7 @@ export function ScreenerWorkspace() {
           {!refreshStatusLoading && !refreshStatus && !refreshError ? (
             <StatusBlock
               title="尚未执行"
-              description="当前还没有读取到数据补全状态，点击按钮后即可启动一次手动补全。"
+              description="当前没有读取到数据补全状态，可以直接启动一次补全任务。"
             />
           ) : null}
           {refreshStatus ? <RefreshStatusPanel status={refreshStatus} /> : null}
@@ -222,8 +248,8 @@ export function ScreenerWorkspace() {
       </SectionCard>
 
       <SectionCard
-        title="规则初筛"
-        description="调用 /screener/run，查看当前全市场规则初筛结果。"
+        title="初筛结果"
+        description="主展示字段使用 v2_list_type；兼容字段 list_type 只保留为兼容说明，不再作为主分桶。"
       >
         <form className="grid gap-4 md:grid-cols-4" onSubmit={handleInitialSubmit}>
           <Field
@@ -246,7 +272,7 @@ export function ScreenerWorkspace() {
               disabled={initialLoading}
               className="min-h-11 rounded-2xl bg-emerald-700 px-5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-400"
             >
-              {initialLoading ? "初筛运行中..." : "运行初筛"}
+              {initialLoading ? "初筛执行中..." : "运行规则初筛"}
             </button>
           </div>
         </form>
@@ -258,7 +284,7 @@ export function ScreenerWorkspace() {
           {!initialRun && !initialLoading && !initialError ? (
             <StatusBlock
               title="等待运行"
-              description="输入参数后运行初筛，即可看到 BUY_CANDIDATE、WATCHLIST 和 AVOID 三类结果。"
+              description="输入参数后运行初筛，即可看到 READY_TO_BUY、WATCH_PULLBACK、WATCH_BREAKOUT、RESEARCH_ONLY 和 AVOID 五类结果。"
             />
           ) : null}
           {initialLoading ? (
@@ -269,8 +295,8 @@ export function ScreenerWorkspace() {
       </SectionCard>
 
       <SectionCard
-        title="深筛聚合"
-        description="调用 /screener/deep-run，聚合初筛、研究和策略输出。"
+        title="深筛结果"
+        description="这里展示 deep screener 的聚合结果，适合从初筛候选继续收敛到重点研究名单。"
       >
         <form className="grid gap-4 md:grid-cols-4" onSubmit={handleDeepSubmit}>
           <Field
@@ -300,7 +326,7 @@ export function ScreenerWorkspace() {
               disabled={deepLoading}
               className="min-h-11 rounded-2xl bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
             >
-              {deepLoading ? "深筛运行中..." : "运行深筛"}
+              {deepLoading ? "深筛执行中..." : "运行深筛"}
             </button>
           </div>
         </form>
@@ -312,7 +338,7 @@ export function ScreenerWorkspace() {
           {!deepRun && !deepLoading && !deepError ? (
             <StatusBlock
               title="等待运行"
-              description="深筛会先用初筛结果挑出候选，再聚合研究与策略输出。"
+              description="深筛会先缩小候选范围，再聚合研究与策略结果，适合挑出少量优先跟踪标的。"
             />
           ) : null}
           {deepLoading ? (
@@ -321,6 +347,8 @@ export function ScreenerWorkspace() {
           {deepRun ? <DeepScreenerRunResult run={deepRun} /> : null}
         </div>
       </SectionCard>
+
+      <DeepReviewWorkflowPanel />
     </div>
   );
 }
@@ -361,51 +389,20 @@ function RefreshStatusPanel({ status }: { status: DataRefreshStatus }) {
         ]}
       />
       {status.recent_warnings.length > 0 ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-          <h3 className="text-sm font-semibold text-amber-900">最近警告（详细）</h3>
-          <ul className="mt-3 space-y-2 text-sm leading-6 text-amber-800">
-            {status.recent_warnings.map((message) => (
-              <li key={message}>{message}</li>
-            ))}
-          </ul>
-        </div>
+        <StringPanel
+          title="最近警告"
+          items={status.recent_warnings}
+          tone="warning"
+        />
       ) : null}
       {status.recent_errors.length > 0 ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
-          <h3 className="text-sm font-semibold text-rose-900">最近错误</h3>
-          <ul className="mt-3 space-y-2 text-sm leading-6 text-rose-800">
-            {status.recent_errors.map((message) => (
-              <li key={message}>{message}</li>
-            ))}
-          </ul>
-        </div>
+        <StringPanel
+          title="最近错误"
+          items={status.recent_errors}
+          tone="error"
+        />
       ) : null}
     </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <label className="space-y-2">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        inputMode="numeric"
-        placeholder={placeholder}
-        className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-      />
-    </label>
   );
 }
 
@@ -417,23 +414,23 @@ function ScreenerRunResult({ run }: { run: ScreenerRunResponse }) {
           { label: "交易日", value: formatDate(run.as_of_date) },
           { label: "股票池总数", value: String(run.total_symbols) },
           { label: "实际扫描数", value: String(run.scanned_symbols) },
+          { label: "兼容 BUY_CANDIDATE", value: String(run.buy_candidates.length) },
+          { label: "兼容 WATCHLIST", value: String(run.watch_candidates.length) },
+          { label: "兼容 AVOID", value: String(run.avoid_candidates.length) },
         ]}
       />
-      <CandidateGroup
-        title="BUY_CANDIDATE"
-        candidates={run.buy_candidates}
-        emptyText="当前没有进入买入候选的股票。"
+      <StatusBlock
+        title="分桶说明"
+        description="主展示字段为 v2_list_type。卡片里会同时展示旧字段 list_type，仅用于兼容和排查。"
       />
-      <CandidateGroup
-        title="WATCHLIST"
-        candidates={run.watch_candidates}
-        emptyText="当前没有进入观察池的股票。"
-      />
-      <CandidateGroup
-        title="AVOID"
-        candidates={run.avoid_candidates}
-        emptyText="当前没有落入回避列表的股票。"
-      />
+      {V2_BUCKETS.map((bucket) => (
+        <CandidateGroup
+          key={bucket.key}
+          title={bucket.listType}
+          candidates={run[bucket.key]}
+          emptyText={`当前没有 ${bucket.listType} 分桶的候选。`}
+        />
+      ))}
     </div>
   );
 }
@@ -452,7 +449,7 @@ function DeepScreenerRunResult({ run }: { run: DeepScreenerRunResponse }) {
       {run.deep_candidates.length === 0 ? (
         <StatusBlock
           title="暂无深筛结果"
-          description="本次运行没有形成可展示的深筛候选，可能是候选为空或个别股票在聚合过程中被跳过。"
+          description="本次深筛没有形成可展示的候选，可能是初筛为空，或候选在聚合阶段被跳过。"
         />
       ) : (
         <div className="grid gap-4">
@@ -470,13 +467,15 @@ function CandidateGroup({
   candidates,
   emptyText,
 }: {
-  title: string;
+  title: ScreenerListType;
   candidates: ScreenerCandidate[];
   emptyText: string;
 }) {
   return (
     <div className="space-y-3">
-      <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+      <h3 className="text-base font-semibold text-slate-900">
+        {title} · {formatListType(title)}
+      </h3>
       {candidates.length === 0 ? (
         <StatusBlock title="暂无结果" description={emptyText} />
       ) : (
@@ -502,6 +501,12 @@ function CandidateCard({ candidate }: { candidate: ScreenerCandidate }) {
             <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-600">
               {candidate.symbol}
             </span>
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+              主展示：{candidate.v2_list_type}
+            </span>
+            <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">
+              兼容：{candidate.list_type}
+            </span>
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-600">
             {candidate.short_reason}
@@ -514,13 +519,32 @@ function CandidateCard({ candidate }: { candidate: ScreenerCandidate }) {
           查看单票
         </Link>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
         <Metric label="排名" value={`#${candidate.rank}`} />
-        <Metric label="评分" value={formatScore(candidate.screener_score)} />
-        <Metric label="趋势" value={`${candidate.trend_state} / ${candidate.trend_score}`} />
-        <Metric label="收盘价" value={formatPrice(candidate.latest_close)} />
+        <Metric label="总分" value={formatScore(candidate.screener_score)} />
+        <Metric label="alpha" value={formatScore(candidate.alpha_score)} />
+        <Metric label="trigger" value={formatScore(candidate.trigger_score)} />
+        <Metric label="risk" value={formatScore(candidate.risk_score)} />
+        <Metric label="最新收盘" value={formatPrice(candidate.latest_close)} />
         <Metric label="支撑位" value={formatPrice(candidate.support_level)} />
         <Metric label="压力位" value={formatPrice(candidate.resistance_level)} />
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <StringPanel
+          title="主要正向因子"
+          items={candidate.top_positive_factors}
+          emptyText="当前没有主要正向因子。"
+        />
+        <StringPanel
+          title="主要负向因子"
+          items={candidate.top_negative_factors}
+          emptyText="当前没有主要负向因子。"
+        />
+        <StringPanel
+          title="风险提示"
+          items={candidate.risk_notes}
+          emptyText="当前没有额外风险提示。"
+        />
       </div>
     </article>
   );
@@ -555,17 +579,92 @@ function DeepCandidateCard({
           查看单票
         </Link>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
         <Metric label="优先级" value={formatScore(candidate.priority_score)} />
-        <Metric label="初筛分数" value={formatScore(candidate.base_screener_score)} />
-        <Metric label="研究结论" value={`${candidate.research_action} / ${candidate.research_overall_score}`} />
+        <Metric label="初筛总分" value={formatScore(candidate.base_screener_score)} />
+        <Metric label="研究动作" value={formatAction(candidate.research_action)} />
+        <Metric
+          label="研究分 / 置信度"
+          value={`${candidate.research_overall_score} / ${candidate.research_confidence}`}
+        />
+        <Metric label="策略动作" value={formatAction(candidate.strategy_action)} />
         <Metric label="策略类型" value={candidate.strategy_type} />
         <Metric label="入场区间" value={formatRange(candidate.ideal_entry_range)} />
         <Metric label="止损价" value={formatPrice(candidate.stop_loss_price)} />
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Metric label="止盈区间" value={formatRange(candidate.take_profit_range)} />
         <Metric label="复核周期" value={candidate.review_timeframe} />
       </div>
     </article>
+  );
+}
+
+function StringPanel({
+  title,
+  items,
+  emptyText,
+  tone = "default",
+}: {
+  title: string;
+  items: string[];
+  emptyText?: string;
+  tone?: "default" | "warning" | "error";
+}) {
+  const panelClassName =
+    tone === "warning"
+      ? "border-amber-200 bg-amber-50"
+      : tone === "error"
+        ? "border-rose-200 bg-rose-50"
+        : "border-slate-200 bg-slate-50";
+
+  const textClassName =
+    tone === "warning"
+      ? "text-amber-800"
+      : tone === "error"
+        ? "text-rose-800"
+        : "text-slate-700";
+
+  return (
+    <div className={`rounded-2xl border p-4 ${panelClassName}`}>
+      <p className="text-sm font-semibold text-slate-950">{title}</p>
+      {items.length === 0 ? (
+        <p className={`mt-3 text-sm leading-6 ${textClassName}`}>
+          {emptyText ?? "当前没有可展示内容。"}
+        </p>
+      ) : (
+        <ul className={`mt-3 space-y-2 text-sm leading-6 ${textClassName}`}>
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        inputMode="numeric"
+        placeholder={placeholder}
+        className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+      />
+    </label>
   );
 }
 
@@ -603,21 +702,6 @@ function resolveRefreshTitle(status: DataRefreshStatus): string {
     return "数据补全失败";
   }
   return "尚未执行数据补全";
-}
-
-function formatDateTime(value: string | null): string {
-  if (!value) {
-    return "-";
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleString("zh-CN", {
-    hour12: false,
-  });
 }
 
 function parseOptionalInteger(value: string): number | undefined {

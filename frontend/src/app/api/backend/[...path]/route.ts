@@ -7,8 +7,12 @@ const MIN_SCREENER_TIMEOUT_MS = 120_000;
 const MAX_SCREENER_TIMEOUT_MS = 1_800_000;
 const MIN_DEEP_SCREENER_TIMEOUT_MS = 180_000;
 const MAX_DEEP_SCREENER_TIMEOUT_MS = 2_700_000;
+const SINGLE_STOCK_WORKFLOW_TIMEOUT_MS = 90_000;
+const MIN_DEEP_WORKFLOW_TIMEOUT_MS = 240_000;
+const MAX_DEEP_WORKFLOW_TIMEOUT_MS = 3_600_000;
 const SCREENER_TIMEOUT_PER_SYMBOL_MS = 250;
 const DEEP_SCREENER_TIMEOUT_PER_SYMBOL_MS = 350;
+const WORKFLOW_TIMEOUT_PER_SYMBOL_MS = 500;
 
 export const dynamic = "force-dynamic";
 
@@ -33,16 +37,16 @@ async function proxyRequest(
 ) {
   const { path } = await context.params;
   const targetUrl = buildTargetUrl(request, path);
-  const timeoutMs = getProxyTimeout(request, path);
+  const requestBodyText = method === "POST" ? await request.text() : undefined;
+  const timeoutMs = getProxyTimeout(request, path, requestBodyText);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const bodyText = method === "POST" ? await request.text() : undefined;
     const upstreamResponse = await fetch(targetUrl, {
       method,
       headers: buildUpstreamHeaders(request, method),
-      body: method === "POST" ? bodyText : undefined,
+      body: method === "POST" ? requestBodyText : undefined,
       cache: "no-store",
       signal: controller.signal,
     });
@@ -94,14 +98,34 @@ function buildUpstreamHeaders(
   return headers;
 }
 
-function getProxyTimeout(request: NextRequest, path: string[]): number {
+function getProxyTimeout(
+  request: NextRequest,
+  path: string[],
+  requestBodyText?: string,
+): number {
   if (path[0] === "data" && path[1] === "refresh") {
     return DATA_REFRESH_TIMEOUT_MS;
   }
 
-  const maxSymbols = parseOptionalPositiveInteger(
+  const maxSymbols = resolveMaxSymbols(
     request.nextUrl.searchParams.get("max_symbols"),
+    requestBodyText,
   );
+
+  if (path[0] === "workflows" && path[1] === "single-stock" && path[2] === "run") {
+    return SINGLE_STOCK_WORKFLOW_TIMEOUT_MS;
+  }
+
+  if (path[0] === "workflows" && path[1] === "deep-review" && path[2] === "run") {
+    if (maxSymbols === undefined) {
+      return MIN_DEEP_WORKFLOW_TIMEOUT_MS;
+    }
+
+    return clampTimeout(
+      MIN_DEEP_WORKFLOW_TIMEOUT_MS + maxSymbols * WORKFLOW_TIMEOUT_PER_SYMBOL_MS,
+      MAX_DEEP_WORKFLOW_TIMEOUT_MS,
+    );
+  }
 
   if (path[0] === "screener" && path[1] === "deep-run") {
     if (maxSymbols === undefined) {
@@ -127,6 +151,33 @@ function getProxyTimeout(request: NextRequest, path: string[]): number {
   }
 
   return STOCK_PAGE_TIMEOUT_MS;
+}
+
+function resolveMaxSymbols(
+  queryValue: string | null,
+  requestBodyText?: string,
+): number | undefined {
+  const fromQuery = parseOptionalPositiveInteger(queryValue);
+  if (fromQuery !== undefined) {
+    return fromQuery;
+  }
+
+  if (!requestBodyText) {
+    return undefined;
+  }
+
+  try {
+    const payload = JSON.parse(requestBodyText) as {
+      max_symbols?: number | null;
+    };
+    return parseOptionalPositiveInteger(
+      payload.max_symbols === undefined || payload.max_symbols === null
+        ? null
+        : String(payload.max_symbols),
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 function parseOptionalPositiveInteger(value: string | null): number | undefined {
