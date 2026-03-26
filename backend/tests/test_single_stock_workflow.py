@@ -10,6 +10,8 @@ from app.services.workflow_runtime.definitions.single_stock_workflow import (
     build_single_stock_workflow_definition,
 )
 from app.services.workflow_runtime.executor import WorkflowExecutor
+from app.services.workflow_runtime.registry import WorkflowRegistry
+from app.services.workflow_runtime.workflow_service import WorkflowRuntimeService
 from .workflow_test_helpers import (
     build_debate_review_report,
     build_factor_snapshot,
@@ -122,3 +124,30 @@ def test_single_stock_workflow_can_start_from_middle_node(tmp_path: Path) -> Non
     assert result.final_output.debate_review is not None
     assert result.final_output.strategy_plan is not None
     assert debate_runtime_service.calls == [("600519.SH", False)]
+
+
+def test_workflow_runtime_service_serializes_step_summaries(tmp_path: Path) -> None:
+    """workflow runtime service 应把内部步骤结果转换为对外 schema。"""
+    definition = build_single_stock_workflow_definition(
+        debate_orchestrator=StubDebateOrchestrator(),
+        factor_snapshot_service=StubFactorSnapshotService(),
+        stock_review_service=StubStockReviewService(),
+        debate_runtime_service=StubDebateRuntimeService(),
+        strategy_planner=StubStrategyPlanner(),
+    )
+    artifact_store = FileWorkflowArtifactStore(tmp_path)
+    service = WorkflowRuntimeService(
+        registry=WorkflowRegistry(definitions=(definition,)),
+        executor=WorkflowExecutor(artifact_store),
+        artifact_store=artifact_store,
+    )
+
+    response = service.run_single_stock_workflow(
+        SingleStockWorkflowRunRequest(symbol="600519.SH", use_llm=False)
+    )
+    detail = service.get_run_detail(response.run_id)
+
+    assert response.status == "completed"
+    assert len(response.steps) == 5
+    assert response.steps[0].node_name == "SingleStockResearchInputs"
+    assert detail.steps[0].node_name == "SingleStockResearchInputs"

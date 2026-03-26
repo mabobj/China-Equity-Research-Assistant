@@ -6,9 +6,11 @@ from app.schemas.workflow import (
     DeepReviewWorkflowRunRequest,
     WorkflowRunDetailResponse,
     WorkflowRunResponse,
+    WorkflowStepSummary,
     SingleStockWorkflowRunRequest,
 )
 from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
+from app.services.workflow_runtime.base import WorkflowStepResult
 from app.services.workflow_runtime.executor import WorkflowExecutor
 from app.services.workflow_runtime.registry import WorkflowRegistry
 
@@ -41,7 +43,7 @@ class WorkflowRuntimeService:
                 "started_at": result.started_at,
                 "finished_at": result.finished_at,
                 "input_summary": result.input_summary,
-                "steps": result.steps,
+                "steps": self._to_step_summaries(result.steps),
                 "final_output_summary": result.final_output_summary,
                 "error_message": result.error_message,
             }
@@ -62,7 +64,7 @@ class WorkflowRuntimeService:
                 "started_at": result.started_at,
                 "finished_at": result.finished_at,
                 "input_summary": result.input_summary,
-                "steps": result.steps,
+                "steps": self._to_step_summaries(result.steps),
                 "final_output_summary": result.final_output_summary,
                 "error_message": result.error_message,
             }
@@ -79,9 +81,28 @@ class WorkflowRuntimeService:
                 "started_at": artifact.started_at,
                 "finished_at": artifact.finished_at,
                 "input_summary": artifact.input_summary,
-                "steps": artifact.steps,
+                "steps": self._to_step_summaries(artifact.steps),
                 "final_output_summary": artifact.final_output_summary,
                 "final_output": artifact.final_output,
                 "error_message": artifact.error_message,
             }
         )
+
+    def _to_step_summaries(
+        self,
+        steps: tuple[WorkflowStepResult, ...],
+    ) -> list[WorkflowStepSummary]:
+        """把内部步骤结果转换为 API schema。"""
+        return [
+            WorkflowStepSummary(
+                node_name=step.node_name,
+                status=step.status,
+                started_at=step.started_at,
+                finished_at=step.finished_at,
+                message=step.message,
+                input_summary=step.input_summary,
+                output_summary=step.output_summary,
+                error_message=step.error_message,
+            )
+            for step in steps
+        ]
