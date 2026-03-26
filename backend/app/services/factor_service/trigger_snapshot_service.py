@@ -7,6 +7,7 @@ import logging
 
 from app.schemas.intraday import IntradaySnapshot, TriggerSnapshot
 from app.schemas.technical import TechnicalSnapshot
+from app.services.data_service.exceptions import DataServiceError
 from app.services.data_service.intraday_service import IntradayService
 from app.services.feature_service.technical_analysis_service import (
     TechnicalAnalysisService,
@@ -41,11 +42,18 @@ class TriggerSnapshotService:
         technical_snapshot = self._technical_analysis_service.get_technical_snapshot(
             symbol=symbol,
         )
-        intraday_snapshot = self._intraday_service.get_intraday_snapshot(
-            symbol=symbol,
-            frequency=frequency,
-            limit=limit,
-        )
+        try:
+            intraday_snapshot = self._intraday_service.get_intraday_snapshot(
+                symbol=symbol,
+                frequency=frequency,
+                limit=limit,
+            )
+        except DataServiceError:
+            logger.debug(
+                "trigger_snapshot.fallback_use symbol=%s reason=intraday_unavailable",
+                symbol,
+            )
+            return self.build_daily_fallback_trigger_snapshot(technical_snapshot)
         snapshot = self.build_trigger_snapshot(
             technical_snapshot=technical_snapshot,
             intraday_snapshot=intraday_snapshot,

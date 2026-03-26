@@ -11,6 +11,7 @@ from app.schemas.technical import (
     TechnicalSnapshot,
     VolumeMetricsSnapshot,
 )
+from app.services.data_service.exceptions import DataServiceError
 from app.services.factor_service.trigger_snapshot_service import TriggerSnapshotService
 
 
@@ -53,6 +54,11 @@ class StubIntradayService:
         )
 
 
+class BrokenIntradayService:
+    def get_intraday_snapshot(self, symbol: str, frequency: str = "1m", limit: int = 60):
+        raise DataServiceError("intraday unavailable")
+
+
 def test_trigger_snapshot_service_returns_near_breakout() -> None:
     service = TriggerSnapshotService(
         technical_analysis_service=StubTechnicalAnalysisService(),
@@ -66,3 +72,17 @@ def test_trigger_snapshot_service_returns_near_breakout() -> None:
     assert snapshot.daily_support_level == 100.0
     assert snapshot.daily_resistance_level == 102.0
     assert snapshot.latest_intraday_price == 101.3
+
+
+def test_trigger_snapshot_service_falls_back_when_intraday_unavailable() -> None:
+    service = TriggerSnapshotService(
+        technical_analysis_service=StubTechnicalAnalysisService(),
+        intraday_service=BrokenIntradayService(),
+    )
+
+    snapshot = service.get_trigger_snapshot("600519.SH", frequency="1m", limit=60)
+
+    assert snapshot.symbol == "600519.SH"
+    assert snapshot.as_of_datetime == datetime(2024, 1, 2, 15, 0, 0)
+    assert snapshot.latest_intraday_price == 101.0
+    assert "缺少盘中数据" in snapshot.trigger_note
