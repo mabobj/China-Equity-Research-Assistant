@@ -15,6 +15,13 @@ export type WorkflowStepStatus =
   | "completed"
   | "failed"
   | "skipped";
+export type DecisionBriefActionNow =
+  | "BUY_NOW"
+  | "WAIT_PULLBACK"
+  | "WAIT_BREAKOUT"
+  | "RESEARCH_ONLY"
+  | "AVOID";
+export type DecisionConvictionLevel = "low" | "medium" | "high";
 
 export type PriceRange = {
   low: number;
@@ -342,6 +349,53 @@ export type StrategyPlan = {
   sell_rule: string;
   review_timeframe: string;
   confidence: number;
+};
+
+export type DecisionBriefEvidence = {
+  title: string;
+  detail: string;
+  source_module:
+    | "stock_profile"
+    | "factor_snapshot"
+    | "review_report"
+    | "debate_review"
+    | "strategy_plan"
+    | "trigger_snapshot";
+};
+
+export type DecisionPriceLevel = {
+  label: string;
+  value_text: string;
+  note: string | null;
+};
+
+export type DecisionSourceModule = {
+  module_name:
+    | "stock_profile"
+    | "factor_snapshot"
+    | "review_report"
+    | "debate_review"
+    | "strategy_plan"
+    | "trigger_snapshot";
+  as_of: string | null;
+  note: string | null;
+};
+
+export type DecisionBrief = {
+  symbol: string;
+  name: string;
+  as_of_date: string;
+  headline_verdict: string;
+  action_now: DecisionBriefActionNow;
+  conviction_level: DecisionConvictionLevel;
+  why_it_made_the_list: string[];
+  why_not_all_in: string[];
+  key_evidence: DecisionBriefEvidence[];
+  key_risks: DecisionBriefEvidence[];
+  price_levels_to_watch: DecisionPriceLevel[];
+  what_to_do_next: string[];
+  next_review_window: string;
+  source_modules: DecisionSourceModule[];
 };
 
 export type DataRefreshStatus = {

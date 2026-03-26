@@ -397,3 +397,48 @@ data/workflow_runs/{run_id}.json
 - DAG 可视化编辑器
 - 自动复盘与持仓管理
 - 新的核心业务能力扩张
+## DecisionBrief 主输出层
+
+当前单票页新增了一个独立的输出整合层：
+
+```text
+backend/app/services/decision_brief_service/
+```
+
+这一层不负责新增分析能力，只负责把已有结果整理成统一的“结论 -> 依据 -> 动作”。
+
+它依赖的下层输入包括：
+
+- `FactorSnapshot`
+- `ReviewReport v2`
+- `DebateReviewReport`
+- `StrategyPlan`
+- `TriggerSnapshot`
+- `StockProfile`
+
+关系可以理解为：
+
+1. `factor / review / debate / strategy / trigger`
+   - 提供原始结构化依据
+2. `decision_brief_service`
+   - 把这些依据整合成更适合直接阅读和执行的主输出
+3. `frontend stock workspace`
+   - 先展示 `DecisionBrief`
+   - 再展示证据层
+   - 最后下沉到详细模块
+
+推荐顺序：
+
+1. 先看 `DecisionBrief`
+2. 再看证据层
+3. 最后看详细模块
+
+对应接口关系：
+
+- `GET /stocks/{symbol}/decision-brief`
+  - 主输出层
+- `GET /stocks/{symbol}/factor-snapshot`
+- `GET /stocks/{symbol}/review-report`
+- `GET /stocks/{symbol}/debate-review`
+- `GET /strategy/{symbol}`
+  - 下层依据接口，继续保留，不做删除

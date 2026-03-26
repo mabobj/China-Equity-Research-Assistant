@@ -2,6 +2,7 @@ import type {
   DataRefreshStatus,
   DbQueryResponse,
   DbTablesResponse,
+  DecisionBrief,
   DebateReviewProgress,
   DebateReviewReport,
   DeepReviewWorkflowRunRequest,
@@ -121,6 +122,21 @@ export async function getStockReviewReport(
   return fetchBackend<StockReviewReport>(
     `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/review-report`,
     { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function getDecisionBrief(
+  symbol: string,
+  params: DebateReviewParams = {},
+): Promise<DecisionBrief> {
+  return fetchBackend<DecisionBrief>(
+    buildPath(
+      `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/decision-brief`,
+      {
+        use_llm: params.useLlm,
+      },
+    ),
+    { timeoutMs: DEBATE_REVIEW_TIMEOUT_MS },
   );
 }
 

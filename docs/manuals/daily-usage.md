@@ -236,3 +236,33 @@ data/workflow_runs/{run_id}.json
 ```text
 logs/backend-debug.log
 ```
+
+## 9. DecisionBrief 的推荐用法
+
+`DecisionBrief` 是当前系统新的主输出层，适合当作单票分析和候选跟踪的第一阅读入口。
+
+推荐顺序：
+
+1. 先看 `DecisionBrief`
+   - 看一句话结论 `headline_verdict`
+   - 看当前动作 `action_now`
+   - 看 `what_to_do_next`
+   - 看 `next_review_window`
+2. 再看证据层
+   - `why_it_made_the_list`
+   - `why_not_all_in`
+   - `key_evidence`
+   - `key_risks`
+   - `price_levels_to_watch`
+3. 最后再看详细模块
+   - `factor snapshot`
+   - `review-report v2`
+   - `debate-review`
+   - `strategy plan`
+   - `trigger snapshot`
+
+这意味着：
+
+- 单票页先给出结论和动作，再下沉详细模块
+- 选股页先给出候选的一句话判断和动作建议，再进入单票页深看
+- `review / debate / strategy / factor` 仍然保留，但它们现在主要承担“依据层”角色

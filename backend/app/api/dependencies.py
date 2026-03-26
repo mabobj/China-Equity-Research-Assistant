@@ -15,6 +15,9 @@ from app.services.data_service.providers.cninfo_provider import CninfoProvider
 from app.services.data_service.providers.mootdx_provider import MootdxProvider
 
 if TYPE_CHECKING:
+    from app.services.decision_brief_service.decision_brief_service import (
+        DecisionBriefService,
+    )
     from app.services.data_service.db_inspector_service import DbInspectorService
     from app.services.data_service.intraday_service import IntradayService
     from app.services.data_service.refresh_service import DataRefreshService
@@ -183,6 +186,24 @@ def get_stock_review_service() -> "StockReviewService":
         factor_snapshot_service=get_factor_snapshot_service(),
         trigger_snapshot_service=get_trigger_snapshot_service(),
         strategy_planner=get_strategy_planner(),
+    )
+
+
+@lru_cache
+def get_decision_brief_service() -> "DecisionBriefService":
+    """构建统一决策简报 service。"""
+    from app.services.decision_brief_service.decision_brief_service import (
+        DecisionBriefService,
+    )
+
+    return DecisionBriefService(
+        market_data_service=get_market_data_service(),
+        technical_analysis_service=get_technical_analysis_service(),
+        factor_snapshot_service=get_factor_snapshot_service(),
+        stock_review_service=get_stock_review_service(),
+        debate_runtime_service=get_debate_runtime_service(),
+        strategy_planner=get_strategy_planner(),
+        trigger_snapshot_service=get_trigger_snapshot_service(),
     )
 
 

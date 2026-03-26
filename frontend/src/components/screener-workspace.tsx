@@ -13,6 +13,7 @@ import {
   formatAction,
   formatDate,
   formatDateTime,
+  formatDecisionBriefAction,
   formatListType,
   formatPrice,
   formatRange,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/format";
 import type {
   DataRefreshStatus,
+  DecisionBriefActionNow,
   DeepScreenerCandidate,
   DeepScreenerRunResponse,
   ScreenerCandidate,
@@ -490,6 +492,9 @@ function CandidateGroup({
 }
 
 function CandidateCard({ candidate }: { candidate: ScreenerCandidate }) {
+  const actionNow = getCandidateActionNow(candidate.v2_list_type);
+  const headlineVerdict = getCandidateHeadlineVerdict(candidate);
+
   return (
     <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -508,6 +513,9 @@ function CandidateCard({ candidate }: { candidate: ScreenerCandidate }) {
               兼容：{candidate.list_type}
             </span>
           </div>
+          <p className="mt-2 text-sm font-semibold leading-6 text-slate-900">
+            {headlineVerdict}
+          </p>
           <p className="mt-2 text-sm leading-6 text-slate-600">
             {candidate.short_reason}
           </p>
@@ -520,6 +528,7 @@ function CandidateCard({ candidate }: { candidate: ScreenerCandidate }) {
         </Link>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+        <Metric label="褰撳墠鍔ㄤ綔" value={formatDecisionBriefAction(actionNow)} />
         <Metric label="排名" value={`#${candidate.rank}`} />
         <Metric label="总分" value={formatScore(candidate.screener_score)} />
         <Metric label="alpha" value={formatScore(candidate.alpha_score)} />
@@ -548,6 +557,38 @@ function CandidateCard({ candidate }: { candidate: ScreenerCandidate }) {
       </div>
     </article>
   );
+}
+
+function getCandidateActionNow(listType: ScreenerListType): DecisionBriefActionNow {
+  if (listType === "READY_TO_BUY") {
+    return "BUY_NOW";
+  }
+  if (listType === "WATCH_PULLBACK") {
+    return "WAIT_PULLBACK";
+  }
+  if (listType === "WATCH_BREAKOUT") {
+    return "WAIT_BREAKOUT";
+  }
+  if (listType === "RESEARCH_ONLY") {
+    return "RESEARCH_ONLY";
+  }
+  return "AVOID";
+}
+
+function getCandidateHeadlineVerdict(candidate: ScreenerCandidate): string {
+  if (candidate.v2_list_type === "READY_TO_BUY") {
+    return `${candidate.name} 宸茶繘鍏ラ噸鐐硅瀵熺殑鎵ц绐楀彛锛屼絾浠嶈鎸夌邯寰嬫帶鍒朵粨浣嶃€?`;
+  }
+  if (candidate.v2_list_type === "WATCH_PULLBACK") {
+    return `${candidate.name} 鏂瑰悜涓嶅樊锛屼絾鏇撮€傚悎绛夊洖韪╃‘璁ゃ€?`;
+  }
+  if (candidate.v2_list_type === "WATCH_BREAKOUT") {
+    return `${candidate.name} 鍏堢瓑绐佺牬纭锛屽啀鍐冲畾鏄惁鍙備笌銆?`;
+  }
+  if (candidate.v2_list_type === "RESEARCH_ONLY") {
+    return `${candidate.name} 褰撳墠鏇撮€傚悎缁х画鐮旂┒锛屼笉鐢ㄦ€ョ潃涓嬪崟銆?`;
+  }
+  return `${candidate.name} 褰撳墠涓嶅湪鍚堥€備氦鏄撶獥鍙ｏ紝鍏堝洖閬裤€?`;
 }
 
 function DeepCandidateCard({

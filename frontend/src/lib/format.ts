@@ -1,4 +1,6 @@
 import type {
+  DecisionBriefActionNow,
+  DecisionConvictionLevel,
   PriceRange,
   ResearchAction,
   ScreenerListType,
@@ -27,6 +29,20 @@ const ACTION_LABELS: Record<ResearchAction, string> = {
   BUY: "买入",
   WATCH: "观察",
   AVOID: "回避",
+};
+
+const DECISION_BRIEF_ACTION_LABELS: Record<DecisionBriefActionNow, string> = {
+  BUY_NOW: "现在可执行",
+  WAIT_PULLBACK: "等待回踩",
+  WAIT_BREAKOUT: "等待突破",
+  RESEARCH_ONLY: "继续研究",
+  AVOID: "先回避",
+};
+
+const CONVICTION_LEVEL_LABELS: Record<DecisionConvictionLevel, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
 };
 
 const STEP_STATUS_LABELS: Record<WorkflowStepStatus, string> = {
@@ -106,6 +122,14 @@ export function formatLabel(value: string | null | undefined): string {
 
 export function formatAction(value: ResearchAction): string {
   return ACTION_LABELS[value];
+}
+
+export function formatDecisionBriefAction(value: DecisionBriefActionNow): string {
+  return DECISION_BRIEF_ACTION_LABELS[value];
+}
+
+export function formatConvictionLevel(value: DecisionConvictionLevel): string {
+  return CONVICTION_LEVEL_LABELS[value];
 }
 
 export function formatListType(value: ScreenerListType): string {

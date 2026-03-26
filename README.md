@@ -227,6 +227,33 @@ npm.cmd run type-check
 - 外部数据源统一走 provider
 - 免费 provider 必须允许失效与回退
 
+## 主输出层：DecisionBrief
+
+`DecisionBrief` 是当前单票研究页的主输出层，用来把现有模块重组为：
+
+- 结论：当前这只股票到底该怎么看
+- 依据：为什么值得关注，为什么还不能重仓
+- 动作：下一步应该做什么
+
+它不会替代既有模块，而是站在这些模块之上做统一提炼。当前主要依赖：
+
+- `factor snapshot`
+- `review-report v2`
+- `debate-review`
+- `strategy plan`
+- `trigger snapshot`
+- `stock profile`
+
+推荐使用顺序：
+
+1. 先看 `DecisionBrief`
+2. 再看看多证据与风险证据
+3. 最后下钻到 `factor / review / debate / strategy / trigger`
+
+对应接口：
+
+- `GET /stocks/{symbol}/decision-brief`
+
 ## 目录结构
 
 ```text

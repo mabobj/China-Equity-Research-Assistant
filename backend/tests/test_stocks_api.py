@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.api.dependencies import (
     get_debate_runtime_service,
+    get_decision_brief_service,
     get_factor_snapshot_service,
     get_market_data_service,
     get_stock_review_service,
@@ -22,6 +23,12 @@ from app.schemas.debate import (
     DebatePoint,
     DebateReviewReport,
     RiskReview,
+)
+from app.schemas.decision_brief import (
+    DecisionBrief,
+    DecisionBriefEvidence,
+    DecisionPriceLevel,
+    DecisionSourceModule,
 )
 from app.main import app
 from app.schemas.factor import (
@@ -396,6 +403,54 @@ class StubDebateOrchestrator:
         )
 
 
+class StubDecisionBriefService:
+    def get_decision_brief(
+        self,
+        symbol: str,
+        *,
+        use_llm: Optional[bool] = None,
+    ) -> DecisionBrief:
+        return DecisionBrief(
+            symbol="600519.SH",
+            name="Kweichow Moutai",
+            as_of_date=date(2024, 1, 2),
+            headline_verdict="Kweichow Moutai 鏇撮€傚悎鍏堢瓑鍥炶俯锛屼笉瑕佺洿鎺ヨ拷浠枫€?",
+            action_now="WAIT_PULLBACK",
+            conviction_level="medium",
+            why_it_made_the_list=["瓒嬪娍鍜屼簨浠剁淮搴︿粛鏈夋敮鎾戙€?"],
+            why_not_all_in=["褰撳墠浣嶇疆杩樺緱绛夊洖鎵嶆洿鑸掓湇銆?"],
+            key_evidence=[
+                DecisionBriefEvidence(
+                    title="瓒嬪娍鍗犱紭",
+                    detail="20鏃ユ敹鐩婄巼淇濇寔姝ｅ悜锛岀煭鏈熺浉瀵瑰己寮变粛鍦ㄦ敼鍠勩€?",
+                    source_module="factor_snapshot",
+                )
+            ],
+            key_risks=[
+                DecisionBriefEvidence(
+                    title="浣嶇疆绾︽潫",
+                    detail="褰撳墠鏇撮€傚悎绛夊洖鎵嶇‘璁わ紝涓嶅疁鐩存帴杩戒环銆?",
+                    source_module="review_report",
+                )
+            ],
+            price_levels_to_watch=[
+                DecisionPriceLevel(
+                    label="鐞嗘兂瑙傚療鍖洪棿",
+                    value_text="100.00 - 101.00",
+                )
+            ],
+            what_to_do_next=["鍏堢瓑鍥炶俯鍒?100.00 - 101.00 闄勮繎鍐嶅鏍搞€?"],
+            next_review_window="daily_close_review",
+            source_modules=[
+                DecisionSourceModule(
+                    module_name="debate_review",
+                    as_of="2024-01-02",
+                    note="runtime_mode=llm" if use_llm else "runtime_mode=rule_based",
+                )
+            ],
+        )
+
+
 def test_get_stock_profile_route_returns_structured_payload() -> None:
     """The stock profile endpoint should return the schema payload."""
     app.dependency_overrides[get_market_data_service] = lambda: StubMarketDataService()
@@ -404,6 +459,25 @@ def test_get_stock_profile_route_returns_structured_payload() -> None:
     assert response.status_code == 200
     assert response.json()["symbol"] == "600519.SH"
     assert response.json()["name"] == "Kweichow Moutai"
+
+    app.dependency_overrides.clear()
+
+
+def test_decision_brief_route_returns_structured_payload() -> None:
+    """The decision-brief route should expose unified brief payloads."""
+    app.dependency_overrides[get_decision_brief_service] = (
+        lambda: StubDecisionBriefService()
+    )
+
+    response = client.get("/stocks/600519/decision-brief?use_llm=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600519.SH"
+    assert payload["action_now"] == "WAIT_PULLBACK"
+    assert payload["conviction_level"] == "medium"
+    assert payload["key_evidence"][0]["source_module"] == "factor_snapshot"
+    assert payload["source_modules"][0]["note"] == "runtime_mode=llm"
 
     app.dependency_overrides.clear()
 
