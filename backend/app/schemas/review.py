@@ -34,6 +34,9 @@ class TechnicalView(BaseModel):
         "overstretched",
         "invalid",
     ]
+    latest_close: Optional[float] = None
+    support_level: Optional[float] = None
+    resistance_level: Optional[float] = None
     key_levels: list[str] = Field(default_factory=list)
     tactical_read: str
     invalidation_hint: str

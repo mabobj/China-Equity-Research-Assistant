@@ -5,7 +5,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies import (
-    get_debate_orchestrator,
+    get_debate_runtime_service,
     get_factor_snapshot_service,
     get_market_data_service,
     get_stock_review_service,
@@ -180,7 +180,8 @@ def get_stock_review_report(
 @router.get("/{symbol}/debate-review", response_model=DebateReviewReport)
 def get_debate_review_report(
     symbol: str,
-    service: Any = Depends(get_debate_orchestrator),
+    use_llm: Optional[bool] = Query(default=None),
+    service: Any = Depends(get_debate_runtime_service),
 ) -> DebateReviewReport:
     """返回角色化裁决骨架版单票报告。"""
-    return service.get_debate_review_report(symbol)
+    return service.get_debate_review_report(symbol, use_llm=use_llm)

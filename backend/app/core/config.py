@@ -78,12 +78,19 @@ class Settings:
     api_prefix: str
     host: str
     port: int
+    log_level: str
+    log_dir: Path
+    log_file_name: str
     sqlite_url: str
     duckdb_path: Path
     cache_dir: Path
     data_dir: Path
     openai_api_key: Optional[str]
     openai_model: str
+    openai_base_url: Optional[str]
+    llm_provider: str
+    enable_llm_debate: bool
+    llm_debate_timeout_seconds: int
     enable_akshare: bool
     enable_baostock: bool
     enable_cninfo: bool
@@ -115,12 +122,22 @@ def get_settings() -> Settings:
         api_prefix=os.getenv("API_PREFIX", ""),
         host=os.getenv("APP_HOST", "127.0.0.1"),
         port=_read_int_env("APP_PORT", default=8000),
+        log_level=os.getenv("LOG_LEVEL", "INFO"),
+        log_dir=_read_path_env("LOG_DIR", "logs"),
+        log_file_name=os.getenv("LOG_FILE_NAME", "backend-debug.log"),
         sqlite_url=os.getenv("SQLITE_URL", "sqlite:///./app.db"),
         duckdb_path=_read_path_env("DUCKDB_PATH", "data/market.duckdb"),
         cache_dir=_read_path_env("CACHE_DIR", "cache"),
         data_dir=_read_path_env("DATA_DIR", "data"),
         openai_api_key=_read_optional_env("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4"),
+        openai_base_url=_read_optional_env("OPENAI_BASE_URL"),
+        llm_provider=os.getenv("LLM_PROVIDER", "auto"),
+        enable_llm_debate=_read_bool_env("ENABLE_LLM_DEBATE", default=False),
+        llm_debate_timeout_seconds=_read_int_env(
+            "LLM_DEBATE_TIMEOUT_SECONDS",
+            default=20,
+        ),
         enable_akshare=_read_bool_env("ENABLE_AKSHARE", default=True),
         enable_baostock=_read_bool_env("ENABLE_BAOSTOCK", default=True),
         enable_cninfo=_read_bool_env("ENABLE_CNINFO", default=True),

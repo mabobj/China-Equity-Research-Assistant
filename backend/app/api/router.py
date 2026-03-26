@@ -12,6 +12,7 @@ from app.api.routes import (
     stocks,
     strategy,
     trades,
+    workflows,
 )
 
 api_router = APIRouter()
@@ -24,3 +25,4 @@ api_router.include_router(strategy.router)
 api_router.include_router(screener.router)
 api_router.include_router(trades.router)
 api_router.include_router(reviews.router)
+api_router.include_router(workflows.router)

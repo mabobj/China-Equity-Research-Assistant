@@ -102,6 +102,7 @@ class DebateReviewReport(BaseModel):
     final_action: Literal["BUY", "WATCH", "AVOID"]
     strategy_summary: StrategySummary
     confidence: int = Field(ge=0, le=100)
+    runtime_mode: Literal["rule_based", "llm"] = "rule_based"
 
 
 class SingleStockResearchInputs(BaseModel):

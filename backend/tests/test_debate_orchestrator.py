@@ -159,3 +159,28 @@ def test_debate_orchestrator_builds_structured_report() -> None:
     assert report.bull_case.reasons
     assert report.bear_case.reasons
     assert report.chief_judgement.final_action == report.final_action
+
+
+class FailingTriggerSnapshotService:
+    def get_trigger_snapshot(
+        self,
+        symbol: str,
+        frequency: str = "1m",
+        limit: int = 60,
+    ) -> TriggerSnapshot:
+        raise AssertionError("debate orchestrator 不应在已有 review_report 后重复请求盘中触发快照")
+
+
+def test_debate_orchestrator_reuses_review_report_without_intraday_dependency() -> None:
+    orchestrator = DebateOrchestrator(
+        stock_review_service=StubStockReviewService(),
+        factor_snapshot_service=StubFactorSnapshotService(),
+        strategy_planner=StubStrategyPlanner(),
+        trigger_snapshot_service=FailingTriggerSnapshotService(),
+    )
+
+    report = orchestrator.get_debate_review_report("600519.SH")
+
+    assert report.symbol == "600519.SH"
+    assert report.runtime_mode == "rule_based"
+    assert report.analyst_views.technical.key_levels

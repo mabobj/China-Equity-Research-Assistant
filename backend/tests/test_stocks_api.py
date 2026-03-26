@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import (
-    get_debate_orchestrator,
+    get_debate_runtime_service,
     get_factor_snapshot_service,
     get_market_data_service,
     get_stock_review_service,
@@ -296,7 +296,11 @@ class StubStockReviewService:
 
 
 class StubDebateOrchestrator:
-    def get_debate_review_report(self, symbol: str) -> DebateReviewReport:
+    def get_debate_review_report(
+        self,
+        symbol: str,
+        use_llm: Optional[bool] = None,
+    ) -> DebateReviewReport:
         return DebateReviewReport(
             symbol="600519.SH",
             name="Kweichow Moutai",
@@ -367,6 +371,7 @@ class StubDebateOrchestrator:
                 concise_summary="策略层仍以观察为主。",
             ),
             confidence=67,
+            runtime_mode="llm" if use_llm else "rule_based",
         )
 
 
@@ -480,7 +485,7 @@ def test_review_report_route_returns_structured_payload() -> None:
 
 def test_debate_review_route_returns_structured_payload() -> None:
     """The debate-review route should expose debate-role payloads."""
-    app.dependency_overrides[get_debate_orchestrator] = (
+    app.dependency_overrides[get_debate_runtime_service] = (
         lambda: StubDebateOrchestrator()
     )
 
@@ -492,5 +497,10 @@ def test_debate_review_route_returns_structured_payload() -> None:
     assert payload["analyst_views"]["technical"]["role"] == "technical_analyst"
     assert payload["chief_judgement"]["final_action"] == "WATCH"
     assert payload["risk_review"]["risk_level"] == "medium"
+    assert payload["runtime_mode"] == "rule_based"
+
+    response = client.get("/stocks/600519/debate-review?use_llm=true")
+    payload = response.json()
+    assert payload["runtime_mode"] == "llm"
 
     app.dependency_overrides.clear()

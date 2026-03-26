@@ -8,6 +8,7 @@ numpy
 duckdb
 pyarrow
 httpx
+openai
 akshare
 baostock
 mootdx

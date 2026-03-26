@@ -104,3 +104,20 @@ function Get-NpmCommand {
 
     throw "npm executable not found. Please install Node.js and npm."
 }
+
+function Test-PythonModule {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$PythonInvocation,
+        [Parameter(Mandatory = $true)]
+        [string]$ModuleName
+    )
+
+    try {
+        & $PythonInvocation.Command @($PythonInvocation.Arguments) -c "import $ModuleName" *> $null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        return $false
+    }
+}

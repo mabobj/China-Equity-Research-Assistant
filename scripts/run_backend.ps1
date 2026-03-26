@@ -13,6 +13,12 @@ if (-not $env:APP_PORT) {
 $python = Get-PythonInvocation
 $backendRoot = Join-Path (Get-RepoRoot) "backend"
 
+if ($env:ENABLE_LLM_DEBATE -eq "true") {
+    if (-not (Test-PythonModule -PythonInvocation $python -ModuleName "openai")) {
+        throw "ENABLE_LLM_DEBATE=true，但当前 Python 环境未安装 openai 包。请执行：$($python.Command) -m pip install -r backend\\requirements.txt"
+    }
+}
+
 Push-Location $backendRoot
 try {
     & $python.Command @($python.Arguments) -m uvicorn app.main:app --reload --host $env:APP_HOST --port $env:APP_PORT

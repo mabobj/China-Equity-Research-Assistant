@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timedelta
+import logging
 from typing import Iterator, Optional, Sequence
 
 from app.db.market_data_store import (
@@ -46,6 +47,8 @@ from app.services.data_service.providers.base import (
     UNIVERSE_CAPABILITY,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class MarketDataService:
     """统一封装 A 股数据访问、本地落盘与 provider 选择。"""
@@ -63,15 +66,30 @@ class MarketDataService:
 
     def get_stock_profile(self, symbol: str) -> StockProfile:
         canonical_symbol = normalize_symbol(symbol)
+        logger.debug(
+            "market_data.profile.start symbol=%s canonical_symbol=%s",
+            symbol,
+            canonical_symbol,
+        )
 
         if self._local_store is not None:
             cached_profile = self._local_store.get_stock_profile(canonical_symbol)
             if cached_profile is not None:
+                logger.debug(
+                    "market_data.profile.cache_hit symbol=%s source=%s",
+                    canonical_symbol,
+                    cached_profile.source,
+                )
                 return cached_profile
 
         profile = self._load_stock_profile_from_providers(canonical_symbol)
         if self._local_store is not None:
             self._local_store.upsert_stock_profile(profile)
+        logger.debug(
+            "market_data.profile.done symbol=%s source=%s",
+            canonical_symbol,
+            profile.source,
+        )
         return profile
 
     def get_daily_bars(
@@ -81,6 +99,13 @@ class MarketDataService:
         end_date: Optional[str] = None,
     ) -> DailyBarResponse:
         canonical_symbol = normalize_symbol(symbol)
+        logger.debug(
+            "market_data.daily_bars.start symbol=%s canonical_symbol=%s start_date=%s end_date=%s",
+            symbol,
+            canonical_symbol,
+            start_date,
+            end_date,
+        )
         normalized_start_date = _parse_optional_date(start_date, "start_date")
         normalized_end_date = _parse_optional_date(end_date, "end_date")
 
@@ -96,6 +121,11 @@ class MarketDataService:
                 canonical_symbol,
                 normalized_start_date,
                 normalized_end_date,
+            )
+            logger.debug(
+                "market_data.daily_bars.done symbol=%s count=%s source_mode=provider_only",
+                canonical_symbol,
+                len(bars),
             )
             return _build_daily_bar_response(
                 canonical_symbol,
@@ -120,6 +150,13 @@ class MarketDataService:
                 normalized_end_date,
             )
         ):
+            logger.debug(
+                "market_data.daily_bars.cache_hit symbol=%s start_date=%s end_date=%s count=%s",
+                canonical_symbol,
+                normalized_start_date,
+                normalized_end_date,
+                len(cached_bars),
+            )
             return _build_daily_bar_response(
                 canonical_symbol,
                 normalized_start_date,
@@ -135,6 +172,10 @@ class MarketDataService:
             sync_start_date = latest_local_trade_date + timedelta(days=1)
             sync_end_date = normalized_end_date or date.today()
             if sync_start_date > sync_end_date:
+                logger.debug(
+                    "market_data.daily_bars.skip_remote symbol=%s reason=already_up_to_date",
+                    canonical_symbol,
+                )
                 return _build_daily_bar_response(
                     canonical_symbol,
                     normalized_start_date,
@@ -150,6 +191,11 @@ class MarketDataService:
             )
         except ProviderError:
             if cached_bars and normalized_start_date is None and normalized_end_date is None:
+                logger.debug(
+                    "market_data.daily_bars.remote_failed_use_cache symbol=%s cached_count=%s",
+                    canonical_symbol,
+                    len(cached_bars),
+                )
                 return _build_daily_bar_response(
                     canonical_symbol,
                     normalized_start_date,
@@ -173,6 +219,11 @@ class MarketDataService:
             normalized_end_date,
         )
         if merged_bars:
+            logger.debug(
+                "market_data.daily_bars.done symbol=%s count=%s source_mode=local_plus_provider",
+                canonical_symbol,
+                len(merged_bars),
+            )
             return _build_daily_bar_response(
                 canonical_symbol,
                 normalized_start_date,
@@ -180,6 +231,11 @@ class MarketDataService:
                 merged_bars,
             )
         if cached_bars:
+            logger.debug(
+                "market_data.daily_bars.done symbol=%s count=%s source_mode=cache_fallback",
+                canonical_symbol,
+                len(cached_bars),
+            )
             return _build_daily_bar_response(
                 canonical_symbol,
                 normalized_start_date,
@@ -200,6 +256,15 @@ class MarketDataService:
         limit: Optional[int] = None,
     ) -> IntradayBarResponse:
         canonical_symbol = normalize_symbol(symbol)
+        logger.debug(
+            "market_data.intraday_bars.start symbol=%s canonical_symbol=%s frequency=%s start_datetime=%s end_datetime=%s limit=%s",
+            symbol,
+            canonical_symbol,
+            frequency,
+            start_datetime,
+            end_datetime,
+            limit,
+        )
         normalized_frequency = _normalize_intraday_frequency(frequency)
         normalized_start_datetime = _parse_optional_datetime(
             start_datetime,
@@ -232,6 +297,12 @@ class MarketDataService:
                     symbol=canonical_symbol,
                 ),
             )
+        logger.debug(
+            "market_data.intraday_bars.done symbol=%s frequency=%s count=%s",
+            canonical_symbol,
+            normalized_frequency,
+            len(bars),
+        )
         return IntradayBarResponse(
             symbol=canonical_symbol,
             frequency=normalized_frequency,
@@ -291,6 +362,14 @@ class MarketDataService:
             raise InvalidRequestError("limit must be greater than 0.")
 
         canonical_symbol = normalize_symbol(symbol)
+        logger.debug(
+            "market_data.announcements.start symbol=%s canonical_symbol=%s start_date=%s end_date=%s limit=%s",
+            symbol,
+            canonical_symbol,
+            start_date,
+            end_date,
+            limit,
+        )
         normalized_start_date, normalized_end_date = _resolve_announcement_date_range(
             start_date=start_date,
             end_date=end_date,
@@ -309,6 +388,11 @@ class MarketDataService:
                 limit=limit,
             )
             if cached_items:
+                logger.debug(
+                    "market_data.announcements.cache_hit symbol=%s count=%s",
+                    canonical_symbol,
+                    len(cached_items),
+                )
                 return AnnouncementListResponse(
                     symbol=canonical_symbol,
                     count=len(cached_items),
@@ -337,6 +421,11 @@ class MarketDataService:
                 limit=limit,
             )
             if merged_items:
+                logger.debug(
+                    "market_data.announcements.done symbol=%s count=%s source_mode=local_plus_provider",
+                    canonical_symbol,
+                    len(merged_items),
+                )
                 return AnnouncementListResponse(
                     symbol=canonical_symbol,
                     count=len(merged_items),
@@ -344,6 +433,11 @@ class MarketDataService:
                 )
 
         if items:
+            logger.debug(
+                "market_data.announcements.done symbol=%s count=%s source_mode=provider_only",
+                canonical_symbol,
+                len(items),
+            )
             return AnnouncementListResponse(
                 symbol=canonical_symbol,
                 count=len(items),
@@ -358,17 +452,32 @@ class MarketDataService:
 
     def get_stock_financial_summary(self, symbol: str) -> FinancialSummary:
         canonical_symbol = normalize_symbol(symbol)
+        logger.debug(
+            "market_data.financial_summary.start symbol=%s canonical_symbol=%s",
+            symbol,
+            canonical_symbol,
+        )
 
         if self._local_store is not None:
             cached_summary = self._local_store.get_stock_financial_summary(
                 canonical_symbol,
             )
             if cached_summary is not None:
+                logger.debug(
+                    "market_data.financial_summary.cache_hit symbol=%s source=%s",
+                    canonical_symbol,
+                    cached_summary.source,
+                )
                 return cached_summary
 
         summary = self._load_stock_financial_summary_from_providers(canonical_symbol)
         if self._local_store is not None:
             self._local_store.upsert_stock_financial_summary(summary)
+        logger.debug(
+            "market_data.financial_summary.done symbol=%s source=%s",
+            canonical_symbol,
+            summary.source,
+        )
         return summary
 
     def refresh_stock_profile(self, symbol: str) -> StockProfile:
@@ -545,6 +654,13 @@ class MarketDataService:
         provider_errors: list[str] = []
 
         for provider in providers:
+            logger.debug(
+                "market_data.daily_bars.provider_try symbol=%s provider=%s start_date=%s end_date=%s",
+                symbol,
+                provider.name,
+                start_date,
+                end_date,
+            )
             try:
                 bars = provider.get_daily_bars(
                     symbol,
@@ -552,6 +668,12 @@ class MarketDataService:
                     end_date=end_date,
                 )
             except ProviderError as exc:
+                logger.debug(
+                    "market_data.daily_bars.provider_fail symbol=%s provider=%s error=%s",
+                    symbol,
+                    provider.name,
+                    exc,
+                )
                 last_error = exc
                 provider_errors.append("{provider}: {message}".format(provider=provider.name, message=str(exc)))
                 continue
@@ -568,7 +690,18 @@ class MarketDataService:
                 )
                 continue
             if bars:
+                logger.debug(
+                    "market_data.daily_bars.provider_success symbol=%s provider=%s count=%s",
+                    symbol,
+                    provider.name,
+                    len(bars),
+                )
                 return bars
+            logger.debug(
+                "market_data.daily_bars.provider_empty symbol=%s provider=%s",
+                symbol,
+                provider.name,
+            )
             provider_errors.append(
                 "{provider}: empty result".format(provider=provider.name),
             )
@@ -797,11 +930,17 @@ class MarketDataService:
     def _iter_available_providers(self, capability: str) -> list[object]:
         providers = self._provider_registry.get_providers(capability, available_only=True)
         if not providers:
+            logger.debug("market_data.providers.none capability=%s", capability)
             raise ProviderError(
                 "No enabled market data providers are available for capability '{capability}'.".format(
                     capability=capability,
                 ),
             )
+        logger.debug(
+            "market_data.providers.selected capability=%s providers=%s",
+            capability,
+            [provider.name for provider in providers],
+        )
         return providers
 
 

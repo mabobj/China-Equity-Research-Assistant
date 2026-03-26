@@ -2,543 +2,464 @@
 
 ## 文档目标
 
-本文件描述当前版本 A-Share Research Assistant 的核心分层，以及本轮“架构收敛 + mootdx 接入验证”后的结构变化。
-
-这份文档重点回答 4 个问题：
-- 数据层现在如何分层
-- provider 如何按 capability 管理
-- factor_service 预埋到了哪里
-- workflow 节点化未来将如何承接流程
+本文档说明当前版本的核心分层，以及本轮新增的 LLM provider 适配层、角色提示词配置层和受控裁决运行时。
 
 ## 系统定位
 
-本系统面向中国大陆 A 股市场，当前阶段聚焦：
-- 全市场选股
-- 单票研究
-- 结构化交易策略
-- 交易记录与复盘预留
+本系统服务于中国大陆 A 股市场的单用户研究场景，目标是稳定输出：
 
-当前不包含：
-- 自动实盘交易
-- 券商下单集成
-- 高频交易
-- 复杂多 agent 运行时
+- 结构化研究报告
+- 结构化交易策略
+- 结构化选股结果
+- 可追踪、可回退的 LLM 裁决结果
+
+当前不包含自动实盘交易与开放式 agent 平台。
 
 ## 总体分层
 
 ```text
-外部数据源 / 本地数据目录
-  -> Provider 层
-  -> MarketDataService / FactorService / FeatureService
-  -> Research / Strategy / Screener
-  -> API 层
-  -> 前端页面
+API 层
+  -> Service 层
+    -> Provider 层
+      -> 本地存储 / 外部数据源
 ```
 
-主要职责：
-- Provider 层：屏蔽外部数据源差异，只负责取数与原始字段映射
-- Service 层：做标准化、缓存、本地落盘、评分、研究整合
-- Schema 层：提供结构化输入输出
-- API 层：只做参数接收和响应返回
+同时保留独立的：
 
-## 数据层重构
+- `Schema` 层：统一输入输出结构
+- `DB` 层：SQLite / DuckDB / Parquet
+- `LLM Debate` 层：固定角色、固定轮次、固定 schema 的受控运行时
 
-### 1. 旧问题
+## 核心目录
 
-旧版 `MarketDataProvider` 是一个过大的协议，默认要求 provider 同时具备：
-- profile
-- daily bars
-- universe
-- announcements
-- financial summary
+```text
+backend/app/api/
+backend/app/core/
+backend/app/db/
+backend/app/schemas/
+backend/app/services/
+```
 
-这会导致两个问题：
-- 新 provider 接入成本高
-- provider 经常出现空实现或无意义兜底
+## 数据层
 
-### 2. 新结构
+### Provider 层
 
-本轮把数据层收敛为 capability-based provider 设计。
+所有外部数据源必须位于：
 
-当前 capability：
-- `profile`
-- `daily_bars`
-- `universe`
-- `announcements`
-- `financial_summary`
-- `intraday_bars`
-- `timeline`
+```text
+backend/app/services/data_service/providers/
+```
 
-关键文件：
-- `backend/app/services/data_service/providers/base.py`
-- `backend/app/services/data_service/provider_registry.py`
-- `backend/app/services/data_service/market_data_service.py`
+当前 provider 负责：
 
-### 3. ProviderRegistry
+- 抓取或读取原始数据
+- 做最小必要的字段标准化
+- 允许失败、空结果和 graceful fallback
 
-`ProviderRegistry` 的职责：
-- 注册 provider
-- 输出 capability report
-- 输出 health report
-- 按 capability 选择 provider
-- 只把可用 provider 暴露给 `MarketDataService`
+业务层不直接访问第三方网页或接口。
 
-这意味着：
-- provider 不再需要一次性实现所有能力
-- `MarketDataService` 可以继续保持统一入口
-- 现有 API 不需要因为内部重构而整体改写
+### MarketDataService
 
-### 4. MarketDataService 的定位
+`MarketDataService` 是统一的数据访问门面，负责：
 
-`MarketDataService` 仍然是上层统一访问入口，但内部实现已经改为：
-- 先标准化 symbol
-- 再按 capability 从 registry 选择 provider
-- 再做本地缓存 / DuckDB 存储 / 范围覆盖逻辑
+- symbol 标准化
+- 根据 capability 选择 provider
+- 本地缓存与本地落盘
+- 对上层暴露稳定接口
 
-这样它继续承担“统一访问门面”，但不再直接依赖“大而全 provider 协议”。
+## 研究与策略层
 
-## 当前 Provider 分工
+### review_service
 
-### AKShare
+`review_service` 负责多维结构化研究输出，核心包括：
 
-当前 capability：
-- `profile`
-- `daily_bars`
-- `universe`
-- `financial_summary`
+- `factor_profile`
+- `technical_view`
+- `fundamental_view`
+- `event_view`
+- `sentiment_view`
+- `bull_case`
+- `bear_case`
+- `final_judgement`
 
-适用场景：
-- 基础行情
-- 股票池
-- 财务摘要
+### debate_service
 
-### BaoStock
+`debate_service` 是规则版角色化裁决层。它不依赖 LLM，而是把角色边界和节点顺序固定下来，作为受控运行时的稳定基线。
 
-当前 capability：
-- `profile`
-- `daily_bars`
-- `universe`
+固定角色包括：
 
-适用场景：
-- 行情补充
-- 会话型批量请求
+- `technical_analyst`
+- `fundamental_analyst`
+- `event_analyst`
+- `sentiment_analyst`
+- `bull_researcher`
+- `bear_researcher`
+- `chief_analyst`
+- `risk_reviewer`
 
-### CNINFO
+## LLM Debate 架构
 
-当前 capability：
-- `announcements`
+### 设计目标
 
-适用场景：
-- 公告列表
+LLM debate 不是开放式多 agent 系统，而是：
 
-### mootdx
+- 固定角色
+- 固定轮次
+- 固定输出 schema
+- 可回退到规则版
 
-当前 capability：
-- `daily_bars`
-- `intraday_bars`
-- `timeline`
+这样可以保证研究结果可解释、可验证、可维护。
 
-定位：
-- 作为本地通达信目录行情 provider
-- 为未来分钟级分析和 workflow 提供本地数据输入
+### 模块拆分
 
-当前明确不支持：
-- 财务
-- 公告
-- 股票池
-- 在线 quotes 默认通道
-- 默认复权
-- 北交所专门支持
-- 扩展市场 / 商品 / 期货
+当前目录：
 
-当前限制：
-- 当前只保证沪深 SH / SZ 本地标准市场路径。
-- `intraday_bars` 当前只支持 `1m` / `5m`。
-- `timeline` 当前基于本地 `fzline/lc5` 数据提取最新交易日预览，不是完整盘中分析引擎。
-- 若本地目录存在但对应数据文件缺失，会返回清晰业务错误。
+```text
+backend/app/services/llm_debate_service/
+  base.py
+  llm_role_runner.py
+  llm_debate_orchestrator.py
+  fallback.py
+  providers/
+  prompts/
+```
 
-## mootdx 接入策略
+职责划分如下。
 
-### 1. 启用方式
+### 1. `llm_role_runner.py`
 
-通过环境变量控制：
-- `ENABLE_MOOTDX`
-- `MOOTDX_TDX_DIR`
+职责：
 
-### 2. 当前验证方式
+- 执行单个角色
+- 统一发起 `chat.completions`
+- 解析 JSON
+- 做 schema 校验
+- 对常见输出漂移做轻量纠偏
 
-独立验证脚本：
-- `backend/app/scripts/validate_mootdx_provider.py`
-- `backend/app/scripts/run_mootdx_validation_matrix.py`
+纠偏范围只限结构层，不替代业务规则，例如：
 
-脚本职责：
-- 输出 capability report
-- 输出 health report
-- 验证日线读取
-- 验证分钟线读取
-- 尝试分时线读取
-- 失败时打印清晰错误原因
+- `list[str] -> list[{title, detail}]`
+- 缺失 `action_bias` 时推断默认值
+- 缺失 `chief_judgement.summary` 时自动补齐
 
-批量验证矩阵补充：
-- 支持多 symbol、多频率批量验证
-- 可选与 `akshare` / `baostock` 做最近 20 个交易日日线对比
-- 输出结构化 JSON / CSV，便于实测验收与问题排查
+### 2. `providers/`
 
-### 3. 设计原则
+这是本轮新增的 provider 适配层，用来隔离不同 OpenAI 兼容网关的能力差异。
 
-`mootdx` 目前只作为可选 provider，不直接改变公开 API 行为，也不强制接管所有日线请求。
+当前包含：
 
-## factor_service 预埋结构
+- `openai_compatible_provider.py`
+- `volcengine_ark_provider.py`
+- `registry.py`
 
-本轮不实现完整多因子引擎，但显式建立了 `factor_service`。
+适配层负责：
 
-目录：
-- `backend/app/services/factor_service/base.py`
-- `backend/app/services/factor_service/snapshot.py`
-- `backend/app/services/factor_service/registry.py`
-- `backend/app/services/factor_service/preprocess.py`
-- `backend/app/services/factor_service/composite.py`
+- 创建底层客户端
+- 决定支持哪些 `response_format` 策略
 
-当前能力：
-- 从 `TechnicalSnapshot` 生成 `FactorSnapshot`
-- 生成 `AlphaScore`
-- 生成 `TriggerScore`
-- 基于 `TechnicalSnapshot + IntradaySnapshot` 生成 `TriggerSnapshot`
-- 让 screener 开始依赖 factor snapshot / trigger 结构
+例如：
 
-当前边界：
-- 不是完整横截面多因子系统
-- 不是行业中性化框架
-- 不是回测引擎
-- 只是为下一阶段扩展预留稳定接口
+- 标准 OpenAI 兼容网关：
+  - `json_schema`
+  - `json_object`
+  - `prompt_only_json`
+- 火山方舟 coding/plan：
+  - 直接走 `prompt_only_json`
 
-## 盘中能力层
+这样后续接入新的 LLM 时，只需要新增 provider 模块，不需要改 `llm_role_runner` 的核心逻辑。
 
-当前新增的最小盘中结构分为两层：
-- `backend/app/services/data_service/intraday_service.py`
-- `backend/app/services/factor_service/trigger_snapshot_service.py`
+### 3. `prompts/`
 
-职责划分：
-- `IntradayService`：基于分钟线构建 `IntradaySnapshot`
-- `TriggerSnapshotService`：组合日线 `TechnicalSnapshot` 与 `IntradaySnapshot`，输出轻量 `TriggerSnapshot`
+角色提示词已统一改为独立配置文件：
 
-当前公开接口保持克制：
-- `GET /stocks/{symbol}/intraday-bars`
-- `GET /stocks/{symbol}/trigger-snapshot`
+```text
+TECHNICAL_ANALYST_AGENT.md
+FUNDAMENTAL_ANALYST_AGENT.md
+EVENT_ANALYST_AGENT.md
+SENTIMENT_ANALYST_AGENT.md
+BULL_RESEARCHER_AGENT.md
+BEAR_RESEARCHER_AGENT.md
+CHIEF_ANALYST_AGENT.md
+RISK_REVIEWER_AGENT.md
+```
 
-说明：
-- `intraday-bars` 负责结构化分钟线返回
-- `trigger-snapshot` 负责给出接近日线支撑、接近突破、拉伸过度等轻量触发判断
-- 盘中层当前不实现复杂盘中策略、自动交易或图表分析
+这些文件承担两层职责：
 
-## Screener 架构收敛
+- 角色说明文件
+- 提示词配置入口
 
-### 当前状态
+因此后续修改角色边界时，应先改这里，而不是把提示词散落在 Python 代码中。
 
-当前 screener 仍保留原有行为兼容，但内部已经开始向两层收敛：
-- `factor snapshot`
-- `technical trigger`
+### 4. `fallback.py`
 
-当前 pipeline 结构：
-- universe 过滤
-- 日线数据过滤
-- technical snapshot
-- factor snapshot
-- screener scoring
+`fallback.py` 统一管理运行时选择：
 
-这样后续再加入：
-- 横截面 alpha 排序
-- 行业内标准化
-- trigger engine
+- `rule_based`
+- `llm`
 
-就不需要把所有逻辑继续堆进 `pipeline.py`。
+回退条件包括：
 
-## Workflow 预埋结构
+- LLM 未启用
+- API key 缺失
+- 网关调用失败
+- 输出未通过 schema 校验
+- 请求超时
 
-本轮没有引入 LangGraph 或复杂运行时框架，但已经显式定义 workflow 节点 schema。
+回退后仍然返回同一份结构化 `DebateReviewReport`，只是在 `runtime_mode` 中标记为 `rule_based`。
 
-当前节点类型：
-- `MarketDataSync`
-- `FactorSnapshotBuild`
-- `ScreenerRun`
-- `CandidateDeepReview`
-- `SingleStockResearch`
-- `SingleStockStrategy`
+## 火山方舟适配策略
 
-关键文件：
-- `backend/app/schemas/workflow.py`
-- `backend/app/services/workflow_service/orchestrator.py`
+### 当前问题
 
-当前定位：
-- 先把 workflow 节点和结果结构显式化
-- 为未来“从中间节点启动流程”做准备
-- 暂时只提供轻量 orchestration 占位
+火山方舟 coding/plan 套餐不支持：
+
+- `response_format.type=json_schema`
+- `response_format.type=json_object`
+
+如果继续按通用模式依次尝试，会在每个角色上先打两次无意义的 `400`。
+
+### 当前实现
+
+通过 `providers/volcengine_ark_provider.py` 把这部分差异单独封装：
+
+- 自动识别方舟 `base_url`
+- 直接走 `prompt_only_json`
+- 对方舟把实际超时下限提升到 `60s`
+- 关闭 SDK 自动重试，避免同一角色被重复超时
+- 由运行器继续做 JSON 解析和 schema 校验
+
+### 后续扩展
+
+若要新增其他 LLM 网关，推荐步骤：
+
+1. 在 `providers/` 下新增一个适配模块
+2. 实现 `create_client()` 与 `build_attempts()`
+3. 在 `registry.py` 中注册识别逻辑
+4. 不修改业务层和编排层 schema
+
+## 接口与 Schema
+
+核心输出统一放在：
+
+```text
+backend/app/schemas/
+```
+
+重点包括：
+
+- `review.py`
+- `debate.py`
+
+约束原则：
+
+- 关键研究结果必须结构化
+- 关键策略结果必须结构化
+- LLM 输出必须经过 Pydantic 校验
+
+## 测试策略
+
+本项目优先保证以下模块可单测：
+
+- 指标计算
+- 趋势评分
+- 支撑压力识别
+- 选股规则
+- 策略输出校验
+- API 健康检查
+- LLM 角色执行器与 provider 适配层
+
+其中 LLM 相关测试采用 stub client，不依赖外网。
 
 ## 当前边界
 
-本轮没有做：
-- 自动复盘
-- 持仓管理
-- 多 agent 运行时
-- LLM 集成
-- 新前端页面
-- 新图表
-- 新通知
-- 完整多因子回测
+当前架构仍然坚持以下原则：
 
-## 设计原则
+- 不把确定性计算交给 LLM
+- 不在路由层写复杂逻辑
+- 不把未来实盘能力混入当前研究核心
+- 不为了“像 agent”而牺牲可维护性
 
-当前阶段的优先顺序仍然是：
-1. 数据结构清晰
-2. provider 职责明确
-3. 输出结构化
-4. 可测试
-5. 可扩展
+成功标准不是“更像聊天机器人”，而是：
 
-不是：
-- 一次性堆很多新功能
-- 为了“智能感”牺牲可维护性
-- 让数据层继续膨胀成所有逻辑的汇集点
+- 数据接入稳定
+- 研究结果可信
+- 策略边界清晰
+- 回退路径明确
+- 后续扩展新 provider 成本低
 
-## 选股 v2 因子框架
+## Workflow Runtime v1
 
-本轮开始把 `factor_service` 从“预埋占位”升级为“最小可用因子框架”。
+### 设计目标
 
-当前核心文件：
-- `backend/app/services/factor_service/base.py`
-- `backend/app/services/factor_service/preprocess.py`
-- `backend/app/services/factor_service/factor_snapshot_service.py`
-- `backend/app/services/factor_service/composite.py`
-- `backend/app/services/factor_service/reason_builder.py`
-- `backend/app/services/factor_service/factor_library/trend_factors.py`
-- `backend/app/services/factor_service/factor_library/quality_factors.py`
-- `backend/app/services/factor_service/factor_library/growth_factors.py`
-- `backend/app/services/factor_service/factor_library/low_vol_factors.py`
-- `backend/app/services/factor_service/factor_library/event_factors.py`
+当前版本新增 `workflow_runtime` 层，用来把已经存在的能力组织成显式 workflow，同时保持：
 
-### 输入来源
+- 轻量
+- 同步
+- 可测试
+- 可解释
+- 可从中间节点启动
 
-本轮因子框架只复用现有输入，不扩外部数据面：
-- `DailyBarResponse`
-- `TechnicalSnapshot`
-- `FinancialSummary`
-- `AnnouncementListResponse`
+它不是调度平台，也不是通用 DAG 引擎，更不是后台任务系统。
 
-### 输出结构
+目录结构：
 
-当前统一输出 `FactorSnapshot`，至少包含：
-- `raw_factors`
-- `normalized_factors`
-- `factor_group_scores`
-- `alpha_score`
-- `trigger_score`
-- `risk_score`
+```text
+backend/app/services/workflow_runtime/
+  base.py
+  context.py
+  registry.py
+  executor.py
+  artifacts.py
+  workflow_service.py
+  definitions/
+    single_stock_workflow.py
+    deep_review_workflow.py
+```
 
-其中：
-- `alpha_score` 表示横截面优先级
-- `trigger_score` 表示当前是否接近“回踩/突破”型观察点
-- `risk_score` 是风险分，数值越高表示风险越高
+### 运行时分层
 
-### 当前最小因子集合
+`workflow_runtime` 内部职责划分如下：
 
-当前已落地的因子组：
-- `trend`
-  - `return_20d`
-  - `return_60d`
-  - `distance_to_52w_high`
-  - `relative_hs300_strength` 预留
-  - `relative_industry_strength` 预留
-- `quality`
-  - `roe`
-  - `net_margin`
-  - `debt_ratio`
-  - `eps`
-  - `financial_data_completeness`
-- `growth`
-  - `revenue_yoy`
-  - `net_profit_yoy`
-  - `revenue_acceleration` 预留
-  - `net_profit_acceleration` 预留
-- `low_vol`
-  - `volatility_20d`
-  - `volatility_60d`
-  - `atr_to_close`
-  - `max_drawdown_60d`
-- `event`
-  - `announcement_count_30d`
-  - `announcement_keyword_score`
-  - `event_freshness_score`
+- `base.py`
+  - 定义 `WorkflowNode`
+  - 定义 `WorkflowDefinition`
+  - 定义 `WorkflowStepResult`
+  - 定义 `WorkflowRunResult`
+  - 定义 `WorkflowArtifact`
+- `context.py`
+  - 保存本次运行的 request、选项和节点输出
+- `registry.py`
+  - 注册 workflow definition
+- `executor.py`
+  - 按顺序同步执行节点
+  - 处理 `start_from / stop_after`
+  - 在节点失败时生成清晰状态与错误摘要
+- `artifacts.py`
+  - 以轻量 JSON 文件持久化运行记录
+- `workflow_service.py`
+  - 作为 API 层的薄门面
 
-### 推荐理由生成
+### 单票 Workflow
 
-`reason_builder.py` 的职责是把因子贡献收敛为结构化短理由，而不是生成自由文本长文。
+名称：`single_stock_full_review`
 
-当前输出：
-- `top_positive_factors`
-- `top_negative_factors`
-- `short_reason`
-- `risk_notes`
+节点顺序：
 
-这些字段直接来自因子组信号，不依赖 LLM。
+1. `SingleStockResearchInputs`
+2. `FactorSnapshotBuild`
+3. `ReviewReportBuild`
+4. `DebateReviewBuild`
+5. `StrategyPlanBuild`
 
-## Screener v2 兼容收敛
+节点与既有服务关系：
 
-当前 `ScreenerPipeline` 已切换为以下结构：
-- `universe constraints`
-- `technical snapshot`
-- `factor snapshot`
-- `alpha / trigger / risk scoring`
-- `list classification`
-
-当前新版分桶：
-- `READY_TO_BUY`
-- `WATCH_PULLBACK`
-- `WATCH_BREAKOUT`
-- `RESEARCH_ONLY`
-- `AVOID`
-
-为了兼容现有前端与深筛链路，公开响应暂时同时保留：
-- 旧字段：`buy_candidates`、`watch_candidates`、`avoid_candidates`
-- 新字段：`ready_to_buy_candidates`、`watch_pullback_candidates`、`watch_breakout_candidates`、`research_only_candidates`
-
-映射关系：
-- `READY_TO_BUY` -> `BUY_CANDIDATE`
-- `WATCH_PULLBACK` / `WATCH_BREAKOUT` / `RESEARCH_ONLY` -> `WATCHLIST`
-- `AVOID` -> `AVOID`
-
-这意味着：
-- 旧前端和深筛流程可以继续工作
-- 新的因子分数和理由字段已经能被上层消费
-- 后续可以继续演进为真正的横截面多因子排序，而不必再次推翻 screener 结构
-
-## 个股研判 v2 结构化地基
-
-本轮没有删除原有 `research_service`，而是在其旁边新增 `review_service`，用于承载更清晰的多维研判框架，并为后续有限轮多 agent 裁决预埋角色边界。
-
-核心文件：
-- `backend/app/services/review_service/factor_profile_builder.py`
-- `backend/app/services/review_service/technical_view_builder.py`
-- `backend/app/services/review_service/fundamental_view_builder.py`
-- `backend/app/services/review_service/event_view_builder.py`
-- `backend/app/services/review_service/sentiment_view_builder.py`
-- `backend/app/services/review_service/bull_bear_builder.py`
-- `backend/app/services/review_service/chief_judgement_builder.py`
-- `backend/app/services/review_service/stock_review_service.py`
-- `backend/app/schemas/review.py`
-
-### 输入复用
-
-`StockReviewService` 不新增外部数据面，只复用现有能力：
-- `get_stock_profile`
-- `get_technical_snapshot`
-- `get_trigger_snapshot`
-- `get_stock_financial_summary`
-- `get_stock_announcements`
-- `get_factor_snapshot`
-- `get_strategy_plan`
-
-### 六块固定输出
-
-`StockReviewReport` 当前固定包含：
-- `factor_profile`
-- `technical_view`
-- `fundamental_view`
-- `event_view`
-- `sentiment_view`
-- `bull_case / bear_case / key_disagreements / final_judgement`
-
-其设计目标不是生成长文，而是把后续 agent 化之前的角色边界先固定下来。
-
-### 角色边界
-
-- `factor_profile`
-- 更像因子分析员输出，负责总结强弱因子组与 `alpha / trigger / risk`
-- `technical_view`
-- 更像技术分析员输出，负责趋势、触发与关键位
-- `fundamental_view`
-- 更像基本面分析员输出，负责质量、成长、杠杆与财务完整度
-- `event_view`
-- 更像事件分析员输出，负责公告催化与风险扰动
-- `sentiment_view`
-- 是当前的轻量情绪占位层，先用已有强弱、量能、波动和位置数据构造
-- `bull_case`
-- 只提炼支持继续关注或买入的最强理由
-- `bear_case`
-- 只提炼反对交易或要求谨慎的最强理由
-- `final_judgement`
-- 作为首席裁决层，整合多空分歧与现有策略计划
-
-### 与旧 research 接口的关系
-
-- `GET /research/{symbol}`
-- 保留，继续作为轻量研究接口
-- `GET /stocks/{symbol}/review-report`
-- 新增，作为多维结构化研判接口
-
-这意味着：
-- 旧前端和旧调用方不需要立刻迁移
-- 新的研判结构已经可以单独消费
-- 后续若接入多 agent，有了天然的角色输出边界，而不需要重写底层 schema
-
-## workflow 节点化与角色化裁决骨架
-
-本轮目标不是引入真正的多 agent runtime，而是把“单票角色化裁决”收敛成显式节点流和明确角色边界。
-
-### debate_service 分层
-
-当前新增目录：
-- `backend/app/services/debate_service/analyst_views_builder.py`
-- `backend/app/services/debate_service/technical_analyst.py`
-- `backend/app/services/debate_service/fundamental_analyst.py`
-- `backend/app/services/debate_service/event_analyst.py`
-- `backend/app/services/debate_service/sentiment_analyst.py`
-- `backend/app/services/debate_service/bull_researcher.py`
-- `backend/app/services/debate_service/bear_researcher.py`
-- `backend/app/services/debate_service/chief_analyst.py`
-- `backend/app/services/debate_service/risk_reviewer.py`
-- `backend/app/services/debate_service/debate_orchestrator.py`
-
-职责划分：
-- `technical_analyst`
-- 读取技术画像与触发快照，输出技术面观点、关键价位和失效提示
-- `fundamental_analyst`
-- 读取基本面画像，输出质量、成长和财务风险提示
-- `event_analyst`
-- 读取事件画像，输出催化、风险和事件温度
-- `sentiment_analyst`
-- 读取轻量情绪画像，输出市场偏好、拥挤度和动量环境
-- `bull_researcher`
-- 汇总支持交易的最强理由
-- `bear_researcher`
-- 汇总反对交易或建议谨慎的最强理由
-- `chief_analyst`
-- 基于多空分歧、因子画像和策略摘要输出最终裁决
-- `risk_reviewer`
-- 基于风险分、技术失效条件和策略边界输出风险复核
-
-### workflow 节点骨架
-
-当前单票角色化流程被拆成以下结构化节点：
 - `SingleStockResearchInputs`
-- `AnalystViewsBuild`
-- `BullBearDebateBuild`
-- `ChiefJudgementBuild`
-- `StrategyFinalize`
+  - 复用 `DebateOrchestrator.build_inputs`
+- `FactorSnapshotBuild`
+  - 复用 `FactorSnapshotService`
+- `ReviewReportBuild`
+  - 复用 `StockReviewService`
+- `DebateReviewBuild`
+  - 复用 `DebateRuntimeService`
+  - 支持 `use_llm=true/false`
+- `StrategyPlanBuild`
+  - 复用 `StrategyPlanner`
 
-这些节点的目标是：
-- 让未来可以从中间节点启动
-- 让每个节点输入输出保持机器可读
-- 为后续有限轮多 agent 裁决预留稳定接口
+统一输出会聚合：
 
-### debate-review 与 review-report 的关系
+- `research_inputs`
+- `factor_snapshot`
+- `review_report`
+- `debate_review`
+- `strategy_plan`
 
-- `review-report`
-- 是多维研判 v2，强调静态聚合后的结构化画像
-- `debate-review`
-- 是在 `review-report` 之上的角色化裁决骨架，强调 analyst 角色、多空研究员、首席裁决和风险复核
+### 深筛 Workflow
 
-这意味着：
-- 当前公开 API 继续兼容
-- 旧调用方仍可使用 `review-report`
-- 新调用方可以直接消费 `debate-review`
-- 当前仍然不是 LLM 版 agent runtime，只是非 LLM 的结构化骨架
+名称：`deep_candidate_review`
+
+节点顺序：
+
+1. `ScreenerRun`
+2. `DeepCandidateSelect`
+3. `CandidateReviewBuild`
+4. `CandidateDebateBuild`
+5. `CandidateStrategyBuild`
+
+节点与既有服务关系：
+
+- `ScreenerRun`
+  - 复用 `ScreenerPipeline`
+- `DeepCandidateSelect`
+  - 基于初筛结果选出深筛候选
+- `CandidateReviewBuild`
+  - 对候选逐个复用 `StockReviewService`
+- `CandidateDebateBuild`
+  - 对候选逐个复用 `DebateRuntimeService`
+- `CandidateStrategyBuild`
+  - 对候选逐个复用 `StrategyPlanner`
+
+当前版本允许个别 symbol 失败：
+
+- 单个标的失败不会中断整个 workflow
+- 会在批量节点输出和最终输出中记录失败摘要
+
+### `start_from` 与 `stop_after`
+
+`executor.py` 当前支持两个边界参数：
+
+- `start_from`
+  - 从指定节点开始执行
+  - 之前节点在 step summary 中标记为 `skipped`
+- `stop_after`
+  - 执行到指定节点后停止
+  - 之后节点在 step summary 中标记为 `skipped`
+
+语义约束：
+
+- 只改变本次执行边界，不改变 workflow 定义顺序
+- 如果从中间节点启动，节点内部可以通过已有 service 自动补齐前置输入
+- 自动补齐输入不等同于把前置节点记为已执行完成
+
+### 运行记录与产物
+
+当前版本使用最简单稳定的文件持久化：
+
+```text
+data/workflow_runs/{run_id}.json
+```
+
+记录内容包括：
+
+- `workflow_name`
+- `started_at`
+- `finished_at`
+- `input_summary`
+- `step summaries`
+- `final_output_summary`
+- `status`
+- `error_message`
+
+### API 关系
+
+新增接口：
+
+- `POST /workflows/single-stock/run`
+- `POST /workflows/deep-review/run`
+- `GET /workflows/runs/{run_id}`
+
+与现有接口的关系：
+
+- `review-report / debate-review / strategy / screener` 继续保留
+- workflow API 只是把这些既有能力按节点顺序显式编排起来
+- 路由层只负责请求接收与响应返回，不承载 workflow 编排逻辑
+
+### 当前边界
+
+本轮明确不做：
+
+- 后台调度器
+- 队列
+- 自动复盘
+- DAG 可视化
+- 前端 workflow 控制台
+- 任意复杂通用 workflow 引擎

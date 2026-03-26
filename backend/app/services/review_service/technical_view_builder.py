@@ -27,6 +27,9 @@ def build_technical_view(
     return TechnicalView(
         trend_state=technical_snapshot.trend_state,
         trigger_state=trigger_snapshot.trigger_state,
+        latest_close=technical_snapshot.latest_close,
+        support_level=technical_snapshot.support_level,
+        resistance_level=technical_snapshot.resistance_level,
         key_levels=key_levels,
         tactical_read=_build_tactical_read(
             technical_snapshot=technical_snapshot,

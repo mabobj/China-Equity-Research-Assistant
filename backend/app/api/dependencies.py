@@ -3,6 +3,8 @@
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from fastapi import Depends
+
 from app.core.config import get_settings
 from app.db.market_data_store import LocalMarketDataStore
 from app.services.data_service.market_data_service import MarketDataService
@@ -17,6 +19,11 @@ if TYPE_CHECKING:
     from app.services.data_service.intraday_service import IntradayService
     from app.services.data_service.refresh_service import DataRefreshService
     from app.services.debate_service.debate_orchestrator import DebateOrchestrator
+    from app.services.llm_debate_service.fallback import DebateRuntimeService
+    from app.services.llm_debate_service.llm_debate_orchestrator import (
+        LLMDebateOrchestrator,
+    )
+    from app.services.llm_debate_service.llm_role_runner import LLMRoleRunner
     from app.services.factor_service.factor_snapshot_service import (
         FactorSnapshotService,
     )
@@ -31,6 +38,8 @@ if TYPE_CHECKING:
     from app.services.review_service.stock_review_service import StockReviewService
     from app.services.screener_service.deep_pipeline import DeepScreenerPipeline
     from app.services.screener_service.pipeline import ScreenerPipeline
+    from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
+    from app.services.workflow_runtime.workflow_service import WorkflowRuntimeService
 
 
 @lru_cache
@@ -190,6 +199,59 @@ def get_debate_orchestrator() -> "DebateOrchestrator":
 
 
 @lru_cache
+def get_llm_role_runner() -> "LLMRoleRunner":
+    """构建受控 LLM 角色执行器。"""
+    from app.services.llm_debate_service.base import LLMDebateSettings
+    from app.services.llm_debate_service.llm_role_runner import LLMRoleRunner
+
+    settings = get_settings()
+    return LLMRoleRunner(
+        settings=LLMDebateSettings(
+            enabled=settings.enable_llm_debate,
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            base_url=settings.openai_base_url,
+            timeout_seconds=settings.llm_debate_timeout_seconds,
+            provider=settings.llm_provider,
+        )
+    )
+
+
+@lru_cache
+def get_llm_debate_orchestrator() -> "LLMDebateOrchestrator":
+    """构建受控 LLM 裁决编排器。"""
+    from app.services.llm_debate_service.llm_debate_orchestrator import (
+        LLMDebateOrchestrator,
+    )
+
+    return LLMDebateOrchestrator(
+        debate_orchestrator=get_debate_orchestrator(),
+        role_runner=get_llm_role_runner(),
+    )
+
+
+@lru_cache
+def get_debate_runtime_service() -> "DebateRuntimeService":
+    """构建统一的 debate 运行时服务。"""
+    from app.services.llm_debate_service.base import LLMDebateSettings
+    from app.services.llm_debate_service.fallback import DebateRuntimeService
+
+    settings = get_settings()
+    return DebateRuntimeService(
+        rule_based_orchestrator=get_debate_orchestrator(),
+        llm_orchestrator=get_llm_debate_orchestrator(),
+        settings=LLMDebateSettings(
+            enabled=settings.enable_llm_debate,
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            base_url=settings.openai_base_url,
+            timeout_seconds=settings.llm_debate_timeout_seconds,
+            provider=settings.llm_provider,
+        ),
+    )
+
+
+@lru_cache
 def get_screener_pipeline() -> "ScreenerPipeline":
     """构建规则初筛选股 pipeline。"""
     from app.services.screener_service.pipeline import ScreenerPipeline
@@ -213,4 +275,62 @@ def get_deep_screener_pipeline() -> "DeepScreenerPipeline":
         screener_pipeline=get_screener_pipeline(),
         research_manager=get_research_manager(),
         strategy_planner=get_strategy_planner(),
+    )
+
+
+@lru_cache
+def get_workflow_artifact_store() -> "FileWorkflowArtifactStore":
+    """构建 workflow 运行记录存储。"""
+    from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
+
+    settings = get_settings()
+    return FileWorkflowArtifactStore(root_dir=settings.data_dir / "workflow_runs")
+
+
+def get_workflow_runtime_service(
+    debate_orchestrator: "DebateOrchestrator" = Depends(get_debate_orchestrator),
+    factor_snapshot_service: "FactorSnapshotService" = Depends(
+        get_factor_snapshot_service
+    ),
+    stock_review_service: "StockReviewService" = Depends(get_stock_review_service),
+    debate_runtime_service: "DebateRuntimeService" = Depends(
+        get_debate_runtime_service
+    ),
+    strategy_planner: "StrategyPlanner" = Depends(get_strategy_planner),
+    screener_pipeline: "ScreenerPipeline" = Depends(get_screener_pipeline),
+) -> "WorkflowRuntimeService":
+    """构建 workflow runtime service。"""
+    from app.services.workflow_runtime.definitions.deep_review_workflow import (
+        build_deep_review_workflow_definition,
+    )
+    from app.services.workflow_runtime.definitions.single_stock_workflow import (
+        build_single_stock_workflow_definition,
+    )
+    from app.services.workflow_runtime.executor import WorkflowExecutor
+    from app.services.workflow_runtime.registry import WorkflowRegistry
+    from app.services.workflow_runtime.workflow_service import WorkflowRuntimeService
+
+    artifact_store = get_workflow_artifact_store()
+    registry = WorkflowRegistry(
+        definitions=(
+            build_single_stock_workflow_definition(
+                debate_orchestrator=debate_orchestrator,
+                factor_snapshot_service=factor_snapshot_service,
+                stock_review_service=stock_review_service,
+                debate_runtime_service=debate_runtime_service,
+                strategy_planner=strategy_planner,
+            ),
+            build_deep_review_workflow_definition(
+                screener_pipeline=screener_pipeline,
+                stock_review_service=stock_review_service,
+                debate_runtime_service=debate_runtime_service,
+                strategy_planner=strategy_planner,
+            ),
+        )
+    )
+    executor = WorkflowExecutor(artifact_store=artifact_store)
+    return WorkflowRuntimeService(
+        registry=registry,
+        executor=executor,
+        artifact_store=artifact_store,
     )

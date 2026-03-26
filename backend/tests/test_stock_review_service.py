@@ -15,6 +15,7 @@ from app.schemas.technical import (
     TechnicalSnapshot,
     VolumeMetricsSnapshot,
 )
+from app.services.data_service.exceptions import ProviderError
 from app.services.review_service.stock_review_service import StockReviewService
 
 
@@ -208,3 +209,49 @@ def test_stock_review_service_builds_review_report() -> None:
     assert report.final_judgement.action == "BUY"
     assert report.strategy_summary.strategy_type == "pullback"
     assert report.confidence >= 60
+
+
+class FailingTriggerSnapshotService:
+    def get_trigger_snapshot(
+        self,
+        symbol: str,
+        frequency: str = "1m",
+        limit: int = 60,
+    ) -> TriggerSnapshot:
+        raise ProviderError(
+            "No enabled market data providers are available for capability 'intraday_bars'."
+        )
+
+    def build_daily_fallback_trigger_snapshot(
+        self,
+        technical_snapshot: TechnicalSnapshot,
+    ) -> TriggerSnapshot:
+        return TriggerSnapshot(
+            symbol=technical_snapshot.symbol,
+            as_of_datetime=datetime(2024, 3, 25, 15, 0, 0),
+            daily_trend_state=technical_snapshot.trend_state,
+            daily_support_level=technical_snapshot.support_level,
+            daily_resistance_level=technical_snapshot.resistance_level,
+            latest_intraday_price=technical_snapshot.latest_close,
+            distance_to_support_pct=3.45,
+            distance_to_resistance_pct=1.67,
+            trigger_state="neutral",
+            trigger_note="缺少盘中数据，使用日线降级触发判断。",
+        )
+
+
+def test_stock_review_service_falls_back_when_intraday_data_is_unavailable() -> None:
+    service = StockReviewService(
+        market_data_service=StubMarketDataService(),
+        technical_analysis_service=StubTechnicalAnalysisService(),
+        factor_snapshot_service=StubFactorSnapshotService(),
+        trigger_snapshot_service=FailingTriggerSnapshotService(),
+        strategy_planner=StubStrategyPlanner(),
+    )
+
+    report = service.get_stock_review_report("600519.SH")
+
+    assert report.symbol == "600519.SH"
+    assert report.technical_view.trigger_state == "neutral"
+    assert report.technical_view.latest_close == 120.0
+    assert report.technical_view.support_level == 116.0

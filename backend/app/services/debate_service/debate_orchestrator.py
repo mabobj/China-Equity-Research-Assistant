@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, time
+import logging
+
 from app.schemas.debate import (
     AnalystViewsBuild,
     BullBearDebateBuild,
@@ -10,6 +13,7 @@ from app.schemas.debate import (
     SingleStockResearchInputs,
     StrategyFinalize,
 )
+from app.schemas.intraday import TriggerSnapshot
 from app.schemas.review import StrategySummary
 from app.services.factor_service.factor_snapshot_service import FactorSnapshotService
 from app.services.factor_service.trigger_snapshot_service import TriggerSnapshotService
@@ -20,6 +24,8 @@ from app.services.debate_service.bear_researcher import build_bear_case
 from app.services.debate_service.bull_researcher import build_bull_case
 from app.services.debate_service.chief_analyst import build_chief_judgement
 from app.services.debate_service.risk_reviewer import build_risk_review
+
+logger = logging.getLogger(__name__)
 
 
 class DebateOrchestrator:
@@ -39,12 +45,12 @@ class DebateOrchestrator:
 
     def build_inputs(self, symbol: str) -> SingleStockResearchInputs:
         """构建单票流程输入节点。"""
+        logger.debug("debate.rule.build_inputs.start symbol=%s", symbol)
         review_report = self._stock_review_service.get_stock_review_report(symbol)
         factor_snapshot = self._factor_snapshot_service.get_factor_snapshot(symbol)
         strategy_plan = self._strategy_planner.get_strategy_plan(symbol)
-        trigger_snapshot = self._trigger_snapshot_service.get_trigger_snapshot(symbol)
 
-        return SingleStockResearchInputs(
+        inputs = SingleStockResearchInputs(
             symbol=review_report.symbol,
             review_report=review_report,
             strategy_summary=StrategySummary(
@@ -59,22 +65,39 @@ class DebateOrchestrator:
             ),
             factor_alpha_score=factor_snapshot.alpha_score.total_score,
             factor_risk_score=factor_snapshot.risk_score.total_score,
-            trigger_state=trigger_snapshot.trigger_state,
+            trigger_state=review_report.technical_view.trigger_state,
         )
+        logger.debug(
+            "debate.rule.build_inputs.done symbol=%s trigger_state=%s alpha_score=%s risk_score=%s strategy_action=%s",
+            symbol,
+            inputs.trigger_state,
+            inputs.factor_alpha_score,
+            inputs.factor_risk_score,
+            strategy_plan.action,
+        )
+        return inputs
 
     def build_analyst_views(
         self,
         inputs: SingleStockResearchInputs,
     ) -> AnalystViewsBuild:
         """构建四类 analyst 节点。"""
-        trigger_snapshot = self._trigger_snapshot_service.get_trigger_snapshot(inputs.symbol)
-        return AnalystViewsBuild(
+        node = AnalystViewsBuild(
             symbol=inputs.symbol,
             analyst_views=build_analyst_views_bundle(
                 inputs.review_report,
-                trigger_snapshot,
+                self._build_trigger_snapshot_from_review(inputs),
             ),
         )
+        logger.debug(
+            "debate.rule.analyst_views.done symbol=%s technical_bias=%s fundamental_bias=%s event_bias=%s sentiment_bias=%s",
+            inputs.symbol,
+            node.analyst_views.technical.action_bias,
+            node.analyst_views.fundamental.action_bias,
+            node.analyst_views.event.action_bias,
+            node.analyst_views.sentiment.action_bias,
+        )
+        return node
 
     def build_bull_bear_debate(
         self,
@@ -142,13 +165,14 @@ class DebateOrchestrator:
 
     def get_debate_review_report(self, symbol: str) -> DebateReviewReport:
         """返回角色化裁决骨架版报告。"""
+        logger.debug("debate.rule.start symbol=%s", symbol)
         inputs = self.build_inputs(symbol)
         analyst_views_node = self.build_analyst_views(inputs)
         debate_node = self.build_bull_bear_debate(analyst_views_node)
         chief_node = self.build_chief_judgement(inputs, debate_node)
         finalize_node = self.finalize_strategy(inputs, chief_node)
 
-        return DebateReviewReport(
+        report = DebateReviewReport(
             symbol=inputs.review_report.symbol,
             name=inputs.review_report.name,
             as_of_date=inputs.review_report.as_of_date,
@@ -161,7 +185,15 @@ class DebateOrchestrator:
             final_action=finalize_node.final_action,
             strategy_summary=finalize_node.strategy_summary,
             confidence=finalize_node.confidence,
+            runtime_mode="rule_based",
         )
+        logger.debug(
+            "debate.rule.done symbol=%s final_action=%s confidence=%s",
+            symbol,
+            report.final_action,
+            report.confidence,
+        )
+        return report
 
     def _merge_key_disagreements(self, *, bull_case, bear_case) -> list[str]:
         disagreements: list[str] = []
@@ -176,3 +208,45 @@ class DebateOrchestrator:
         if not disagreements:
             disagreements.append("当前分歧不大，更多是执行节奏上的保守与激进差异。")
         return disagreements[:3]
+
+    def _build_trigger_snapshot_from_review(
+        self,
+        inputs: SingleStockResearchInputs,
+    ) -> TriggerSnapshot:
+        logger.debug(
+            "debate.rule.trigger_from_review symbol=%s trigger_state=%s",
+            inputs.symbol,
+            inputs.review_report.technical_view.trigger_state,
+        )
+        technical_view = inputs.review_report.technical_view
+        latest_price = technical_view.latest_close or 0.0
+        support_level = technical_view.support_level
+        resistance_level = technical_view.resistance_level
+
+        distance_to_support_pct = None
+        if support_level is not None and support_level > 0 and latest_price > 0:
+            distance_to_support_pct = float(
+                (latest_price - support_level) / support_level * 100
+            )
+
+        distance_to_resistance_pct = None
+        if resistance_level is not None and latest_price > 0:
+            distance_to_resistance_pct = float(
+                (resistance_level - latest_price) / latest_price * 100
+            )
+
+        return TriggerSnapshot(
+            symbol=inputs.symbol,
+            as_of_datetime=datetime.combine(
+                inputs.review_report.as_of_date,
+                time(15, 0, 0),
+            ),
+            daily_trend_state=technical_view.trend_state,
+            daily_support_level=support_level,
+            daily_resistance_level=resistance_level,
+            latest_intraday_price=latest_price,
+            distance_to_support_pct=distance_to_support_pct,
+            distance_to_resistance_pct=distance_to_resistance_pct,
+            trigger_state=technical_view.trigger_state,
+            trigger_note=technical_view.tactical_read,
+        )
