@@ -2,6 +2,7 @@ import type {
   DataRefreshStatus,
   DbQueryResponse,
   DbTablesResponse,
+  DebateReviewProgress,
   DebateReviewReport,
   DeepReviewWorkflowRunRequest,
   DeepScreenerRunResponse,
@@ -18,7 +19,8 @@ import type {
 } from "@/types/api";
 
 const API_PREFIX = "/api/backend";
-const STOCK_PAGE_TIMEOUT_MS = 30_000;
+const STOCK_PAGE_TIMEOUT_MS = 90_000;
+const DEBATE_REVIEW_TIMEOUT_MS = 240_000;
 const DATA_REFRESH_TIMEOUT_MS = 30_000;
 const MIN_SCREENER_TIMEOUT_MS = 120_000;
 const MAX_SCREENER_TIMEOUT_MS = 1_800_000;
@@ -57,6 +59,7 @@ type DataRefreshParams = {
 
 type DebateReviewParams = {
   useLlm?: boolean;
+  requestId?: string;
 };
 
 type FetchOptions = {
@@ -130,9 +133,26 @@ export async function getDebateReview(
       `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/debate-review`,
       {
         use_llm: params.useLlm,
+        request_id: params.requestId,
       },
     ),
-    { timeoutMs: resolveSingleStockWorkflowTimeoutMs() },
+    { timeoutMs: DEBATE_REVIEW_TIMEOUT_MS },
+  );
+}
+
+export async function getDebateReviewProgress(
+  symbol: string,
+  params: DebateReviewParams = {},
+): Promise<DebateReviewProgress> {
+  return fetchBackend<DebateReviewProgress>(
+    buildPath(
+      `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/debate-review-progress`,
+      {
+        use_llm: params.useLlm,
+        request_id: params.requestId,
+      },
+    ),
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
   );
 }
 

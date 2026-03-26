@@ -12,7 +12,7 @@ from app.api.dependencies import (
     get_technical_analysis_service,
     get_trigger_snapshot_service,
 )
-from app.schemas.debate import DebateReviewReport
+from app.schemas.debate import DebateReviewProgress, DebateReviewReport
 from app.schemas.factor import FactorSnapshot
 from app.schemas.intraday import TriggerSnapshot
 from app.schemas.market_data import (
@@ -74,7 +74,7 @@ def get_intraday_bars(
     limit: Optional[int] = Query(default=None, ge=1),
     service: MarketDataService = Depends(get_market_data_service),
 ) -> IntradayBarResponse:
-    """返回单只股票分钟线行情，支持 1 分钟和 5 分钟频率。"""
+    """返回单只股票分钟线行情。"""
     return service.get_intraday_bars(
         symbol=symbol,
         frequency=frequency,
@@ -181,7 +181,32 @@ def get_stock_review_report(
 def get_debate_review_report(
     symbol: str,
     use_llm: Optional[bool] = Query(default=None),
+    request_id: Optional[str] = Query(default=None),
     service: Any = Depends(get_debate_runtime_service),
 ) -> DebateReviewReport:
     """返回角色化裁决骨架版单票报告。"""
-    return service.get_debate_review_report(symbol, use_llm=use_llm)
+    if request_id is None:
+        return service.get_debate_review_report(
+            symbol,
+            use_llm=use_llm,
+        )
+    return service.get_debate_review_report(
+        symbol,
+        use_llm=use_llm,
+        request_id=request_id,
+    )
+
+
+@router.get("/{symbol}/debate-review-progress", response_model=DebateReviewProgress)
+def get_debate_review_progress(
+    symbol: str,
+    use_llm: Optional[bool] = Query(default=None),
+    request_id: Optional[str] = Query(default=None),
+    service: Any = Depends(get_debate_runtime_service),
+) -> DebateReviewProgress:
+    """返回 Debate Review 当前运行进度。"""
+    return service.get_debate_review_progress(
+        symbol,
+        use_llm=use_llm,
+        request_id=request_id,
+    )

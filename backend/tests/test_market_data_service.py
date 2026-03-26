@@ -258,6 +258,34 @@ def test_service_normalizes_symbol_before_calling_provider() -> None:
     assert profile.symbol == "600519.SH"
 
 
+def test_service_refreshes_partial_cached_profile(tmp_path: Path) -> None:
+    """本地 profile 不完整时，应继续向 provider 补全并回写。"""
+    provider = FakeProvider()
+    local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
+    local_store.upsert_stock_profile(
+        StockProfile(
+            symbol="600519.SH",
+            code="600519",
+            exchange="SH",
+            name="Kweichow Moutai",
+            industry=None,
+            list_date=None,
+            total_market_cap=None,
+            circulating_market_cap=None,
+            source="cninfo",
+        )
+    )
+    service = MarketDataService(
+        providers=[provider],
+        local_store=local_store,
+    )
+
+    profile = service.get_stock_profile("600519.SH")
+
+    assert provider.profile_call_count == 1
+    assert profile.source == "fake"
+
+
 def test_service_parses_date_filters_for_daily_bars() -> None:
     """The service should parse date strings before calling providers."""
     provider = FakeProvider()

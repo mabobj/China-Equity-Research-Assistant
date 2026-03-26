@@ -1,6 +1,6 @@
-"""角色化裁决骨架相关 schema。"""
+"""角色化裁决相关 schema。"""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -103,6 +103,36 @@ class DebateReviewReport(BaseModel):
     strategy_summary: StrategySummary
     confidence: int = Field(ge=0, le=100)
     runtime_mode: Literal["rule_based", "llm"] = "rule_based"
+
+
+class DebateReviewProgress(BaseModel):
+    """Debate Review 后台运行进度。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    request_id: str | None = None
+    status: Literal["idle", "running", "completed", "failed", "fallback"]
+    stage: Literal[
+        "idle",
+        "rule_based",
+        "building_inputs",
+        "running_roles",
+        "finalizing",
+        "completed",
+        "failed",
+        "fallback_rule_based",
+    ]
+    runtime_mode: Literal["rule_based", "llm"] | None = None
+    current_step: str | None = None
+    completed_steps: int = Field(default=0, ge=0)
+    total_steps: int = Field(default=0, ge=0)
+    message: str
+    started_at: datetime | None = None
+    updated_at: datetime | None = None
+    finished_at: datetime | None = None
+    error_message: str | None = None
+    recent_steps: list[str] = Field(default_factory=list)
 
 
 class SingleStockResearchInputs(BaseModel):

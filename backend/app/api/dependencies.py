@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         LLMDebateOrchestrator,
     )
     from app.services.llm_debate_service.llm_role_runner import LLMRoleRunner
+    from app.services.llm_debate_service.progress_tracker import DebateProgressTracker
     from app.services.factor_service.factor_snapshot_service import (
         FactorSnapshotService,
     )
@@ -218,6 +219,14 @@ def get_llm_role_runner() -> "LLMRoleRunner":
 
 
 @lru_cache
+def get_debate_progress_tracker() -> "DebateProgressTracker":
+    """构建 debate 运行进度跟踪器。"""
+    from app.services.llm_debate_service.progress_tracker import DebateProgressTracker
+
+    return DebateProgressTracker()
+
+
+@lru_cache
 def get_llm_debate_orchestrator() -> "LLMDebateOrchestrator":
     """构建受控 LLM 裁决编排器。"""
     from app.services.llm_debate_service.llm_debate_orchestrator import (
@@ -227,6 +236,7 @@ def get_llm_debate_orchestrator() -> "LLMDebateOrchestrator":
     return LLMDebateOrchestrator(
         debate_orchestrator=get_debate_orchestrator(),
         role_runner=get_llm_role_runner(),
+        progress_tracker=get_debate_progress_tracker(),
     )
 
 
@@ -240,6 +250,7 @@ def get_debate_runtime_service() -> "DebateRuntimeService":
     return DebateRuntimeService(
         rule_based_orchestrator=get_debate_orchestrator(),
         llm_orchestrator=get_llm_debate_orchestrator(),
+        progress_tracker=get_debate_progress_tracker(),
         settings=LLMDebateSettings(
             enabled=settings.enable_llm_debate,
             api_key=settings.openai_api_key,

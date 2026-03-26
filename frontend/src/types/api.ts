@@ -200,6 +200,31 @@ export type DebateReviewReport = {
   runtime_mode: "rule_based" | "llm";
 };
 
+export type DebateReviewProgress = {
+  symbol: string;
+  request_id: string | null;
+  status: "idle" | "running" | "completed" | "failed" | "fallback";
+  stage:
+    | "idle"
+    | "rule_based"
+    | "building_inputs"
+    | "running_roles"
+    | "finalizing"
+    | "completed"
+    | "failed"
+    | "fallback_rule_based";
+  runtime_mode: "rule_based" | "llm" | null;
+  current_step: string | null;
+  completed_steps: number;
+  total_steps: number;
+  message: string;
+  started_at: string | null;
+  updated_at: string | null;
+  finished_at: string | null;
+  error_message: string | null;
+  recent_steps: string[];
+};
+
 export type TriggerSnapshot = {
   symbol: string;
   as_of_datetime: string;

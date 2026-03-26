@@ -18,6 +18,7 @@ from app.schemas.debate import (
     BearCase,
     BullCase,
     ChiefJudgement,
+    DebateReviewProgress,
     DebatePoint,
     DebateReviewReport,
     RiskReview,
@@ -374,6 +375,26 @@ class StubDebateOrchestrator:
             runtime_mode="llm" if use_llm else "rule_based",
         )
 
+    def get_debate_review_progress(
+        self,
+        symbol: str,
+        *,
+        request_id: Optional[str] = None,
+        use_llm: Optional[bool] = None,
+    ) -> DebateReviewProgress:
+        return DebateReviewProgress(
+            symbol="600519.SH",
+            request_id=request_id,
+            status="running",
+            stage="running_roles",
+            runtime_mode="llm" if use_llm else "rule_based",
+            current_step="正在执行：技术分析员",
+            completed_steps=1,
+            total_steps=9,
+            message="后台正在运行技术分析员。",
+            recent_steps=["正在执行：技术分析员"],
+        )
+
 
 def test_get_stock_profile_route_returns_structured_payload() -> None:
     """The stock profile endpoint should return the schema payload."""
@@ -502,5 +523,25 @@ def test_debate_review_route_returns_structured_payload() -> None:
     response = client.get("/stocks/600519/debate-review?use_llm=true")
     payload = response.json()
     assert payload["runtime_mode"] == "llm"
+
+    app.dependency_overrides.clear()
+
+
+def test_debate_review_progress_route_returns_structured_payload() -> None:
+    """The debate-review-progress route should expose backend progress."""
+    app.dependency_overrides[get_debate_runtime_service] = (
+        lambda: StubDebateOrchestrator()
+    )
+
+    response = client.get(
+        "/stocks/600519/debate-review-progress?use_llm=true&request_id=req-1"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600519.SH"
+    assert payload["request_id"] == "req-1"
+    assert payload["stage"] == "running_roles"
+    assert payload["current_step"] == "正在执行：技术分析员"
 
     app.dependency_overrides.clear()

@@ -75,12 +75,39 @@ class MarketDataService:
         if self._local_store is not None:
             cached_profile = self._local_store.get_stock_profile(canonical_symbol)
             if cached_profile is not None:
+                if _is_stock_profile_complete(cached_profile):
+                    logger.debug(
+                        "market_data.profile.cache_hit symbol=%s source=%s",
+                        canonical_symbol,
+                        cached_profile.source,
+                    )
+                    return cached_profile
                 logger.debug(
-                    "market_data.profile.cache_hit symbol=%s source=%s",
+                    "market_data.profile.cache_partial symbol=%s source=%s reason=incomplete_profile",
                     canonical_symbol,
                     cached_profile.source,
                 )
-                return cached_profile
+                try:
+                    profile = self._load_stock_profile_from_providers(canonical_symbol)
+                except (ProviderError, DataNotFoundError):
+                    logger.debug(
+                        "market_data.profile.cache_partial_use symbol=%s source=%s reason=provider_unavailable",
+                        canonical_symbol,
+                        cached_profile.source,
+                    )
+                    return cached_profile
+
+                merged_profile = _merge_stock_profiles(
+                    cached_profile=cached_profile,
+                    provider_profile=profile,
+                )
+                self._local_store.upsert_stock_profile(merged_profile)
+                logger.debug(
+                    "market_data.profile.cache_completed symbol=%s source=%s",
+                    canonical_symbol,
+                    merged_profile.source,
+                )
+                return merged_profile
 
         profile = self._load_stock_profile_from_providers(canonical_symbol)
         if self._local_store is not None:
@@ -1024,3 +1051,41 @@ def _resolve_announcement_date_range(
         raise InvalidDateError("start_date cannot be later than end_date.")
 
     return normalized_start_date, normalized_end_date
+
+
+def _is_stock_profile_complete(profile: StockProfile) -> bool:
+    return all(
+        [
+            profile.industry is not None,
+            profile.list_date is not None,
+            profile.total_market_cap is not None,
+            profile.circulating_market_cap is not None,
+        ]
+    )
+
+
+def _merge_stock_profiles(
+    *,
+    cached_profile: StockProfile,
+    provider_profile: StockProfile,
+) -> StockProfile:
+    return StockProfile(
+        symbol=provider_profile.symbol,
+        code=provider_profile.code or cached_profile.code,
+        exchange=provider_profile.exchange,
+        name=provider_profile.name or cached_profile.name,
+        industry=provider_profile.industry or cached_profile.industry,
+        list_date=provider_profile.list_date or cached_profile.list_date,
+        status=provider_profile.status or cached_profile.status,
+        total_market_cap=(
+            provider_profile.total_market_cap
+            if provider_profile.total_market_cap is not None
+            else cached_profile.total_market_cap
+        ),
+        circulating_market_cap=(
+            provider_profile.circulating_market_cap
+            if provider_profile.circulating_market_cap is not None
+            else cached_profile.circulating_market_cap
+        ),
+        source=provider_profile.source or cached_profile.source,
+    )
