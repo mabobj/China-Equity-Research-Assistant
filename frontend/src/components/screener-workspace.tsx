@@ -16,6 +16,7 @@ import {
   formatDate,
   formatDateTime,
   formatDecisionBriefAction,
+  formatLabel,
   formatListType,
   formatPrice,
   formatRange,
@@ -105,79 +106,79 @@ export function ScreenerWorkspace() {
   return (
     <div className="space-y-6">
       <SectionCard
-        title="Data Refresh"
-        description="Refresh local inputs first when needed. The screener itself now runs in workflow mode instead of waiting on a long synchronous page request."
+        title="数据刷新"
+        description="需要时先补齐本地数据。选股页面已改为工作流模式，不再阻塞等待超长同步请求。"
       >
         <form className="grid gap-4 md:grid-cols-3" onSubmit={handleRefresh}>
-          <Field label="max_symbols" value={maxSymbols} onChange={setMaxSymbols} />
+          <Field label="最大股票数（max_symbols）" value={maxSymbols} onChange={setMaxSymbols} />
           <div className="md:col-span-2 flex items-end gap-3">
             <button
               type="submit"
               disabled={refreshLoading}
               className="min-h-11 rounded-2xl bg-amber-600 px-5 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:bg-amber-300"
             >
-              {refreshLoading ? "Starting refresh..." : "Start Refresh"}
+              {refreshLoading ? "正在启动刷新..." : "开始刷新"}
             </button>
           </div>
         </form>
         <div className="mt-5 space-y-4">
-          {refreshError ? <StatusBlock title="Refresh failed" description={refreshError} tone="error" /> : null}
+          {refreshError ? <StatusBlock title="刷新失败" description={refreshError} tone="error" /> : null}
           {refreshStatus ? (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <Metric label="Status" value={refreshStatus.status} />
-              <Metric label="Current stage" value={refreshStatus.current_stage ?? "-"} />
-              <Metric label="Processed" value={`${refreshStatus.processed_symbols}/${refreshStatus.total_symbols}`} />
-              <Metric label="Updated at" value={formatDateTime(refreshStatus.finished_at ?? refreshStatus.started_at)} />
+              <Metric label="状态" value={formatLabel(refreshStatus.status)} />
+              <Metric label="当前阶段" value={formatLabel(refreshStatus.current_stage ?? "-")} />
+              <Metric label="处理进度" value={`${refreshStatus.processed_symbols}/${refreshStatus.total_symbols}`} />
+              <Metric label="更新时间" value={formatDateTime(refreshStatus.finished_at ?? refreshStatus.started_at)} />
             </div>
           ) : (
-            <StatusBlock title="No refresh status" description="No refresh task has been loaded yet." />
+            <StatusBlock title="暂无刷新状态" description="还没有加载任何刷新任务状态。" />
           )}
         </div>
       </SectionCard>
 
       <SectionCard
-        title="Initial Screener Workflow"
-        description="The page starts screener_run immediately, returns run_id, and polls workflow run records until the screener snapshot is ready."
+        title="初筛工作流"
+        description="提交后会立即返回 run_id，并轮询工作流运行记录，直到初筛快照就绪。"
       >
         <form className="grid gap-4 md:grid-cols-3" onSubmit={handleScreenerRun}>
-          <Field label="max_symbols" value={maxSymbols} onChange={setMaxSymbols} />
-          <Field label="top_n" value={topN} onChange={setTopN} />
+          <Field label="最大股票数（max_symbols）" value={maxSymbols} onChange={setMaxSymbols} />
+          <Field label="候选上限（top_n）" value={topN} onChange={setTopN} />
           <div className="flex items-end">
             <button
               type="submit"
               className="min-h-11 rounded-2xl bg-emerald-700 px-5 text-sm font-semibold text-white transition hover:bg-emerald-800"
             >
-              Start Screener Workflow
+              运行初筛工作流
             </button>
           </div>
         </form>
         <div className="mt-5 space-y-4">
-          {screenerError ? <StatusBlock title="Screener workflow failed to start" description={screenerError} tone="error" /> : null}
-          {screenerRun ? <WorkflowRunSummary run={screenerRun} /> : <StatusBlock title="Waiting to run" description="Submit the screener workflow to get a run_id and step summaries." />}
+          {screenerError ? <StatusBlock title="初筛工作流启动失败" description={screenerError} tone="error" /> : null}
+          {screenerRun ? <WorkflowRunSummary run={screenerRun} /> : <StatusBlock title="等待执行" description="提交初筛工作流后会返回 run_id 和步骤摘要。" />}
           {renderScreenerFinalOutput(screenerRun)}
         </div>
       </SectionCard>
 
       <SectionCard
-        title="Deep Review Workflow"
-        description="Deep review runs in the same workflow mode, so the page shows run_id, current step, partial failures, and final output without one long blocking request."
+        title="深筛工作流"
+        description="深筛同样使用工作流模式，页面可查看 run_id、当前步骤、局部失败与最终结果。"
       >
         <form className="grid gap-4 md:grid-cols-4" onSubmit={handleDeepRun}>
-          <Field label="max_symbols" value={maxSymbols} onChange={setMaxSymbols} />
-          <Field label="top_n" value={topN} onChange={setTopN} />
-          <Field label="deep_top_k" value={deepTopK} onChange={setDeepTopK} />
+          <Field label="最大股票数（max_symbols）" value={maxSymbols} onChange={setMaxSymbols} />
+          <Field label="候选上限（top_n）" value={topN} onChange={setTopN} />
+          <Field label="深筛数量（deep_top_k）" value={deepTopK} onChange={setDeepTopK} />
           <div className="flex items-end">
             <button
               type="submit"
               className="min-h-11 rounded-2xl bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
-              Start Deep Review Workflow
+              运行深筛工作流
             </button>
           </div>
         </form>
         <div className="mt-5 space-y-4">
-          {deepError ? <StatusBlock title="Deep review workflow failed to start" description={deepError} tone="error" /> : null}
-          {deepRun ? <WorkflowRunSummary run={deepRun} /> : <StatusBlock title="Waiting to run" description="Submit the deep review workflow to get a run_id and step summaries." />}
+          {deepError ? <StatusBlock title="深筛工作流启动失败" description={deepError} tone="error" /> : null}
+          {deepRun ? <WorkflowRunSummary run={deepRun} /> : <StatusBlock title="等待执行" description="提交深筛工作流后会返回 run_id 和步骤摘要。" />}
           {renderDeepFinalOutput(deepRun)}
         </div>
       </SectionCard>
@@ -214,7 +215,7 @@ function renderScreenerFinalOutput(run: WorkflowRunDetailResponse | null) {
   const finalOutput = run?.final_output as ScreenerRunResponse | null;
   if (!run || run.status === "running") return null;
   if (!finalOutput) {
-    return <StatusBlock title="No screener output" description="The workflow finished without a screener final output." tone="error" />;
+    return <StatusBlock title="无初筛输出" description="工作流已结束，但没有返回初筛结果。" tone="error" />;
   }
 
   const buckets: Array<[string, ScreenerCandidate[]]> = [
@@ -228,18 +229,18 @@ function renderScreenerFinalOutput(run: WorkflowRunDetailResponse | null) {
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="As-of date" value={formatDate(finalOutput.as_of_date)} />
-        <Metric label="Freshness" value={finalOutput.freshness_mode ?? "-"} />
-        <Metric label="Source mode" value={finalOutput.source_mode ?? "-"} />
-        <Metric label="Scanned" value={`${finalOutput.scanned_symbols}/${finalOutput.total_symbols}`} />
+        <Metric label="截至日期" value={formatDate(finalOutput.as_of_date)} />
+        <Metric label="新鲜度模式" value={finalOutput.freshness_mode ?? "-"} />
+        <Metric label="来源模式" value={finalOutput.source_mode ?? "-"} />
+        <Metric label="扫描进度" value={`${finalOutput.scanned_symbols}/${finalOutput.total_symbols}`} />
       </div>
       {buckets.map(([title, items]) => (
         <div key={title} className="space-y-3">
           <h3 className="text-base font-semibold text-slate-900">
-            {title} / {formatListType(title as ScreenerCandidate["v2_list_type"])}
+            {formatListType(title as ScreenerCandidate["v2_list_type"])}（{title}）
           </h3>
           {items.length === 0 ? (
-            <StatusBlock title="No candidates" description={`No ${title} candidates for this run.`} />
+            <StatusBlock title="暂无候选" description={`本次运行没有 ${title} 分桶候选。`} />
           ) : (
             items.map((candidate) => <CandidateCard key={candidate.symbol} candidate={candidate} />)
           )}
@@ -253,12 +254,12 @@ function renderDeepFinalOutput(run: WorkflowRunDetailResponse | null) {
   const finalOutput = run?.final_output as { candidates?: DeepScreenerRunResponse["deep_candidates"] } | null;
   if (!run || run.status === "running") return null;
   if (!finalOutput || !Array.isArray(finalOutput.candidates)) {
-    return <StatusBlock title="No deep review output" description="The workflow finished without deep review candidates." tone="error" />;
+    return <StatusBlock title="无深筛输出" description="工作流已结束，但没有返回深筛候选。" tone="error" />;
   }
   return (
     <div className="space-y-4">
       {finalOutput.candidates.length === 0 ? (
-        <StatusBlock title="No deep review candidates" description="This deep review run did not produce any candidates." />
+        <StatusBlock title="暂无深筛候选" description="本次深筛运行未产出候选。" />
       ) : (
         finalOutput.candidates.map((candidate) => (
           <article key={candidate.symbol} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -269,16 +270,16 @@ function renderDeepFinalOutput(run: WorkflowRunDetailResponse | null) {
                 <p className="mt-2 text-sm leading-6 text-slate-700">{candidate.short_reason}</p>
               </div>
               <Link href={`/stocks/${encodeURIComponent(candidate.symbol)}`} className="text-sm font-semibold text-emerald-700 transition hover:text-emerald-800">
-                Open stock page
+                打开单票页
               </Link>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-              <Metric label="Priority" value={formatScore(candidate.priority_score)} />
-              <Metric label="Research action" value={formatAction(candidate.research_action)} />
-              <Metric label="Strategy action" value={formatAction(candidate.strategy_action)} />
-              <Metric label="Strategy type" value={candidate.strategy_type} />
-              <Metric label="Entry range" value={formatRange(candidate.ideal_entry_range)} />
-              <Metric label="Stop-loss" value={formatPrice(candidate.stop_loss_price)} />
+              <Metric label="优先级" value={formatScore(candidate.priority_score)} />
+              <Metric label="研究动作" value={formatAction(candidate.research_action)} />
+              <Metric label="策略动作" value={formatAction(candidate.strategy_action)} />
+              <Metric label="策略类型" value={candidate.strategy_type} />
+              <Metric label="理想入场区间" value={formatRange(candidate.ideal_entry_range)} />
+              <Metric label="止损位" value={formatPrice(candidate.stop_loss_price)} />
             </div>
           </article>
         ))
@@ -300,20 +301,20 @@ function CandidateCard({ candidate }: { candidate: ScreenerCandidate }) {
           <p className="mt-2 text-sm leading-6 text-slate-700">{candidate.short_reason}</p>
         </div>
         <Link href={`/stocks/${encodeURIComponent(candidate.symbol)}`} className="text-sm font-semibold text-emerald-700 transition hover:text-emerald-800">
-          Open stock page
+          打开单票页
         </Link>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <Metric label="Action now" value={candidate.action_now ? formatDecisionBriefAction(candidate.action_now) : "-"} />
-        <Metric label="Alpha" value={formatScore(candidate.alpha_score)} />
-        <Metric label="Trigger" value={formatScore(candidate.trigger_score)} />
-        <Metric label="Risk" value={formatScore(candidate.risk_score)} />
-        <Metric label="Latest close" value={formatPrice(candidate.latest_close)} />
-        <Metric label="Bucket" value={candidate.v2_list_type} />
+        <Metric label="当前动作" value={candidate.action_now ? formatDecisionBriefAction(candidate.action_now) : "-"} />
+        <Metric label="Alpha 分" value={formatScore(candidate.alpha_score)} />
+        <Metric label="触发分" value={formatScore(candidate.trigger_score)} />
+        <Metric label="风险分" value={formatScore(candidate.risk_score)} />
+        <Metric label="最新收盘价" value={formatPrice(candidate.latest_close)} />
+        <Metric label="分桶" value={`${formatListType(candidate.v2_list_type)}（${candidate.v2_list_type}）`} />
       </div>
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <StringPanel title="Positive factors" items={candidate.top_positive_factors} />
-        <StringPanel title="Evidence hints" items={candidate.evidence_hints} />
+        <StringPanel title="正向因子" items={candidate.top_positive_factors} />
+        <StringPanel title="证据提示" items={candidate.evidence_hints} />
       </div>
     </article>
   );
@@ -345,7 +346,7 @@ function StringPanel({ title, items }: { title: string; items: string[] }) {
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
       <p className="text-sm font-semibold text-slate-950">{title}</p>
       {items.length === 0 ? (
-        <p className="mt-3 text-sm leading-6 text-slate-600">No items.</p>
+        <p className="mt-3 text-sm leading-6 text-slate-600">暂无条目。</p>
       ) : (
         <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
           {items.map((item) => (
@@ -377,5 +378,5 @@ function parseOptionalInteger(value: string): number | undefined {
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
-  return "An unexpected error occurred.";
+  return "发生未知错误，请稍后重试。";
 }

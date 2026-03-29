@@ -5,10 +5,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "A-Share Research Assistant",
-    template: "%s | A-Share Research Assistant",
+    default: "A 股研究助手",
+    template: "%s | A 股研究助手",
   },
-  description: "面向中国大陆 A 股市场的轻量研究与策略展示界面。",
+  description: "面向中国大陆 A 股市场的轻量研究与决策辅助工作台。",
 };
 
 type RootLayoutProps = {

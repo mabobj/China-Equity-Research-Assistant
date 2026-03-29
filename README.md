@@ -1,38 +1,42 @@
-# A-Share Research Assistant
+# A 股研究助手
 
-Single-user research and decision-support workspace for China A-share equities.
+面向中国大陆 A 股市场的单用户研究与决策辅助工作台。
 
-## Scope
-Current phase includes:
-- Single-stock workspace
-- Screener and deep-review workflows
-- Structured outputs (`review-report v2`, `debate-review`, `strategy plan`, `decision brief`)
-- Workflow run records
+## 当前范围
 
-Current phase does **not** include:
-- Live trading execution
-- Broker order integration
-- Trade journal/replay automation
-- Scheduler/queue/DAG platform
+当前阶段已包含：
+- 单票工作台
+- 选股与深筛工作流
+- 结构化输出（`review-report v2`、`debate-review`、`strategy plan`、`decision brief`）
+- 工作流运行记录
 
-## Terminology Convergence
-- `review-report v2`: primary single-stock research artifact.
-- `debate-review`: structured adjudication layer.
-- `strategy plan`: structured action planning layer.
-- `workflow run record`: persisted workflow metadata, step summaries, and final summary.
-- `/reviews`: reserved route, not enabled in current phase.
+当前阶段不包含：
+- 自动实盘交易
+- 券商下单集成
+- 交易复盘自动化闭环
+- 调度器/队列/DAG 平台
 
-## Main Entrances
-- Single-stock main entrance: `GET /stocks/{symbol}/workspace-bundle`
-- Screener main entrance: `POST /workflows/screener/run` + `GET /workflows/runs/{run_id}`
-- Deep review main entrance: `POST /workflows/deep-review/run` + `GET /workflows/runs/{run_id}`
+## 术语统一
 
-Compatible legacy endpoints are still available but are no longer the primary UI path:
+- `review-report v2`：单票主研究产物。
+- `debate-review`：结构化裁决层。
+- `strategy plan`：结构化行动建议层。
+- `workflow run record`：工作流运行元数据、节点摘要与最终摘要。
+- `/reviews`：预留路由，当前未启用。
+
+## 主入口
+
+- 单票主入口：`GET /stocks/{symbol}/workspace-bundle`
+- 初筛工作流主入口：`POST /workflows/screener/run` + `GET /workflows/runs/{run_id}`
+- 深筛工作流主入口：`POST /workflows/deep-review/run` + `GET /workflows/runs/{run_id}`
+
+兼容旧入口（保留但不作为前端主路径）：
 - `GET /screener/run`
 - `GET /screener/deep-run`
 
 ## Workspace Bundle
-`GET /stocks/{symbol}/workspace-bundle` returns one bundle:
+
+`GET /stocks/{symbol}/workspace-bundle` 一次返回：
 - `profile`
 - `factor_snapshot`
 - `review_report`
@@ -44,13 +48,14 @@ Compatible legacy endpoints are still available but are no longer the primary UI
 - `evidence_manifest`
 - `freshness_summary`
 
-Bundle behavior:
-- Uses `200 + module_status_summary` for partial failures.
-- Keeps old detail endpoints for compatibility.
-- Exposes runtime/fallback visibility fields at bundle level and module level where available.
+行为约定：
+- 采用 `200 + module_status_summary` 表达部分模块失败。
+- 保留细粒度旧接口以兼容现有调用。
+- 在 bundle 和相关模块中暴露 runtime/fallback 可见字段。
 
-## Daily Data Products
-Current daily products:
+## 日级数据产品
+
+当前日级数据产品包括：
 - `daily_bars_daily`
 - `announcements_daily`
 - `financial_summary_daily`
@@ -61,60 +66,67 @@ Current daily products:
 - `decision_brief_daily`
 - `screener_snapshot_daily`
 
-## Freshness and Reuse Policy
-Default policy:
-- Use last closed trading day (`as_of_date`) by default.
-- Read local daily artifact first.
-- Recompute only missing/stale parts.
-- Remote refresh is triggered only when `force_refresh=true`.
+## Freshness 与复用策略
 
-Daily outputs should expose:
+默认策略：
+- 默认使用最后一个已收盘交易日（`as_of_date`）。
+- 优先读取本地日级产物。
+- 仅在缺失或过期时重算。
+- 仅在 `force_refresh=true` 时主动刷新远端。
+
+日级输出应尽量携带：
 - `as_of_date`
 - `freshness_mode`
 - `source_mode`
 
-## Daily vs On-Demand Boundary
-Daily snapshot first:
-- Factor/review/debate/strategy/decision brief/screener snapshot.
+## 日级与按需计算边界
 
-Still mostly on-demand:
-- Intraday-heavy `trigger_snapshot`.
-- Real-time progress state objects (for example debate progress polling state).
+优先按日快照复用：
+- factor/review/debate/strategy/decision brief/screener snapshot。
 
-## Runtime/Fallback Visibility Fields
-Key responses (`debate-review`, `workspace-bundle`, `workflows/runs/{run_id}`) expose:
+仍主要按需计算：
+- 依赖盘中数据的 `trigger_snapshot`。
+- 运行进度类实时状态对象（例如 debate 进度轮询）。
+
+## Runtime/Fallback 可见字段
+
+关键响应（`debate-review`、`workspace-bundle`、`workflows/runs/{run_id}`）暴露：
 - `provider_used`
-- `provider_candidates` (optional)
+- `provider_candidates`（可选）
 - `fallback_applied`
 - `fallback_reason`
 - `runtime_mode_requested`
 - `runtime_mode_effective`
 - `warning_messages`
 
-Deep-review run details also expose partial-failure symbols (`failed_symbols`) when available.
+深筛工作流明细中可见局部失败符号（`failed_symbols`）。
 
-## Workflow Run Records
-- Persisted locally under `data/workflow_runs/{run_id}.json`.
-- Official query path in this phase: `GET /workflows/runs/{run_id}`.
-- Lightweight list/filter retrieval is not introduced in this close-out round.
+## 工作流运行记录
 
-## Frontend Routes
-- `/`: workspace landing page
-- `/stocks/[symbol]`: single-stock workspace
-- `/screener`: screener workspace (workflow mode)
-- `/trades`: reserved
-- `/reviews`: reserved
+- 本地落盘路径：`data/workflow_runs/{run_id}.json`
+- 当前官方查询方式：`GET /workflows/runs/{run_id}`
+- 本轮未引入按日期/名称筛选的列表检索 API
 
-## Docs Navigation
-- [Architecture](docs/architecture.md)
-- [Roadmap](docs/roadmap.md)
-- [Stability Audit v1 (with closure update)](docs/audits/stability-review-v1.md)
-- [Quickstart](docs/manuals/quickstart.md)
-- [Daily Usage](docs/manuals/daily-usage.md)
-- [Data and Limitations](docs/manuals/data-and-limitations.md)
-- [Troubleshooting](docs/manuals/troubleshooting.md)
+## 前端路由
 
-## Local Setup
+- `/`：工作台首页
+- `/stocks/[symbol]`：单票工作台
+- `/screener`：选股工作台（工作流模式）
+- `/trades`：预留
+- `/reviews`：预留
+
+## 文档导航
+
+- [系统架构](docs/architecture.md)
+- [路线图](docs/roadmap.md)
+- [稳定性审计 v1（含结案更新）](docs/audits/stability-review-v1.md)
+- [快速开始](docs/manuals/quickstart.md)
+- [日常使用说明](docs/manuals/daily-usage.md)
+- [数据源与边界](docs/manuals/data-and-limitations.md)
+- [故障排查](docs/manuals/troubleshooting.md)
+
+## 本地启动
+
 ```powershell
 Copy-Item .env.example .env
 python -m venv .venv
@@ -125,24 +137,28 @@ npm install
 Set-Location ..
 ```
 
-Start services:
+启动服务：
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_backend.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
 ```
 
-Default URLs:
-- Backend health: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
-- Backend docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- Frontend: [http://127.0.0.1:3000](http://127.0.0.1:3000)
+默认地址：
+- 后端健康检查：[http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
+- 后端文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- 前端页面：[http://127.0.0.1:3000](http://127.0.0.1:3000)
 
-## Test Commands
-Backend:
+## 测试命令
+
+后端：
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 ```
 
-Frontend:
+前端：
+
 ```powershell
 Set-Location frontend
 npm.cmd run lint
@@ -150,15 +166,17 @@ npm.cmd run type-check
 npm.cmd run test:smoke
 ```
 
-Focused stability checks:
+稳定性重点测试：
+
 ```powershell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
 python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py -q
 ```
 
-## Architecture Principles
-- Keep routes thin.
-- Keep business logic in services.
-- Access external data via providers only.
-- Keep core outputs typed and structured.
-- Prefer stable, explainable logic over flashy behavior.
+## 架构原则
+
+- 路由层保持轻薄。
+- 业务逻辑集中在服务层。
+- 外部数据统一通过 provider 层接入。
+- 核心输出优先结构化与类型化。
+- 以稳定、可解释、可维护为先。

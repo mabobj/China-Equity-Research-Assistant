@@ -105,7 +105,7 @@ export function DbConsole() {
           </label>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-700">limit</span>
+              <span className="text-sm font-medium text-slate-700">返回上限（limit）</span>
               <input
                 value={limit}
                 onChange={(event) => setLimit(event.target.value)}

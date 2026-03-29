@@ -27,12 +27,12 @@ runCheck("stock page mounts stock workspace", () => {
   );
   assertContains(
     source,
-    "review-report v2 (primary research artifact)",
+    "review-report v2（主研究产物）",
     "stock page should label review-report v2 as the primary artifact",
   );
   assertContains(
     source,
-    "debate-review (structured adjudication)",
+    "debate-review（结构化裁决）",
     "stock page should label debate-review as structured adjudication",
   );
 });
@@ -46,7 +46,7 @@ runCheck("stock workspace uses workspace-bundle as primary data source", () => {
   );
   assertContains(
     source,
-    "Loading workspace bundle",
+    "正在加载工作台聚合",
     "stock workspace should expose loading state text",
   );
   assertContains(
@@ -56,7 +56,7 @@ runCheck("stock workspace uses workspace-bundle as primary data source", () => {
   );
   assertContains(
     source,
-    "Fallback applied",
+    "已触发降级",
     "stock workspace should show fallback status when present",
   );
 });
@@ -80,7 +80,7 @@ runCheck("screener workspace triggers workflow run and polling", () => {
   );
   assertContains(
     source,
-    "workflow run records",
+    "初筛工作流",
     "screener workspace should mention workflow run records",
   );
 });
@@ -102,12 +102,12 @@ runCheck("workflow summary component renders status and final output summary", (
 
 runCheck("reserved pages keep explicit not-enabled wording", () => {
   const reviewsSource = read("src/app/reviews/page.tsx");
-  assertContains(reviewsSource, "Reviews (Reserved)", "reviews page should stay reserved");
-  assertContains(reviewsSource, "not enabled", "reviews page should explicitly show not enabled");
+  assertContains(reviewsSource, "复盘记录（预留）", "reviews page should stay reserved");
+  assertContains(reviewsSource, "未启用", "reviews page should explicitly show not enabled");
 
   const tradesSource = read("src/app/trades/page.tsx");
-  assertContains(tradesSource, "Trades (Reserved)", "trades page should stay reserved");
-  assertContains(tradesSource, "not enabled", "trades page should explicitly show not enabled");
+  assertContains(tradesSource, "交易记录（预留）", "trades page should stay reserved");
+  assertContains(tradesSource, "未启用", "trades page should explicitly show not enabled");
 });
 
 runCheck("home page keeps naming convergence hints", () => {
@@ -124,7 +124,7 @@ runCheck("home page keeps naming convergence hints", () => {
   );
   assertContains(
     source,
-    "workflow run record",
+    "工作流运行记录（workflow run record）",
     "home page should keep workflow run record wording",
   );
 });

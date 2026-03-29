@@ -53,6 +53,21 @@ const STEP_STATUS_LABELS: Record<WorkflowStepStatus, string> = {
   skipped: "已跳过",
 };
 
+const GENERIC_LABELS: Record<string, string> = {
+  idle: "空闲",
+  loading: "加载中",
+  success: "成功",
+  error: "错误",
+  pending: "待执行",
+  running: "运行中",
+  completed: "已完成",
+  failed: "失败",
+  llm: "LLM",
+  rule_based: "规则版",
+  fallback_rule_based: "规则回退",
+  cache_hit: "命中本地缓存",
+};
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return "-";
@@ -116,6 +131,9 @@ export function formatPercent(value: number | null | undefined): string {
 export function formatLabel(value: string | null | undefined): string {
   if (!value) {
     return "-";
+  }
+  if (GENERIC_LABELS[value]) {
+    return GENERIC_LABELS[value];
   }
   return value.replace(/_/g, " ");
 }

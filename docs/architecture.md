@@ -1,44 +1,48 @@
-# Architecture
+# 系统架构
 
-## Purpose
-This document describes the current implemented architecture, with emphasis on:
-- layer boundaries
-- main user-facing output chain
-- daily data product reuse
-- workflow/runtime visibility
+## 文档目标
 
-This phase is focused on stability and maintainability, not feature expansion.
+本文档描述当前已落地的架构状态，重点覆盖：
+- 分层边界
+- 用户主输出链路
+- 日级数据产品复用机制
+- 工作流与运行时可见性
 
-## Layered Structure
+当前阶段聚焦稳定性与可维护性，不扩展新业务能力。
+
+## 分层结构
+
 ```text
-Frontend workspace
-  -> API routes (FastAPI + Next proxy)
-  -> Services (research / debate / strategy / screener / workflow)
-  -> Providers (external data adapters)
-  -> Local storage (SQLite + DuckDB/Parquet + JSON artifacts)
-  -> Schemas (typed request/response contracts)
+前端工作台
+  -> API 路由层（FastAPI + Next 代理）
+  -> 服务层（review / debate / strategy / screener / workflow）
+  -> Provider 层（外部数据适配）
+  -> 本地存储层（SQLite + DuckDB/Parquet + JSON artifacts）
+  -> Schema 层（类型化请求/响应契约）
 ```
 
-Boundary rules:
-- Route layer stays thin.
-- Service layer owns business logic.
-- External data access goes through providers.
-- Structured schema is the default output form.
+边界规则：
+- 路由层保持轻薄。
+- 业务逻辑集中在服务层。
+- 外部数据访问统一通过 provider 层。
+- 关键输出默认结构化。
 
-## Main Output Chain (Single Stock)
-The converged output chain is:
-1. `review-report v2` (primary research artifact)
-2. `debate-review` (structured adjudication)
-3. `strategy plan` (action layer)
-4. `decision brief` (conclusion/evidence/action summary layer)
+## 单票主输出链路
 
-`/reviews` is a reserved route and is not part of the active output chain.
+当前统一主链路为：
+1. `review-report v2`（主研究产物）
+2. `debate-review`（结构化裁决）
+3. `strategy plan`（行动层）
+4. `decision brief`（结论/证据/动作聚合层）
 
-## Primary API Entrances
-### Single-stock
+`/reviews` 是预留路由，不属于当前主链路。
+
+## 主要 API 入口
+
+### 单票
 - `GET /stocks/{symbol}/workspace-bundle`
 
-Bundle includes:
+bundle 返回：
 - `profile`
 - `factor_snapshot`
 - `review_report`
@@ -50,22 +54,24 @@ Bundle includes:
 - `evidence_manifest`
 - `freshness_summary`
 
-### Screener/Deep review
+### 选股与深筛
 - `POST /workflows/screener/run`
 - `POST /workflows/deep-review/run`
 - `GET /workflows/runs/{run_id}`
 
-Legacy screener endpoints remain for compatibility:
+兼容旧入口：
 - `GET /screener/run`
 - `GET /screener/deep-run`
 
-## Daily Data Product Layer
-Path:
+## 日级数据产品层
+
+目录：
+
 ```text
 backend/app/services/data_products/
 ```
 
-Current daily products:
+当前日级数据产品：
 - `daily_bars_daily`
 - `announcements_daily`
 - `financial_summary_daily`
@@ -76,60 +82,67 @@ Current daily products:
 - `decision_brief_daily`
 - `screener_snapshot_daily`
 
-### Reuse policy
-`workspace-bundle`, workflows, and single-module endpoints should:
-1. read same-day local daily snapshots first
-2. compute on demand only when missing/stale
-3. use remote refresh only when `force_refresh=true`
+### 复用策略
 
-## Freshness Policy
-Default behavior:
-- Daily analysis uses last closed trading day.
-- Page loads do not force current-day remote daily fetch.
-- Responses should expose `as_of_date`, `freshness_mode`, and `source_mode` where applicable.
+`workspace-bundle`、工作流和单模块接口尽量遵循：
+1. 先读同日本地快照
+2. 缺失或过期才按需计算
+3. `force_refresh=true` 时才主动刷新远端
 
-## On-Demand Boundary
-Still mostly on-demand in this phase:
-- Intraday-heavy trigger snapshot paths.
-- Runtime progress state objects.
+## Freshness 策略
 
-This boundary is intentional to keep implementation stable without introducing heavy orchestration.
+默认行为：
+- 日级分析使用最后一个已收盘交易日。
+- 页面访问不默认追当天远端日线。
+- 响应尽量携带 `as_of_date`、`freshness_mode`、`source_mode`。
 
-## Runtime/Fallback Visibility
-Key responses expose structured runtime visibility:
+## 按需计算边界
+
+当前仍主要按需计算：
+- 强依赖盘中数据的 `trigger_snapshot`
+- 运行进度类状态对象
+
+该边界是有意保留，用于控制复杂度与稳定性风险。
+
+## Runtime / Fallback 可见性
+
+关键响应暴露以下字段：
 - `provider_used`
-- `provider_candidates` (optional)
+- `provider_candidates`（可选）
 - `fallback_applied`
 - `fallback_reason`
 - `runtime_mode_requested`
 - `runtime_mode_effective`
 - `warning_messages`
 
-Partial-failure symbols for workflow runs are exposed through run detail fields such as `failed_symbols`.
+工作流局部失败会通过 `failed_symbols` 等字段体现。
 
 ## Workflow Runtime
-Path:
+
+目录：
+
 ```text
 backend/app/services/workflow_runtime/
 ```
 
-Role:
-- explicit node orchestration
+职责：
+- 节点编排执行
 - `start_from` / `stop_after`
-- run record persistence
-- step summary and final summary aggregation
+- 运行记录持久化
+- 步骤摘要与最终摘要聚合
 
-Out of scope:
-- scheduler
-- queue
-- generic DAG editor
+明确不做：
+- 调度器
+- 队列
+- DAG 可视化编辑器
 
-Run record storage:
+运行记录存储：
+
 ```text
 data/workflow_runs/{run_id}.json
 ```
 
-Query in current phase is run-id based:
+当前查询方式：
 - `GET /workflows/runs/{run_id}`
 
-No list/filter run-index API is introduced in this close-out round.
+本轮未引入运行记录列表检索接口。

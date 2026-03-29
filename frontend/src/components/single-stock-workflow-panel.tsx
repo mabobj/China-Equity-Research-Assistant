@@ -2,14 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import {
-  getWorkflowRunDetail,
-  runSingleStockWorkflow,
-} from "@/lib/api";
-import type {
-  WorkflowRunDetailResponse,
-  WorkflowRunResponse,
-} from "@/types/api";
+import { getWorkflowRunDetail, runSingleStockWorkflow } from "@/lib/api";
+import type { WorkflowRunDetailResponse, WorkflowRunResponse } from "@/types/api";
 
 import { SectionCard } from "./section-card";
 import { StatusBlock } from "./status-block";
@@ -27,9 +21,7 @@ type SingleStockWorkflowPanelProps = {
   symbol: string;
 };
 
-export function SingleStockWorkflowPanel({
-  symbol,
-}: SingleStockWorkflowPanelProps) {
+export function SingleStockWorkflowPanel({ symbol }: SingleStockWorkflowPanelProps) {
   const [startFrom, setStartFrom] = useState("");
   const [stopAfter, setStopAfter] = useState("");
   const [useLlm, setUseLlm] = useState(false);
@@ -87,13 +79,13 @@ export function SingleStockWorkflowPanel({
 
   return (
     <SectionCard
-      title="单票 Workflow"
-      description="直接在工作台里运行 single_stock_full_review。支持从中间节点启动，也可以按 run_id 回看本次执行记录。"
+      title="单票工作流"
+      description="在单票页面直接运行 single_stock_full_review。支持从中间节点启动，也支持按 run_id 回查运行记录。"
     >
       <div id="workflow" className="space-y-5">
         <form className="grid gap-4 lg:grid-cols-4" onSubmit={handleRun}>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-slate-700">symbol</span>
+            <span className="text-sm font-medium text-slate-700">股票代码</span>
             <input
               value={symbol}
               readOnly
@@ -101,13 +93,13 @@ export function SingleStockWorkflowPanel({
             />
           </label>
           <NodeSelect
-            label="start_from"
+            label="起始节点（start_from）"
             value={startFrom}
             onChange={setStartFrom}
             options={SINGLE_STOCK_WORKFLOW_NODES}
           />
           <NodeSelect
-            label="stop_after"
+            label="截止节点（stop_after）"
             value={stopAfter}
             onChange={setStopAfter}
             options={SINGLE_STOCK_WORKFLOW_NODES}
@@ -129,18 +121,18 @@ export function SingleStockWorkflowPanel({
               disabled={loading}
               className="min-h-11 rounded-2xl bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
             >
-              {loading ? "正在执行 workflow..." : "运行 single_stock_full_review"}
+              {loading ? "工作流执行中..." : "运行 single_stock_full_review"}
             </button>
           </div>
         </form>
 
         <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
           <label className="space-y-2">
-            <span className="text-sm font-medium text-slate-700">按 run_id 查看记录</span>
+            <span className="text-sm font-medium text-slate-700">按 run_id 回查</span>
             <input
               value={lookupRunId}
               onChange={(event) => setLookupRunId(event.target.value)}
-              placeholder="输入 workflow run_id"
+              placeholder="输入工作流 run_id"
               className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
             />
           </label>
@@ -154,11 +146,9 @@ export function SingleStockWorkflowPanel({
           </button>
         </div>
 
-        {error ? (
-          <StatusBlock title="执行失败" description={error} tone="error" />
-        ) : null}
+        {error ? <StatusBlock title="执行失败" description={error} tone="error" /> : null}
         {lookupError ? (
-          <StatusBlock title="读取失败" description={lookupError} tone="error" />
+          <StatusBlock title="回查失败" description={lookupError} tone="error" />
         ) : null}
         {!run && !loading && !error ? (
           <StatusBlock
@@ -191,7 +181,7 @@ function NodeSelect({
         onChange={(event) => onChange(event.target.value)}
         className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
       >
-        <option value="">从头开始 / 运行到末尾</option>
+        <option value="">从头开始 / 执行到末尾</option>
         {options.map((option) => (
           <option key={option} value={option}>
             {option}

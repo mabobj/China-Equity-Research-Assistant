@@ -6,72 +6,72 @@ import { SymbolSearchForm } from "@/components/symbol-search-form";
 
 const FEATURE_ITEMS = [
   {
-    title: "Single-Stock Workspace",
+    title: "单票工作台",
     description:
-      "Open one symbol and follow the main chain: profile, factor snapshot, review-report v2, debate-review, strategy plan, and trigger snapshot.",
+      "输入一个股票代码后，按主链路查看：基础信息、因子快照、review-report v2、debate-review、策略计划（strategy plan）、触发快照（trigger snapshot）。",
     href: "/stocks/600519.SH",
-    actionLabel: "Open single-stock workspace",
+    actionLabel: "进入单票工作台",
   },
   {
-    title: "Screener Workspace",
+    title: "选股工作台",
     description:
-      "Run refresh, initial screener, and deep review in one place. Candidate cards are linked back to the single-stock workspace.",
+      "在同一页面完成数据补全、初筛与深筛；候选卡片可直接跳转到单票页面继续分析。",
     href: "/screener",
-    actionLabel: "Open screener workspace",
+    actionLabel: "进入选股工作台",
   },
   {
-    title: "Workflow Runs",
+    title: "工作流运行记录",
     description:
-      "Both screens use workflow run records. You can track run_id, node summaries, and final output without long blocking requests.",
+      "单票和选股页面都使用工作流模式，可查看 run_id、节点摘要和最终输出摘要，避免长请求阻塞。",
     href: "/screener#workflow",
-    actionLabel: "Open workflow panel",
+    actionLabel: "查看工作流面板",
   },
   {
-    title: "Trades and Reviews",
+    title: "交易与复盘",
     description:
-      "Both pages are intentionally reserved in this phase. They clearly show not-enabled status instead of fake functionality.",
+      "当前阶段这两个页面为预留态，会明确标注“未启用”，不会展示伪造功能。",
     href: "/trades",
-    actionLabel: "See reserved pages",
+    actionLabel: "查看预留页面",
   },
 ] as const;
 
 export default function HomePage() {
   return (
     <PageShell
-      title="A-Share Research Assistant Workspace"
-      description="The UI is organized as an operator workspace instead of a raw API dump: clear entry points, stable wording, and visible workflow progress."
+      title="A 股研究助手工作台"
+      description="前端按工作台方式组织：入口清晰、术语统一、关键运行状态可见。"
     >
       <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
         <SectionCard
-          title="Start from one symbol"
-          description="Input a stock code and jump directly into the single-stock workspace."
+          title="从单票开始"
+          description="输入股票代码后可直接进入单票工作台。"
         >
           <div className="space-y-5">
             <p className="text-sm leading-7 text-slate-700">
-              Recommended first check: use <code>600519.SH</code>, review the main
-              output chain, then trigger <code>single_stock_full_review</code> only when needed.
+              推荐先用 <code>600519.SH</code> 做最小验证，先看主输出链路，再按需触发
+              <code>single_stock_full_review</code>。
             </p>
             <SymbolSearchForm />
           </div>
         </SectionCard>
 
         <SectionCard
-          title="Current scope"
-          description="This phase focuses on research output stability, not trading execution."
+          title="当前能力范围"
+          description="本阶段聚焦研究输出稳定性，不涉及自动交易执行。"
         >
           <div className="space-y-3">
-            <FeaturePill label="Single-stock research output" />
-            <FeaturePill label="Structured debate adjudication" />
-            <FeaturePill label="Strategy plan output" />
-            <FeaturePill label="Screener workflows" />
-            <FeaturePill label="Workflow run records" />
+            <FeaturePill label="单票研究输出" />
+            <FeaturePill label="结构化裁决" />
+            <FeaturePill label="策略计划输出" />
+            <FeaturePill label="选股工作流" />
+            <FeaturePill label="工作流运行记录" />
           </div>
         </SectionCard>
       </div>
 
       <SectionCard
-        title="Recommended Entry Points"
-        description="Use these stable entrances instead of manually combining many endpoints."
+        title="推荐入口"
+        description="优先使用稳定入口，而不是手工拼接多个接口。"
       >
         <div className="grid gap-4 md:grid-cols-2">
           {FEATURE_ITEMS.map((item) => (
@@ -80,9 +80,7 @@ export default function HomePage() {
               className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
             >
               <h2 className="text-base font-semibold text-slate-950">{item.title}</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                {item.description}
-              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{item.description}</p>
               <Link
                 href={item.href}
                 className="mt-4 inline-flex rounded-2xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800"
@@ -95,22 +93,21 @@ export default function HomePage() {
       </SectionCard>
 
       <SectionCard
-        title="Naming Conventions"
-        description="Wording is intentionally converged in this audit close-out."
+        title="术语说明"
+        description="以下术语在页面和文档中保持一致。"
       >
         <ul className="space-y-3 text-sm leading-7 text-slate-700">
           <li>
-            <strong>review-report v2</strong> is the main single-stock research artifact.
+            <strong>review-report v2</strong>：单票主研究产物。
           </li>
           <li>
-            <strong>debate-review</strong> is the structured adjudication layer.
+            <strong>debate-review</strong>：结构化裁决层。
           </li>
           <li>
-            <strong>/reviews</strong> is reserved and currently not enabled.
+            <strong>/reviews</strong>：预留页面，当前未启用。
           </li>
           <li>
-            <strong>workflow run record</strong> means saved run metadata and step
-            summaries, not manual review notes.
+            <strong>工作流运行记录（workflow run record）</strong>：工作流运行元数据与步骤摘要，不等于人工复盘笔记。
           </li>
         </ul>
       </SectionCard>
