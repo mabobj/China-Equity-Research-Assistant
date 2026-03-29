@@ -48,6 +48,7 @@ Status: acceptable.
 Status: improved compared with earlier baseline.
 - Workspace-bundle remains the single-stock main entrance.
 - Daily product reuse is documented and implemented for primary artifacts.
+This item was materially addressed in later follow-up packs; see closure update.
 
 ### Remaining robustness risks
 - Trigger/intraday paths are still mostly on-demand and may vary by provider availability.
@@ -58,6 +59,7 @@ Status: improved compared with earlier baseline.
 ### P0 (must keep guarded)
 1. Keep regression tests for workspace-bundle partial failure behavior and workflow polling compatibility.
 2. Keep fallback visibility fields stable to avoid silent degrade behavior.
+These items were materially addressed in later follow-up packs; see closure update.
 
 ### P1 (next stability iterations)
 1. Add lightweight run-record query capabilities (by date/workflow/symbol) only if interface cost remains small.
@@ -83,3 +85,23 @@ Not introduced (by design):
 - No new business APIs.
 - No data-productization expansion beyond current scope.
 - No workflow scheduler/queue/DAG changes.
+
+## 2026-03-30 Closure Update
+
+### Closed Items
+The following items are now considered closed for this audit line:
+- Main-chain terminology convergence across frontend copy, README, and architecture docs.
+- `workspace-bundle` as the primary single-stock entrance.
+- Workflow-mode replacement for long synchronous screener page requests.
+- Structured runtime/fallback visibility in key responses.
+- Key backend integration tests and minimum frontend smoke coverage for critical paths.
+- Productization of `review_report`, `debate_review`, and `strategy_plan` into daily data products.
+- `workspace-bundle` preferring daily snapshot reuse to reduce synchronous blocking pressure.
+
+### Remaining Technical Debt
+- Python 3.9 test/runtime compatibility debt remains and should continue to be handled explicitly in test and typing practices.
+- Optional low-priority follow-ups remain (light document/UX polish), but they are no longer treated as primary stability risk.
+
+### Current Risk Posture
+The dominant risk focus has shifted from main-chain stability to environment compatibility debt and incremental UX/documentation polish.
+This is not a claim of perfect resolution; it reflects that prior P0/P1 chain-stability concerns were materially reduced.

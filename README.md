@@ -108,7 +108,7 @@ Deep-review run details also expose partial-failure symbols (`failed_symbols`) w
 ## Docs Navigation
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
-- [Stability Audit v1](docs/audits/stability-review-v1.md)
+- [Stability Audit v1 (with closure update)](docs/audits/stability-review-v1.md)
 - [Quickstart](docs/manuals/quickstart.md)
 - [Daily Usage](docs/manuals/daily-usage.md)
 - [Data and Limitations](docs/manuals/data-and-limitations.md)
