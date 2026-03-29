@@ -1,5 +1,7 @@
 """Tests for decision brief builders and service."""
 
+from __future__ import annotations
+
 from datetime import date, datetime
 
 from app.schemas.debate import (
@@ -51,7 +53,7 @@ def test_build_evidence_layer_returns_traceable_evidence() -> None:
     assert len(result.why_not_all_in) <= 3
     assert any(item.source_module == "factor_snapshot" for item in result.key_evidence)
     assert any(item.source_module == "review_report" for item in result.key_risks)
-    assert any(item.label == "理想观察区间" for item in result.price_levels_to_watch)
+    assert any(item.label == "Ideal entry zone" for item in result.price_levels_to_watch)
 
 
 def test_decision_brief_service_builds_actionable_summary() -> None:

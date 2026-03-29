@@ -1,5 +1,7 @@
 """因子快照与分数组合 schema。"""
 
+from __future__ import annotations
+
 from datetime import date
 from typing import Literal, Optional
 
@@ -65,6 +67,8 @@ class FactorSnapshot(BaseModel):
 
     symbol: str
     as_of_date: date
+    freshness_mode: Optional[str] = None
+    source_mode: Optional[str] = None
     raw_factors: dict[str, Optional[float]] = Field(default_factory=dict)
     normalized_factors: dict[str, Optional[float]] = Field(default_factory=dict)
     factor_group_scores: list[FactorGroupScore] = Field(default_factory=list)

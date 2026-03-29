@@ -1,20 +1,23 @@
-"""LLM 与规则版 debate 运行时回退服务。"""
+"""Runtime facade for rule-based and LLM debate execution."""
 
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from app.schemas.debate import DebateReviewProgress, DebateReviewReport
-from app.services.debate_service.debate_orchestrator import DebateOrchestrator
+from app.schemas.debate import DebateReviewProgress, DebateReviewReport, SingleStockResearchInputs
 from app.services.llm_debate_service.base import LLMDebateSettings
-from app.services.llm_debate_service.llm_debate_orchestrator import LLMDebateOrchestrator
 from app.services.llm_debate_service.progress_tracker import DebateProgressTracker
+
+if TYPE_CHECKING:
+    from app.services.debate_service.debate_orchestrator import DebateOrchestrator
+    from app.services.llm_debate_service.llm_debate_orchestrator import LLMDebateOrchestrator
 
 logger = logging.getLogger(__name__)
 
 
 class DebateRuntimeService:
-    """统一封装 rule-based 与 llm 两种 debate 运行时。"""
+    """Choose LLM or rule-based debate execution with controlled fallback."""
 
     def __init__(
         self,
@@ -34,7 +37,6 @@ class DebateRuntimeService:
         use_llm: bool | None = None,
         request_id: str | None = None,
     ) -> DebateReviewReport:
-        """根据配置或显式参数选择运行时，并在失败时自动回退。"""
         requested_llm = self._settings.enabled if use_llm is None else use_llm
         should_use_llm = self._settings.enabled and requested_llm
         logger.debug(
@@ -48,53 +50,43 @@ class DebateRuntimeService:
             return self._get_rule_based_report(
                 symbol=symbol,
                 request_id=request_id,
-                reason_message="当前使用规则版裁决。",
+                reason_message="Using the rule-based debate runtime.",
             )
 
         self._progress_tracker.start(
             symbol=symbol,
             request_id=request_id,
             runtime_mode="llm",
-            message="已提交 LLM debate-review，请等待后台顺序执行各角色。",
+            message="LLM debate-review submitted and waiting for role execution.",
         )
 
         if not self._settings.api_key:
-            logger.info("LLM debate 未配置 API key，自动回退规则版。symbol=%s", symbol)
+            logger.info(
+                "debate.runtime.llm_unavailable symbol=%s reason=missing_api_key",
+                symbol,
+            )
             self._progress_tracker.update(
                 symbol=symbol,
                 request_id=request_id,
                 status="fallback",
                 stage="fallback_rule_based",
                 runtime_mode="llm",
-                current_step="LLM 不可用，切换规则版",
+                current_step="Switching to rule-based debate",
                 completed_steps=0,
                 total_steps=0,
-                message="未配置 LLM API key，已自动切换到规则版。",
+                message="LLM API key is missing; switched to rule-based debate.",
             )
             return self._get_rule_based_report(
                 symbol=symbol,
                 request_id=request_id,
-                reason_message="LLM 未配置，已自动切换规则版。",
+                reason_message="LLM is unavailable, switched to rule-based debate.",
             )
 
         try:
-            if request_id is None:
-                report = self._llm_orchestrator.get_debate_review_report(symbol)
-            else:
-                report = self._llm_orchestrator.get_debate_review_report(
-                    symbol,
-                    request_id=request_id,
-                )
-            logger.debug(
-                "debate.runtime.llm_success symbol=%s final_action=%s confidence=%s",
-                symbol,
-                report.final_action,
-                report.confidence,
-            )
-            return report
+            return self._call_llm_report(symbol=symbol, request_id=request_id)
         except Exception as exc:
             logger.warning(
-                "LLM debate 执行失败，自动回退规则版。symbol=%s error=%s",
+                "debate.runtime.llm_failed symbol=%s error=%s",
                 symbol,
                 exc,
             )
@@ -104,16 +96,75 @@ class DebateRuntimeService:
                 status="fallback",
                 stage="fallback_rule_based",
                 runtime_mode="llm",
-                current_step="LLM 执行失败，切换规则版",
+                current_step="Switching to rule-based debate",
                 completed_steps=0,
                 total_steps=0,
-                message="LLM 执行失败，正在回退到规则版。",
+                message="LLM debate failed; switched to rule-based debate.",
                 error_message=str(exc),
             )
             return self._get_rule_based_report(
                 symbol=symbol,
                 request_id=request_id,
-                reason_message="LLM 执行失败，已自动切换规则版。",
+                reason_message="LLM failed, switched to rule-based debate.",
+            )
+
+    def get_debate_review_report_from_inputs(
+        self,
+        inputs: SingleStockResearchInputs,
+        *,
+        use_llm: bool | None = None,
+        request_id: str | None = None,
+    ) -> DebateReviewReport:
+        requested_llm = self._settings.enabled if use_llm is None else use_llm
+        should_use_llm = self._settings.enabled and requested_llm
+        if not should_use_llm:
+            return self._get_rule_based_report_from_inputs(
+                inputs=inputs,
+                request_id=request_id,
+                reason_message="Using the rule-based debate runtime.",
+            )
+
+        self._progress_tracker.start(
+            symbol=inputs.symbol,
+            request_id=request_id,
+            runtime_mode="llm",
+            message="LLM debate-review submitted and waiting for role execution.",
+        )
+
+        if not self._settings.api_key:
+            return self._get_rule_based_report_from_inputs(
+                inputs=inputs,
+                request_id=request_id,
+                reason_message="LLM is unavailable, switched to rule-based debate.",
+            )
+
+        try:
+            return self._call_llm_report_from_inputs(
+                inputs=inputs,
+                request_id=request_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "debate.runtime.llm_failed symbol=%s error=%s",
+                inputs.symbol,
+                exc,
+            )
+            self._progress_tracker.update(
+                symbol=inputs.symbol,
+                request_id=request_id,
+                status="fallback",
+                stage="fallback_rule_based",
+                runtime_mode="llm",
+                current_step="Switching to rule-based debate",
+                completed_steps=0,
+                total_steps=0,
+                message="LLM debate failed; switched to rule-based debate.",
+                error_message=str(exc),
+            )
+            return self._get_rule_based_report_from_inputs(
+                inputs=inputs,
+                request_id=request_id,
+                reason_message="LLM failed, switched to rule-based debate.",
             )
 
     def get_debate_review_progress(
@@ -123,7 +174,6 @@ class DebateRuntimeService:
         request_id: str | None = None,
         use_llm: bool | None = None,
     ) -> DebateReviewProgress:
-        """返回当前 symbol/request_id 对应的运行进度。"""
         runtime_mode = (
             "llm"
             if (self._settings.enabled and (use_llm if use_llm is not None else True))
@@ -142,33 +192,92 @@ class DebateRuntimeService:
         request_id: str | None,
         reason_message: str,
     ) -> DebateReviewReport:
+        build_inputs = getattr(self._rule_based_orchestrator, "build_inputs", None)
+        if not callable(build_inputs):
+            report = self._rule_based_orchestrator.get_debate_review_report(symbol)
+            return report.model_copy(update={"runtime_mode": "rule_based"})
+
+        inputs = build_inputs(symbol)
+        return self._get_rule_based_report_from_inputs(
+            inputs=inputs,
+            request_id=request_id,
+            reason_message=reason_message,
+        )
+
+    def _get_rule_based_report_from_inputs(
+        self,
+        *,
+        inputs: SingleStockResearchInputs,
+        request_id: str | None,
+        reason_message: str,
+    ) -> DebateReviewReport:
         self._progress_tracker.update(
-            symbol=symbol,
+            symbol=inputs.symbol,
             request_id=request_id,
             status="running",
             stage="rule_based",
             runtime_mode="rule_based",
-            current_step="规则版裁决",
+            current_step="Running rule-based debate",
             completed_steps=0,
             total_steps=1,
             message=reason_message,
         )
-        report = self._rule_based_orchestrator.get_debate_review_report(symbol)
+        get_from_inputs = getattr(
+            self._rule_based_orchestrator,
+            "get_debate_review_report_from_inputs",
+            None,
+        )
+        if callable(get_from_inputs):
+            report = get_from_inputs(inputs)
+        else:
+            report = self._rule_based_orchestrator.get_debate_review_report(inputs.symbol)
         logger.debug(
             "debate.runtime.rule_based symbol=%s final_action=%s confidence=%s",
-            symbol,
+            inputs.symbol,
             report.final_action,
             report.confidence,
         )
         self._progress_tracker.update(
-            symbol=symbol,
+            symbol=inputs.symbol,
             request_id=request_id,
             status="completed",
             stage="completed",
             runtime_mode="rule_based",
-            current_step="规则版裁决完成",
+            current_step="Rule-based debate completed",
             completed_steps=1,
             total_steps=1,
-            message="规则版 debate-review 已完成。",
+            message="Rule-based debate-review completed.",
         )
         return report.model_copy(update={"runtime_mode": "rule_based"})
+
+    def _call_llm_report(
+        self,
+        *,
+        symbol: str,
+        request_id: str | None,
+    ) -> DebateReviewReport:
+        try:
+            return self._llm_orchestrator.get_debate_review_report(
+                symbol,
+                request_id=request_id,
+            )
+        except TypeError:
+            return self._llm_orchestrator.get_debate_review_report(symbol)
+
+    def _call_llm_report_from_inputs(
+        self,
+        *,
+        inputs: SingleStockResearchInputs,
+        request_id: str | None,
+    ) -> DebateReviewReport:
+        get_from_inputs = getattr(
+            self._llm_orchestrator,
+            "get_debate_review_report_from_inputs",
+            None,
+        )
+        if callable(get_from_inputs):
+            try:
+                return get_from_inputs(inputs, request_id=request_id)
+            except TypeError:
+                return get_from_inputs(inputs)
+        return self._call_llm_report(symbol=inputs.symbol, request_id=request_id)

@@ -1,5 +1,7 @@
 """结构化交易策略输出 schema。"""
 
+from __future__ import annotations
+
 from datetime import date
 from typing import Literal, Optional
 
@@ -23,6 +25,8 @@ class StrategyPlan(BaseModel):
     symbol: str
     name: str
     as_of_date: date
+    freshness_mode: Optional[str] = None
+    source_mode: Optional[str] = None
     action: Literal["BUY", "WATCH", "AVOID"]
     strategy_type: Literal["pullback", "breakout", "wait", "no_trade"]
     entry_window: str

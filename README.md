@@ -104,6 +104,61 @@
 data/workflow_runs/{run_id}.json
 ```
 
+## Workspace Bundle 与 Workflow 主入口
+
+当前推荐入口已经进一步收敛：
+
+- 单票页主入口：`GET /stocks/{symbol}/workspace-bundle`
+- 选股页主入口：
+  - `POST /workflows/screener/run`
+  - `POST /workflows/deep-review/run`
+  - `GET /workflows/runs/{run_id}`
+
+`workspace-bundle` 会一次性返回单票工作台需要的核心模块：
+
+- `profile`
+- `factor_snapshot`
+- `review_report`
+- `debate_review`
+- `strategy_plan`
+- `trigger_snapshot`
+- `decision_brief`
+- `module_status_summary`
+- `evidence_manifest`
+- `freshness_summary`
+
+## 日级数据产品与 Freshness Policy
+
+当前已经正式引入日级数据产品层，优先覆盖：
+
+- `daily_bars_daily`
+- `announcements_daily`
+- `financial_summary_daily`
+- `factor_snapshot_daily`
+- `decision_brief_daily`
+- `screener_snapshot_daily`
+
+统一规则：
+
+- 默认按最后一个已收盘交易日工作
+- 页面访问不默认追当天日线
+- 本地已有同日结果时优先直接读取本地
+- 只有 `force_refresh=true` 时才主动刷新远端
+- 日级产物尽量附带：
+  - `as_of_date`
+  - `freshness_mode`
+  - `source_mode`
+
+## 证据链
+
+当前 `DecisionBrief`、`workspace-bundle` 和 screener candidate 已补统一证据链字段：
+
+- `EvidenceRef`
+- `EvidenceBundle`
+- `EvidenceManifest`
+
+证据链只回答“这条结论来自哪个数据产品、哪个字段、哪个 provider”，不暴露内部思维链。
+
 ## 本地启动
 
 ### 1. 准备环境变量

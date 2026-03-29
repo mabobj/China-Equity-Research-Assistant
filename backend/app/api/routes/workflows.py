@@ -1,4 +1,6 @@
-"""Workflow 运行相关路由。"""
+"""Workflow runtime routes."""
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -7,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.dependencies import get_workflow_runtime_service
 from app.schemas.workflow import (
     DeepReviewWorkflowRunRequest,
+    ScreenerWorkflowRunRequest,
     SingleStockWorkflowRunRequest,
     WorkflowRunDetailResponse,
     WorkflowRunResponse,
@@ -20,7 +23,6 @@ def run_single_stock_workflow(
     request: SingleStockWorkflowRunRequest,
     service: Any = Depends(get_workflow_runtime_service),
 ) -> WorkflowRunResponse:
-    """运行单票完整研判 workflow。"""
     try:
         return service.run_single_stock_workflow(request)
     except ValueError as exc:
@@ -32,9 +34,19 @@ def run_deep_review_workflow(
     request: DeepReviewWorkflowRunRequest,
     service: Any = Depends(get_workflow_runtime_service),
 ) -> WorkflowRunResponse:
-    """运行深筛复核 workflow。"""
     try:
         return service.run_deep_review_workflow(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/screener/run", response_model=WorkflowRunResponse)
+def run_screener_workflow(
+    request: ScreenerWorkflowRunRequest,
+    service: Any = Depends(get_workflow_runtime_service),
+) -> WorkflowRunResponse:
+    try:
+        return service.run_screener_workflow(request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -44,7 +56,6 @@ def get_workflow_run_detail(
     run_id: str,
     service: Any = Depends(get_workflow_runtime_service),
 ) -> WorkflowRunDetailResponse:
-    """读取 workflow 运行详情。"""
     try:
         return service.get_run_detail(run_id)
     except FileNotFoundError as exc:

@@ -1,10 +1,13 @@
 """结构化选股结果 schema。"""
 
+from __future__ import annotations
+
 from datetime import date
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.evidence import EvidenceRef
 from app.schemas.strategy import PriceRange
 
 
@@ -41,6 +44,16 @@ class ScreenerCandidate(BaseModel):
     top_negative_factors: list[str] = Field(default_factory=list)
     risk_notes: list[str] = Field(default_factory=list)
     short_reason: str
+    headline_verdict: Optional[str] = None
+    action_now: Optional[Literal[
+        "BUY_NOW",
+        "WAIT_PULLBACK",
+        "WAIT_BREAKOUT",
+        "RESEARCH_ONLY",
+        "AVOID",
+    ]] = None
+    evidence_hints: list[str] = Field(default_factory=list)
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list)
 
 
 class ScreenerRunResponse(BaseModel):
@@ -49,6 +62,8 @@ class ScreenerRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     as_of_date: date
+    freshness_mode: Optional[str] = None
+    source_mode: Optional[str] = None
     total_symbols: int = Field(ge=0)
     scanned_symbols: int = Field(ge=0)
     buy_candidates: list[ScreenerCandidate] = Field(default_factory=list)
@@ -90,6 +105,8 @@ class DeepScreenerRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     as_of_date: date
+    freshness_mode: Optional[str] = None
+    source_mode: Optional[str] = None
     total_symbols: int = Field(ge=0)
     scanned_symbols: int = Field(ge=0)
     selected_for_deep_review: int = Field(ge=0)

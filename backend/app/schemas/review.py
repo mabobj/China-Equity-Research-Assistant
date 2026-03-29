@@ -1,5 +1,7 @@
 """个股研判 v2 结构化输出 schema。"""
 
+from __future__ import annotations
+
 from datetime import date
 from typing import Literal, Optional
 
@@ -119,6 +121,8 @@ class StockReviewReport(BaseModel):
     symbol: str
     name: str
     as_of_date: date
+    freshness_mode: Optional[str] = None
+    source_mode: Optional[str] = None
     factor_profile: FactorProfileView
     technical_view: TechnicalView
     fundamental_view: FundamentalView

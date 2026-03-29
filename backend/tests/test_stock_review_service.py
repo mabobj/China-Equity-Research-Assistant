@@ -1,5 +1,7 @@
 """个股研判 v2 service 测试。"""
 
+from __future__ import annotations
+
 from datetime import date, datetime
 
 from app.schemas.factor import AlphaScore, FactorGroupScore, FactorSnapshot, RiskScore, TriggerScore

@@ -1,13 +1,8 @@
-"""受控 LLM 裁决服务。"""
+"""LLM debate service package.
 
-from app.services.llm_debate_service.fallback import DebateRuntimeService
-from app.services.llm_debate_service.llm_debate_orchestrator import (
-    LLMDebateOrchestrator,
-)
-from app.services.llm_debate_service.llm_role_runner import LLMRoleRunner
+Runtime assembly must import concrete submodules directly instead of relying on
+package-level re-exports. This keeps dependency wiring explicit and avoids
+accidental circular imports during app startup.
+"""
 
-__all__ = [
-    "DebateRuntimeService",
-    "LLMDebateOrchestrator",
-    "LLMRoleRunner",
-]
+__all__: list[str] = []

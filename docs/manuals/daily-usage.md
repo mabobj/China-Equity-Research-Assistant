@@ -237,7 +237,57 @@ data/workflow_runs/{run_id}.json
 logs/backend-debug.log
 ```
 
-## 9. DecisionBrief 的推荐用法
+## 10. workspace-bundle 怎么看
+
+单票页现在优先走统一 bundle，而不是把各个模块分别打一遍。
+
+推荐理解方式：
+
+1. 页面先请求 `GET /stocks/{symbol}/workspace-bundle`
+2. 先看 `decision_brief`
+3. 再看 `evidence_manifest` 和 `freshness_summary`
+4. 最后再下沉到详细模块
+
+这样做的目的：
+
+- 减少重复抓取
+- 避免多个模块并发请求把页面拖慢
+- 让你先看到结论层，再决定是否继续深挖
+
+## 11. /screener 为什么改成 workflow 模式
+
+`/screener` 现在不再把长时间筛选直接挂在一个同步请求上。
+
+新的推荐流程是：
+
+1. 提交 workflow
+2. 立即拿到 `run_id`
+3. 页面轮询 `GET /workflows/runs/{run_id}`
+4. 查看步骤摘要和最终结果
+
+当前主路径：
+
+- `POST /workflows/screener/run`
+- `POST /workflows/deep-review/run`
+
+这样可以避免“前端先超时、后端还在继续跑”的问题。
+
+## 12. freshness 怎么判断
+
+当前日级产物尽量遵守：
+
+- 默认使用最后一个已收盘交易日
+- 不默认追当天日线
+- 本地已有同日结果优先复用
+- 只有 `force_refresh=true` 时才主动刷新远端
+
+优先关注这些字段：
+
+- `as_of_date`
+- `freshness_mode`
+- `source_mode`
+
+## 13. DecisionBrief 的推荐用法
 
 `DecisionBrief` 是当前系统新的主输出层，适合当作单票分析和候选跟踪的第一阅读入口。
 

@@ -31,12 +31,25 @@ class StubWorkflowRuntimeService:
         return WorkflowRunResponse(
             run_id="run-deep",
             workflow_name="deep_candidate_review",
-            status="completed",
+            status="running",
             started_at=datetime.now(timezone.utc),
-            finished_at=datetime.now(timezone.utc),
+            finished_at=None,
             input_summary={"max_symbols": request.max_symbols},
             steps=[],
-            final_output_summary={"selected_count": 3, "success_count": 2},
+            final_output_summary={},
+            error_message=None,
+        )
+
+    def run_screener_workflow(self, request) -> WorkflowRunResponse:
+        return WorkflowRunResponse(
+            run_id="run-screener",
+            workflow_name="screener_run",
+            status="running",
+            started_at=datetime.now(timezone.utc),
+            finished_at=None,
+            input_summary={"max_symbols": request.max_symbols, "top_n": request.top_n},
+            steps=[],
+            final_output_summary={},
             error_message=None,
         )
 
@@ -88,7 +101,27 @@ def test_run_deep_review_workflow_route_returns_structured_payload() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["workflow_name"] == "deep_candidate_review"
-    assert payload["final_output_summary"]["selected_count"] == 3
+    assert payload["status"] == "running"
+
+    app.dependency_overrides.clear()
+
+
+def test_run_screener_workflow_route_returns_running_payload() -> None:
+    """Screener workflow should return a run id immediately for polling."""
+    app.dependency_overrides[get_workflow_runtime_service] = (
+        lambda: StubWorkflowRuntimeService()
+    )
+
+    response = client.post(
+        "/workflows/screener/run",
+        json={"max_symbols": 50, "top_n": 10},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["workflow_name"] == "screener_run"
+    assert payload["status"] == "running"
+    assert payload["run_id"] == "run-screener"
 
     app.dependency_overrides.clear()
 

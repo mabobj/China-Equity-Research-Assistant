@@ -1,5 +1,7 @@
 """因子快照服务测试。"""
 
+from __future__ import annotations
+
 from datetime import date, timedelta
 
 from app.schemas.market_data import DailyBar, DailyBarResponse

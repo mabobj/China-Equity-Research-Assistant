@@ -10,11 +10,13 @@ import type {
   FactorSnapshot,
   ResearchReport,
   ScreenerRunResponse,
+  ScreenerWorkflowRunRequest,
   SingleStockWorkflowRunRequest,
   StockProfile,
   StockReviewReport,
   StrategyPlan,
   TriggerSnapshot,
+  WorkspaceBundleResponse,
   WorkflowRunDetailResponse,
   WorkflowRunResponse,
 } from "@/types/api";
@@ -28,10 +30,8 @@ const MAX_SCREENER_TIMEOUT_MS = 1_800_000;
 const MIN_DEEP_SCREENER_TIMEOUT_MS = 180_000;
 const MAX_DEEP_SCREENER_TIMEOUT_MS = 2_700_000;
 const MIN_WORKFLOW_TIMEOUT_MS = 90_000;
-const MAX_WORKFLOW_TIMEOUT_MS = 3_600_000;
 const SCREENER_TIMEOUT_PER_SYMBOL_MS = 250;
 const DEEP_SCREENER_TIMEOUT_PER_SYMBOL_MS = 350;
-const WORKFLOW_TIMEOUT_PER_SYMBOL_MS = 500;
 
 export class ApiError extends Error {
   status: number;
@@ -61,6 +61,10 @@ type DataRefreshParams = {
 type DebateReviewParams = {
   useLlm?: boolean;
   requestId?: string;
+};
+
+type WorkspaceBundleParams = DebateReviewParams & {
+  forceRefresh?: boolean;
 };
 
 type FetchOptions = {
@@ -106,6 +110,23 @@ export async function getStockProfile(symbol: string): Promise<StockProfile> {
   return fetchBackend<StockProfile>(
     `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/profile`,
     { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function getWorkspaceBundle(
+  symbol: string,
+  params: WorkspaceBundleParams = {},
+): Promise<WorkspaceBundleResponse> {
+  return fetchBackend<WorkspaceBundleResponse>(
+    buildPath(
+      `/stocks/${encodeURIComponent(normalizeSymbolInput(symbol))}/workspace-bundle`,
+      {
+        use_llm: params.useLlm,
+        request_id: params.requestId,
+        force_refresh: params.forceRefresh,
+      },
+    ),
+    { timeoutMs: DEBATE_REVIEW_TIMEOUT_MS },
   );
 }
 
@@ -209,7 +230,17 @@ export async function runDeepReviewWorkflow(
   payload: DeepReviewWorkflowRunRequest,
 ): Promise<WorkflowRunResponse> {
   return fetchBackend<WorkflowRunResponse>("/workflows/deep-review/run", {
-    timeoutMs: resolveDeepWorkflowTimeoutMs(payload.max_symbols),
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function runScreenerWorkflow(
+  payload: ScreenerWorkflowRunRequest,
+): Promise<WorkflowRunResponse> {
+  return fetchBackend<WorkflowRunResponse>("/workflows/screener/run", {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
     method: "POST",
     body: payload,
   });
@@ -366,17 +397,6 @@ function resolveDeepScreenerTimeoutMs(maxSymbols?: number): number {
 
 function resolveSingleStockWorkflowTimeoutMs(): number {
   return MIN_WORKFLOW_TIMEOUT_MS;
-}
-
-function resolveDeepWorkflowTimeoutMs(maxSymbols?: number): number {
-  if (maxSymbols === undefined) {
-    return 240_000;
-  }
-
-  return clampTimeout(
-    240_000 + maxSymbols * WORKFLOW_TIMEOUT_PER_SYMBOL_MS,
-    MAX_WORKFLOW_TIMEOUT_MS,
-  );
 }
 
 function clampTimeout(timeoutMs: number, maxTimeoutMs: number): number {

@@ -46,6 +46,7 @@ from app.services.data_service.providers.base import (
     TIMELINE_CAPABILITY,
     UNIVERSE_CAPABILITY,
 )
+from app.services.data_products.freshness import resolve_last_closed_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,9 @@ class MarketDataService:
         symbol: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        *,
+        force_refresh: bool = False,
+        provider_names: Optional[Sequence[str]] = None,
     ) -> DailyBarResponse:
         canonical_symbol = normalize_symbol(symbol)
         logger.debug(
@@ -133,8 +137,14 @@ class MarketDataService:
             start_date,
             end_date,
         )
+        request_uses_default_range = (
+            (start_date is None or start_date.strip() == "")
+            and (end_date is None or end_date.strip() == "")
+        )
         normalized_start_date = _parse_optional_date(start_date, "start_date")
         normalized_end_date = _parse_optional_date(end_date, "end_date")
+        if normalized_end_date is None:
+            normalized_end_date = resolve_last_closed_trading_day()
 
         if (
             normalized_start_date is not None
@@ -148,6 +158,7 @@ class MarketDataService:
                 canonical_symbol,
                 normalized_start_date,
                 normalized_end_date,
+                provider_names=provider_names,
             )
             logger.debug(
                 "market_data.daily_bars.done symbol=%s count=%s source_mode=provider_only",
@@ -168,6 +179,8 @@ class MarketDataService:
         )
 
         if (
+            not force_refresh
+            and
             normalized_start_date is not None
             and normalized_end_date is not None
             and self._local_store.is_range_covered(
@@ -194,10 +207,10 @@ class MarketDataService:
         sync_start_date = normalized_start_date
         sync_end_date = normalized_end_date
 
-        if sync_start_date is None and cached_bars:
+        if not force_refresh and sync_start_date is None and cached_bars:
             latest_local_trade_date = cached_bars[-1].trade_date
             sync_start_date = latest_local_trade_date + timedelta(days=1)
-            sync_end_date = normalized_end_date or date.today()
+            sync_end_date = normalized_end_date
             if sync_start_date > sync_end_date:
                 logger.debug(
                     "market_data.daily_bars.skip_remote symbol=%s reason=already_up_to_date",
@@ -210,14 +223,47 @@ class MarketDataService:
                     cached_bars,
                 )
 
+        if (
+            not force_refresh
+            and sync_start_date is None
+            and cached_bars
+            and normalized_end_date is not None
+        ):
+            latest_local_trade_date = cached_bars[-1].trade_date
+            if latest_local_trade_date < normalized_end_date:
+                sync_start_date = latest_local_trade_date + timedelta(days=1)
+                sync_end_date = normalized_end_date
+
+        if force_refresh and sync_start_date is None:
+            latest_local_trade_date = self._local_store.get_latest_daily_bar_date(
+                canonical_symbol,
+            )
+            if latest_local_trade_date is not None:
+                sync_start_date = latest_local_trade_date + timedelta(days=1)
+            else:
+                sync_start_date = normalized_start_date
+            sync_end_date = normalized_end_date
+            if (
+                sync_start_date is not None
+                and sync_end_date is not None
+                and sync_start_date > sync_end_date
+            ):
+                return _build_daily_bar_response(
+                    canonical_symbol,
+                    normalized_start_date,
+                    normalized_end_date,
+                    cached_bars,
+                )
+
         try:
             remote_bars = self._load_daily_bars_from_providers(
                 canonical_symbol,
                 sync_start_date,
                 sync_end_date,
+                provider_names=provider_names,
             )
         except ProviderError:
-            if cached_bars and normalized_start_date is None and normalized_end_date is None:
+            if cached_bars and request_uses_default_range:
                 logger.debug(
                     "market_data.daily_bars.remote_failed_use_cache symbol=%s cached_count=%s",
                     canonical_symbol,
@@ -384,6 +430,8 @@ class MarketDataService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         limit: int = 20,
+        *,
+        force_refresh: bool = False,
     ) -> AnnouncementListResponse:
         if limit <= 0:
             raise InvalidRequestError("limit must be greater than 0.")
@@ -402,11 +450,15 @@ class MarketDataService:
             end_date=end_date,
         )
 
-        if self._local_store is not None and self._local_store.is_range_covered(
-            DATASET_ANNOUNCEMENTS,
-            canonical_symbol,
-            normalized_start_date,
-            normalized_end_date,
+        if (
+            not force_refresh
+            and self._local_store is not None
+            and self._local_store.is_range_covered(
+                DATASET_ANNOUNCEMENTS,
+                canonical_symbol,
+                normalized_start_date,
+                normalized_end_date,
+            )
         ):
             cached_items = self._local_store.get_stock_announcements(
                 canonical_symbol,
@@ -477,7 +529,12 @@ class MarketDataService:
             ),
         )
 
-    def get_stock_financial_summary(self, symbol: str) -> FinancialSummary:
+    def _get_stock_financial_summary(
+        self,
+        symbol: str,
+        *,
+        force_refresh: bool,
+    ) -> FinancialSummary:
         canonical_symbol = normalize_symbol(symbol)
         logger.debug(
             "market_data.financial_summary.start symbol=%s canonical_symbol=%s",
@@ -485,7 +542,7 @@ class MarketDataService:
             canonical_symbol,
         )
 
-        if self._local_store is not None:
+        if not force_refresh and self._local_store is not None:
             cached_summary = self._local_store.get_stock_financial_summary(
                 canonical_symbol,
             )
@@ -507,6 +564,14 @@ class MarketDataService:
         )
         return summary
 
+    def get_stock_financial_summary(
+        self,
+        symbol: str,
+        *,
+        force_refresh: bool = False,
+    ) -> FinancialSummary:
+        return self._get_stock_financial_summary(symbol, force_refresh=force_refresh)
+
     def refresh_stock_profile(self, symbol: str) -> StockProfile:
         canonical_symbol = normalize_symbol(symbol)
         profile = self._load_stock_profile_from_providers(canonical_symbol)
@@ -519,7 +584,7 @@ class MarketDataService:
             raise InvalidRequestError("lookback_days must be greater than 0.")
 
         canonical_symbol = normalize_symbol(symbol)
-        sync_end_date = date.today()
+        sync_end_date = resolve_last_closed_trading_day()
         sync_start_date = sync_end_date - timedelta(days=lookback_days - 1)
 
         if self._local_store is not None:
@@ -675,8 +740,13 @@ class MarketDataService:
         symbol: str,
         start_date: Optional[date],
         end_date: Optional[date],
+        *,
+        provider_names: Optional[Sequence[str]] = None,
     ) -> list[DailyBar]:
-        providers = self._iter_available_providers(DAILY_BAR_CAPABILITY)
+        providers = self._iter_available_providers(
+            DAILY_BAR_CAPABILITY,
+            provider_names=provider_names,
+        )
         last_error = None
         provider_errors: list[str] = []
 
@@ -708,6 +778,13 @@ class MarketDataService:
                 last_error = ProviderError(
                     "{provider} failed to load daily bars.".format(provider=provider.name),
                 )
+                logger.debug(
+                    "market_data.daily_bars.provider_fail symbol=%s provider=%s error_type=%s error=%s",
+                    symbol,
+                    provider.name,
+                    type(exc).__name__,
+                    exc,
+                )
                 provider_errors.append(
                     "{provider}: {error_type}: {message}".format(
                         provider=provider.name,
@@ -718,14 +795,14 @@ class MarketDataService:
                 continue
             if bars:
                 logger.debug(
-                    "market_data.daily_bars.provider_success symbol=%s provider=%s count=%s",
+                    "market_data.daily_bars.fallback_use symbol=%s provider=%s count=%s",
                     symbol,
                     provider.name,
                     len(bars),
                 )
                 return bars
             logger.debug(
-                "market_data.daily_bars.provider_empty symbol=%s provider=%s",
+                "market_data.daily_bars.provider_fail symbol=%s provider=%s reason=empty_result",
                 symbol,
                 provider.name,
             )
@@ -954,7 +1031,11 @@ class MarketDataService:
             "No financial summary found for symbol {symbol}.".format(symbol=symbol),
         )
 
-    def _iter_available_providers(self, capability: str) -> list[object]:
+    def _iter_available_providers(
+        self,
+        capability: str,
+        provider_names: Sequence[str] | None = None,
+    ) -> list[object]:
         providers = self._provider_registry.get_providers(capability, available_only=True)
         if not providers:
             logger.debug("market_data.providers.none capability=%s", capability)
@@ -962,6 +1043,12 @@ class MarketDataService:
                 "No enabled market data providers are available for capability '{capability}'.".format(
                     capability=capability,
                 ),
+            )
+        if provider_names:
+            preferred = {name: index for index, name in enumerate(provider_names)}
+            providers = sorted(
+                providers,
+                key=lambda provider: preferred.get(provider.name, len(preferred) + 100),
             )
         logger.debug(
             "market_data.providers.selected capability=%s providers=%s",

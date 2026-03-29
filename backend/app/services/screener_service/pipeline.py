@@ -1,20 +1,18 @@
 """选股器 pipeline。"""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import date, timedelta
 import logging
 from time import perf_counter
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from app.schemas.market_data import UniverseItem
+from app.schemas.market_data import DailyBar, DailyBarResponse, UniverseItem
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.services.data_service.exceptions import DataServiceError
 from app.services.data_service.market_data_service import MarketDataService
 from app.services.factor_service.base import FactorBuildInputs
-from app.services.factor_service.snapshot import FactorSnapshotService
-from app.services.feature_service.technical_analysis_service import (
-    TechnicalAnalysisService,
-)
 from app.services.screener_service.filters import (
     has_abnormal_price_data,
     has_acceptable_liquidity,
@@ -25,6 +23,12 @@ from app.services.screener_service.scoring import (
     score_technical_snapshot,
 )
 from app.services.screener_service.universe import load_scan_universe
+
+if TYPE_CHECKING:
+    from app.services.factor_service.snapshot import FactorSnapshotService
+    from app.services.feature_service.technical_analysis_service import (
+        TechnicalAnalysisService,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +43,24 @@ class ScreenerPipeline:
         factor_snapshot_service: Optional[FactorSnapshotService] = None,
         lookback_days: int = 400,
         progress_log_interval: int = 100,
+        batch_daily_bar_provider_priority: tuple[str, ...] = (
+            "baostock",
+            "mootdx",
+            "akshare",
+        ),
     ) -> None:
         self._market_data_service = market_data_service
         self._technical_analysis_service = technical_analysis_service
         self._factor_snapshot_service = factor_snapshot_service
         self._lookback_days = max(lookback_days, 180)
         self._progress_log_interval = max(progress_log_interval, 1)
+        self._batch_daily_bar_provider_priority = batch_daily_bar_provider_priority
 
     def run_screener(
         self,
         max_symbols: Optional[int] = None,
         top_n: Optional[int] = None,
+        force_refresh: bool = False,
     ) -> ScreenerRunResponse:
         started_at = perf_counter()
 
@@ -78,6 +89,7 @@ class ScreenerPipeline:
                 scan_result = self._scan_one_symbol(
                     item=item,
                     start_date=lookback_start_date,
+                    force_refresh=force_refresh,
                 )
                 if scan_result is None:
                     skipped_symbols += 1
@@ -146,6 +158,8 @@ class ScreenerPipeline:
 
         return ScreenerRunResponse(
             as_of_date=latest_as_of_date or date.today(),
+            freshness_mode="force_refreshed" if force_refresh else "cache_preferred",
+            source_mode="pipeline",
             total_symbols=total_symbols,
             scanned_symbols=scanned_symbols,
             buy_candidates=buy_candidates,
@@ -161,11 +175,13 @@ class ScreenerPipeline:
         self,
         item: UniverseItem,
         start_date: str,
+        force_refresh: bool,
     ) -> Optional["_ScanResult"]:
         try:
-            daily_bars_response = self._market_data_service.get_daily_bars(
-                item.symbol,
+            daily_bars_response = self._load_daily_bars_for_scan(
+                symbol=item.symbol,
                 start_date=start_date,
+                force_refresh=force_refresh,
             )
         except DataServiceError:
             return None
@@ -222,27 +238,32 @@ class ScreenerPipeline:
 
         return _ScanResult(
             as_of_date=technical_snapshot.as_of_date,
-            candidate=ScreenerCandidate(
-                symbol=item.symbol,
-                name=item.name,
-                list_type=score_result.list_type,
-                v2_list_type=score_result.v2_list_type,
-                rank=1,
-                screener_score=score_result.screener_score,
-                alpha_score=score_result.alpha_score,
-                trigger_score=score_result.trigger_score,
-                risk_score=score_result.risk_score,
-                trend_state=technical_snapshot.trend_state,
-                trend_score=technical_snapshot.trend_score,
-                latest_close=technical_snapshot.latest_close,
-                support_level=technical_snapshot.support_level,
-                resistance_level=technical_snapshot.resistance_level,
-                top_positive_factors=score_result.top_positive_factors,
-                top_negative_factors=score_result.top_negative_factors,
-                risk_notes=score_result.risk_notes,
-                short_reason=score_result.short_reason,
+            candidate=_build_candidate(
+                item=item,
+                technical_snapshot=technical_snapshot,
+                score_result=score_result,
             ),
         )
+
+    def _load_daily_bars_for_scan(
+        self,
+        *,
+        symbol: str,
+        start_date: str,
+        force_refresh: bool,
+    ) -> DailyBarResponse:
+        try:
+            return self._market_data_service.get_daily_bars(
+                symbol,
+                start_date=start_date,
+                force_refresh=force_refresh,
+                provider_names=self._batch_daily_bar_provider_priority,
+            )
+        except TypeError:
+            return self._market_data_service.get_daily_bars(
+                symbol,
+                start_date=start_date,
+            )
 
     def _log_progress(
         self,
@@ -299,6 +320,65 @@ def _rank_candidates(
     for index, candidate in enumerate(sorted_candidates, start=1):
         ranked_candidates.append(candidate.model_copy(update={"rank": index}))
     return ranked_candidates
+
+
+def _build_candidate(
+    *,
+    item: UniverseItem,
+    technical_snapshot,
+    score_result,
+) -> ScreenerCandidate:
+    v2_list_type = score_result.v2_list_type
+    evidence_hints = [
+        *score_result.top_positive_factors[:2],
+        *score_result.risk_notes[:1],
+    ]
+    return ScreenerCandidate(
+        symbol=item.symbol,
+        name=item.name,
+        list_type=score_result.list_type,
+        v2_list_type=v2_list_type,
+        rank=1,
+        screener_score=score_result.screener_score,
+        alpha_score=score_result.alpha_score,
+        trigger_score=score_result.trigger_score,
+        risk_score=score_result.risk_score,
+        trend_state=technical_snapshot.trend_state,
+        trend_score=technical_snapshot.trend_score,
+        latest_close=technical_snapshot.latest_close,
+        support_level=technical_snapshot.support_level,
+        resistance_level=technical_snapshot.resistance_level,
+        top_positive_factors=score_result.top_positive_factors,
+        top_negative_factors=score_result.top_negative_factors,
+        risk_notes=score_result.risk_notes,
+        short_reason=score_result.short_reason,
+        headline_verdict=_build_headline_verdict(item.name, v2_list_type, score_result.short_reason),
+        action_now=_build_action_now(v2_list_type),
+        evidence_hints=evidence_hints[:3],
+    )
+
+
+def _build_action_now(v2_list_type: str) -> str:
+    mapping = {
+        "READY_TO_BUY": "BUY_NOW",
+        "WATCH_PULLBACK": "WAIT_PULLBACK",
+        "WATCH_BREAKOUT": "WAIT_BREAKOUT",
+        "RESEARCH_ONLY": "RESEARCH_ONLY",
+        "AVOID": "AVOID",
+    }
+    return mapping.get(v2_list_type, "RESEARCH_ONLY")
+
+
+def _build_headline_verdict(name: str, v2_list_type: str, short_reason: str) -> str:
+    prefix_map = {
+        "READY_TO_BUY": f"{name} is actionable now, but still needs execution discipline.",
+        "WATCH_PULLBACK": f"{name} is worth tracking, but the better setup is a pullback.",
+        "WATCH_BREAKOUT": f"{name} is worth tracking, but breakout confirmation is still needed.",
+        "RESEARCH_ONLY": f"{name} made the research list, but not the trading list yet.",
+        "AVOID": f"{name} stays on the avoid side for now.",
+    }
+    prefix = prefix_map.get(v2_list_type, f"{name} needs more confirmation.")
+    return f"{prefix} {short_reason}".strip()
 
 
 def _safe_get_financial_summary(

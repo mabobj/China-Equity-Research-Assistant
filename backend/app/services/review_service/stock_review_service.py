@@ -60,6 +60,30 @@ class StockReviewService:
             symbol=symbol,
             as_of_date=technical_snapshot.as_of_date,
         )
+        return self.build_review_report_from_components(
+            symbol=symbol,
+            profile=profile,
+            technical_snapshot=technical_snapshot,
+            factor_snapshot=factor_snapshot,
+            trigger_snapshot=trigger_snapshot,
+            strategy_plan=strategy_plan,
+            financial_summary=financial_summary,
+            announcements=announcements,
+        )
+
+    def build_review_report_from_components(
+        self,
+        *,
+        symbol: str,
+        profile,
+        technical_snapshot: TechnicalSnapshot,
+        factor_snapshot,
+        trigger_snapshot: TriggerSnapshot,
+        strategy_plan,
+        financial_summary: FinancialSummary | None,
+        announcements: list[AnnouncementItem],
+    ) -> StockReviewReport:
+        """Build a review report from already prepared components."""
         logger.debug(
             "review_report.resources symbol=%s profile=%s technical_date=%s factor_alpha=%s strategy_action=%s financial_present=%s announcements_count=%s",
             symbol,

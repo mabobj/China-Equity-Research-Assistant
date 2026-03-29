@@ -1,5 +1,7 @@
 """Tests for intraday service."""
 
+from __future__ import annotations
+
 from datetime import datetime
 
 from app.schemas.market_data import IntradayBar, IntradayBarResponse

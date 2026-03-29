@@ -1,4 +1,4 @@
-"""Workflow 运行记录持久化。"""
+"""Workflow run artifact persistence."""
 
 from __future__ import annotations
 
@@ -16,14 +16,13 @@ from app.services.workflow_runtime.base import (
 
 
 class FileWorkflowArtifactStore:
-    """基于 JSON 文件的轻量运行记录存储。"""
+    """Persist workflow run artifacts as JSON files."""
 
     def __init__(self, root_dir: Path) -> None:
         self._root_dir = root_dir
         self._root_dir.mkdir(parents=True, exist_ok=True)
 
     def save_run(self, result: WorkflowRunResult) -> WorkflowArtifact:
-        """持久化一次 workflow 运行结果。"""
         artifact = WorkflowArtifact(
             run_id=result.run_id,
             workflow_name=result.workflow_name,
@@ -40,18 +39,20 @@ class FileWorkflowArtifactStore:
             ),
             error_message=result.error_message,
         )
-        file_path = self._get_file_path(result.run_id)
+        self.save_artifact(artifact)
+        return artifact
+
+    def save_artifact(self, artifact: WorkflowArtifact) -> None:
+        file_path = self._get_file_path(artifact.run_id)
         file_path.write_text(
             json.dumps(self._serialize_artifact(artifact), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        return artifact
 
     def load_run(self, run_id: str) -> WorkflowArtifact:
-        """读取一次 workflow 运行记录。"""
         file_path = self._get_file_path(run_id)
         if not file_path.exists():
-            raise FileNotFoundError(f"Workflow run '{run_id}' 不存在。")
+            raise FileNotFoundError(f"Workflow run '{run_id}' not found.")
 
         payload = json.loads(file_path.read_text(encoding="utf-8"))
         return WorkflowArtifact(
@@ -95,13 +96,13 @@ class FileWorkflowArtifactStore:
         return self._root_dir / f"{run_id}.json"
 
     def _serialize_artifact(self, artifact: WorkflowArtifact) -> dict[str, Any]:
-        raw = asdict(artifact)
-        raw["started_at"] = artifact.started_at.isoformat()
-        raw["finished_at"] = (
+        payload = asdict(artifact)
+        payload["started_at"] = artifact.started_at.isoformat()
+        payload["finished_at"] = (
             artifact.finished_at.isoformat() if artifact.finished_at is not None else None
         )
-        raw["steps"] = [self._serialize_step(step) for step in artifact.steps]
-        return raw
+        payload["steps"] = [self._serialize_step(step) for step in artifact.steps]
+        return payload
 
     def _serialize_step(self, step: WorkflowStepResult) -> dict[str, Any]:
         payload = asdict(step)

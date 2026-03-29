@@ -60,6 +60,20 @@ class StrategyPlanner:
             research_report=research_report,
         )
 
+    def build_strategy_plan_from_components(
+        self,
+        *,
+        profile_name: str,
+        technical_snapshot: TechnicalSnapshot,
+        research_report: ResearchReport,
+    ) -> StrategyPlan:
+        """Build a strategy plan from precomputed research inputs."""
+        return self._build_strategy_plan(
+            profile_name=profile_name,
+            technical_snapshot=technical_snapshot,
+            research_report=research_report,
+        )
+
     def _build_strategy_plan(
         self,
         profile_name: str,

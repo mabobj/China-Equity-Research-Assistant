@@ -1,7 +1,9 @@
 """角色化裁决相关 schema。"""
 
+from __future__ import annotations
+
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -93,6 +95,8 @@ class DebateReviewReport(BaseModel):
     symbol: str
     name: str
     as_of_date: date
+    freshness_mode: Optional[str] = None
+    source_mode: Optional[str] = None
     analyst_views: AnalystViewsBundle
     bull_case: BullCase
     bear_case: BearCase
@@ -111,7 +115,7 @@ class DebateReviewProgress(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     symbol: str
-    request_id: str | None = None
+    request_id: Optional[str] = None
     status: Literal["idle", "running", "completed", "failed", "fallback"]
     stage: Literal[
         "idle",
@@ -123,15 +127,15 @@ class DebateReviewProgress(BaseModel):
         "failed",
         "fallback_rule_based",
     ]
-    runtime_mode: Literal["rule_based", "llm"] | None = None
-    current_step: str | None = None
+    runtime_mode: Optional[Literal["rule_based", "llm"]] = None
+    current_step: Optional[str] = None
     completed_steps: int = Field(default=0, ge=0)
     total_steps: int = Field(default=0, ge=0)
     message: str
-    started_at: datetime | None = None
-    updated_at: datetime | None = None
-    finished_at: datetime | None = None
-    error_message: str | None = None
+    started_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    error_message: Optional[str] = None
     recent_steps: list[str] = Field(default_factory=list)
 
 

@@ -1,4 +1,4 @@
-"""受控 LLM 裁决编排器。"""
+"""Controlled LLM debate orchestration."""
 
 from __future__ import annotations
 
@@ -26,35 +26,35 @@ _TOTAL_LLM_DEBATE_STEPS = 9
 
 
 class TechnicalAnalystOutput(AnalystView):
-    """技术角色的固定输出。"""
+    """Fixed output contract for the technical analyst role."""
 
     model_config = ConfigDict(extra="forbid")
     role: Literal["technical_analyst"] = "technical_analyst"
 
 
 class FundamentalAnalystOutput(AnalystView):
-    """基本面角色的固定输出。"""
+    """Fixed output contract for the fundamental analyst role."""
 
     model_config = ConfigDict(extra="forbid")
     role: Literal["fundamental_analyst"] = "fundamental_analyst"
 
 
 class EventAnalystOutput(AnalystView):
-    """事件角色的固定输出。"""
+    """Fixed output contract for the event analyst role."""
 
     model_config = ConfigDict(extra="forbid")
     role: Literal["event_analyst"] = "event_analyst"
 
 
 class SentimentAnalystOutput(AnalystView):
-    """情绪角色的固定输出。"""
+    """Fixed output contract for the sentiment analyst role."""
 
     model_config = ConfigDict(extra="forbid")
     role: Literal["sentiment_analyst"] = "sentiment_analyst"
 
 
 class LLMDebateOrchestrator:
-    """在固定角色、固定轮次下执行一次受控 LLM 裁决。"""
+    """Run one controlled debate pass with fixed roles and schema outputs."""
 
     def __init__(
         self,
@@ -72,18 +72,29 @@ class LLMDebateOrchestrator:
         *,
         request_id: str | None = None,
     ) -> DebateReviewReport:
-        """返回 LLM 版角色化裁决报告。"""
+        """Return the LLM debate report for one symbol."""
+        inputs = self._debate_orchestrator.build_inputs(symbol)
         self._update_progress(
-            symbol=symbol,
+            symbol=inputs.symbol,
             request_id=request_id,
             stage="building_inputs",
-            current_step="构建研究输入",
+            current_step="Building research inputs",
             completed_steps=0,
             total_steps=_TOTAL_LLM_DEBATE_STEPS,
-            message="正在整理 review / factor / strategy 输入。",
+            message="Preparing review, factor and strategy inputs.",
         )
-        inputs = self._debate_orchestrator.build_inputs(symbol)
+        return self.get_debate_review_report_from_inputs(
+            inputs,
+            request_id=request_id,
+        )
 
+    def get_debate_review_report_from_inputs(
+        self,
+        inputs: SingleStockResearchInputs,
+        *,
+        request_id: str | None = None,
+    ) -> DebateReviewReport:
+        """Return the LLM debate report from precomputed inputs."""
         analyst_views = self._build_analyst_views(inputs, request_id=request_id)
         bull_case = self._build_bull_case(inputs, analyst_views, request_id=request_id)
         bear_case = self._build_bear_case(inputs, analyst_views, request_id=request_id)
@@ -97,13 +108,13 @@ class LLMDebateOrchestrator:
         risk_review = self._build_risk_review(inputs, request_id=request_id)
 
         self._update_progress(
-            symbol=symbol,
+            symbol=inputs.symbol,
             request_id=request_id,
             stage="finalizing",
-            current_step="收束策略与风险复核",
+            current_step="Finalizing judgement and risk checks",
             completed_steps=8,
             total_steps=_TOTAL_LLM_DEBATE_STEPS,
-            message="正在生成最终裁决和策略摘要。",
+            message="Building the final judgement and risk summary.",
         )
         finalize_node = self._debate_orchestrator.finalize_strategy(
             inputs,
@@ -130,14 +141,14 @@ class LLMDebateOrchestrator:
             runtime_mode="llm",
         )
         self._update_progress(
-            symbol=symbol,
+            symbol=inputs.symbol,
             request_id=request_id,
             status="completed",
             stage="completed",
-            current_step="LLM 裁决完成",
+            current_step="LLM debate completed",
             completed_steps=_TOTAL_LLM_DEBATE_STEPS,
             total_steps=_TOTAL_LLM_DEBATE_STEPS,
-            message="LLM debate-review 已完成。",
+            message="LLM debate-review completed.",
         )
         return report
 
@@ -148,7 +159,6 @@ class LLMDebateOrchestrator:
         request_id: str | None,
     ) -> AnalystViewsBundle:
         review_report = inputs.review_report
-
         technical = self._run_role(
             role="technical_analyst",
             role_input={
@@ -161,7 +171,7 @@ class LLMDebateOrchestrator:
             output_model=TechnicalAnalystOutput,
             request_id=request_id,
             step_index=1,
-            step_label="技术分析员",
+            step_label="technical analyst",
         )
         fundamental = self._run_role(
             role="fundamental_analyst",
@@ -175,7 +185,7 @@ class LLMDebateOrchestrator:
             output_model=FundamentalAnalystOutput,
             request_id=request_id,
             step_index=2,
-            step_label="基本面分析员",
+            step_label="fundamental analyst",
         )
         event = self._run_role(
             role="event_analyst",
@@ -189,7 +199,7 @@ class LLMDebateOrchestrator:
             output_model=EventAnalystOutput,
             request_id=request_id,
             step_index=3,
-            step_label="事件分析员",
+            step_label="event analyst",
         )
         sentiment = self._run_role(
             role="sentiment_analyst",
@@ -204,9 +214,8 @@ class LLMDebateOrchestrator:
             output_model=SentimentAnalystOutput,
             request_id=request_id,
             step_index=4,
-            step_label="情绪分析员",
+            step_label="sentiment analyst",
         )
-
         return AnalystViewsBundle(
             technical=technical,
             fundamental=fundamental,
@@ -231,7 +240,7 @@ class LLMDebateOrchestrator:
             output_model=BullCase,
             request_id=request_id,
             step_index=5,
-            step_label="多头研究员",
+            step_label="bull researcher",
         )
 
     def _build_bear_case(
@@ -251,7 +260,7 @@ class LLMDebateOrchestrator:
             output_model=BearCase,
             request_id=request_id,
             step_index=6,
-            step_label="空头研究员",
+            step_label="bear researcher",
         )
 
     def _build_chief_judgement(
@@ -277,7 +286,7 @@ class LLMDebateOrchestrator:
             output_model=ChiefJudgement,
             request_id=request_id,
             step_index=7,
-            step_label="首席分析员",
+            step_label="chief analyst",
         )
 
     def _build_risk_review(
@@ -298,7 +307,7 @@ class LLMDebateOrchestrator:
             output_model=RiskReview,
             request_id=request_id,
             step_index=8,
-            step_label="风险复核员",
+            step_label="risk reviewer",
         )
 
     def _run_role(
@@ -316,10 +325,10 @@ class LLMDebateOrchestrator:
             symbol=symbol,
             request_id=request_id,
             stage="running_roles",
-            current_step=f"正在执行：{step_label}",
+            current_step=f"Running {step_label}",
             completed_steps=step_index - 1,
             total_steps=_TOTAL_LLM_DEBATE_STEPS,
-            message=f"后台正在运行 {step_label}。",
+            message=f"Executing {step_label}.",
         )
         return self._role_runner.run_role(
             role=role,

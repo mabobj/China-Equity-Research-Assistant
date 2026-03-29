@@ -1,9 +1,10 @@
-"""角色化裁决骨架编排器。"""
+"""Rule-based debate orchestration."""
 
 from __future__ import annotations
 
 from datetime import datetime, time
 import logging
+from typing import Any
 
 from app.schemas.debate import (
     AnalystViewsBuild,
@@ -15,21 +16,21 @@ from app.schemas.debate import (
 )
 from app.schemas.intraday import TriggerSnapshot
 from app.schemas.review import StrategySummary
-from app.services.factor_service.factor_snapshot_service import FactorSnapshotService
-from app.services.factor_service.trigger_snapshot_service import TriggerSnapshotService
-from app.services.review_service.stock_review_service import StockReviewService
-from app.services.research_service.strategy_planner import StrategyPlanner
 from app.services.debate_service.analyst_views_builder import build_analyst_views_bundle
 from app.services.debate_service.bear_researcher import build_bear_case
 from app.services.debate_service.bull_researcher import build_bull_case
 from app.services.debate_service.chief_analyst import build_chief_judgement
 from app.services.debate_service.risk_reviewer import build_risk_review
+from app.services.factor_service.factor_snapshot_service import FactorSnapshotService
+from app.services.factor_service.trigger_snapshot_service import TriggerSnapshotService
+from app.services.research_service.strategy_planner import StrategyPlanner
+from app.services.review_service.stock_review_service import StockReviewService
 
 logger = logging.getLogger(__name__)
 
 
 class DebateOrchestrator:
-    """按节点顺序构建角色化裁决骨架。"""
+    """Build the rule-based debate report in explicit steps."""
 
     def __init__(
         self,
@@ -44,12 +45,23 @@ class DebateOrchestrator:
         self._trigger_snapshot_service = trigger_snapshot_service
 
     def build_inputs(self, symbol: str) -> SingleStockResearchInputs:
-        """构建单票流程输入节点。"""
         logger.debug("debate.rule.build_inputs.start symbol=%s", symbol)
         review_report = self._stock_review_service.get_stock_review_report(symbol)
         factor_snapshot = self._factor_snapshot_service.get_factor_snapshot(symbol)
         strategy_plan = self._strategy_planner.get_strategy_plan(symbol)
+        return self.build_inputs_from_components(
+            review_report=review_report,
+            factor_snapshot=factor_snapshot,
+            strategy_plan=strategy_plan,
+        )
 
+    def build_inputs_from_components(
+        self,
+        *,
+        review_report: Any,
+        factor_snapshot: Any,
+        strategy_plan: Any,
+    ) -> SingleStockResearchInputs:
         inputs = SingleStockResearchInputs(
             symbol=review_report.symbol,
             review_report=review_report,
@@ -69,7 +81,7 @@ class DebateOrchestrator:
         )
         logger.debug(
             "debate.rule.build_inputs.done symbol=%s trigger_state=%s alpha_score=%s risk_score=%s strategy_action=%s",
-            symbol,
+            review_report.symbol,
             inputs.trigger_state,
             inputs.factor_alpha_score,
             inputs.factor_risk_score,
@@ -81,7 +93,6 @@ class DebateOrchestrator:
         self,
         inputs: SingleStockResearchInputs,
     ) -> AnalystViewsBuild:
-        """构建四类 analyst 节点。"""
         node = AnalystViewsBuild(
             symbol=inputs.symbol,
             analyst_views=build_analyst_views_bundle(
@@ -103,18 +114,16 @@ class DebateOrchestrator:
         self,
         analyst_views_node: AnalystViewsBuild,
     ) -> BullBearDebateBuild:
-        """构建多空观点节点。"""
         bull_case = build_bull_case(analyst_views_node.analyst_views)
         bear_case = build_bear_case(analyst_views_node.analyst_views)
-        key_disagreements = self._merge_key_disagreements(
-            bull_case=bull_case,
-            bear_case=bear_case,
-        )
         return BullBearDebateBuild(
             symbol=analyst_views_node.symbol,
             bull_case=bull_case,
             bear_case=bear_case,
-            key_disagreements=key_disagreements,
+            key_disagreements=self._merge_key_disagreements(
+                bull_case=bull_case,
+                bear_case=bear_case,
+            ),
         )
 
     def build_chief_judgement(
@@ -122,7 +131,6 @@ class DebateOrchestrator:
         inputs: SingleStockResearchInputs,
         debate_node: BullBearDebateBuild,
     ) -> ChiefJudgementBuild:
-        """构建首席裁决与风险复核节点。"""
         chief_judgement = build_chief_judgement(
             bull_case=debate_node.bull_case,
             bear_case=debate_node.bear_case,
@@ -145,7 +153,6 @@ class DebateOrchestrator:
         inputs: SingleStockResearchInputs,
         chief_node: ChiefJudgementBuild,
     ) -> StrategyFinalize:
-        """构建策略收束节点。"""
         confidence = max(
             0,
             min(
@@ -164,9 +171,14 @@ class DebateOrchestrator:
         )
 
     def get_debate_review_report(self, symbol: str) -> DebateReviewReport:
-        """返回角色化裁决骨架版报告。"""
         logger.debug("debate.rule.start symbol=%s", symbol)
         inputs = self.build_inputs(symbol)
+        return self.get_debate_review_report_from_inputs(inputs)
+
+    def get_debate_review_report_from_inputs(
+        self,
+        inputs: SingleStockResearchInputs,
+    ) -> DebateReviewReport:
         analyst_views_node = self.build_analyst_views(inputs)
         debate_node = self.build_bull_bear_debate(analyst_views_node)
         chief_node = self.build_chief_judgement(inputs, debate_node)
@@ -189,24 +201,30 @@ class DebateOrchestrator:
         )
         logger.debug(
             "debate.rule.done symbol=%s final_action=%s confidence=%s",
-            symbol,
+            inputs.symbol,
             report.final_action,
             report.confidence,
         )
         return report
 
-    def _merge_key_disagreements(self, *, bull_case, bear_case) -> list[str]:
+    def _merge_key_disagreements(self, *, bull_case: Any, bear_case: Any) -> list[str]:
         disagreements: list[str] = []
         if bull_case.reasons and bear_case.reasons:
             disagreements.append(
-                "多头与空头都能给出有效证据，核心分歧集中在执行赔率而不是是否值得跟踪。"
+                "Bull and bear evidence both exist; the disagreement is mostly about execution timing."
             )
         if len(bull_case.reasons) > len(bear_case.reasons):
-            disagreements.append("多头证据数量更多，但仍需接受空头对纪律和位置的约束。")
+            disagreements.append(
+                "Bullish support is broader, but execution still depends on discipline and location."
+            )
         elif len(bear_case.reasons) > len(bull_case.reasons):
-            disagreements.append("空头约束更集中，说明当前时点的反对理由更具体。")
+            disagreements.append(
+                "Bearish constraints are more concentrated, so the near-term caution case is more concrete."
+            )
         if not disagreements:
-            disagreements.append("当前分歧不大，更多是执行节奏上的保守与激进差异。")
+            disagreements.append(
+                "The current disagreement is small and mainly reflects conservative versus aggressive execution."
+            )
         return disagreements[:3]
 
     def _build_trigger_snapshot_from_review(

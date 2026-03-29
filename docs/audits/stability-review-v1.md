@@ -270,6 +270,73 @@
 
 - 后续做一轮非功能性整理，避免“能跑但让人困惑”的遗留文件继续增加
 
+## 2026-03-29 补充审计
+
+### 1. debate-review deadlock 修复
+
+本轮已经把 `llm_debate_service` 的运行路径改为直接依赖具体子模块，避免依赖包级 `__init__` 重导出参与装配。
+
+结果：
+
+- `GET /stocks/{symbol}/debate-review` 在 `use_llm=true/false` 下都走受控异常包装
+- 循环导入 / import deadlock 风险明显下降
+- 已补回归测试：`test_llm_debate_deadlock_regression.py`
+
+### 2. 重复请求问题修复
+
+此前单票页会分别请求多个下层接口，容易重复触发底层数据抓取。
+
+本轮收敛为：
+
+- 单票页主入口切到 `workspace-bundle`
+- bundle 内部复用同次请求上下文
+- 局部失败降级为 `module_status_summary`
+
+### 3. 同步长请求问题修复
+
+此前 `/screener` 主要依赖同步长任务，请求容易先在前端超时，但后端继续运行。
+
+本轮已切换为 workflow 模式：
+
+- 提交 workflow
+- 立即返回 `run_id`
+- 前端轮询 `/workflows/runs/{run_id}`
+- 展示步骤摘要与最终结果
+
+### 4. 证据链补全
+
+本轮补齐：
+
+- `EvidenceRef`
+- `EvidenceBundle`
+- `EvidenceManifest`
+
+当前已覆盖：
+
+- `DecisionBrief`
+- `workspace-bundle`
+- screener candidate 的 evidence hints
+
+边界明确为：
+
+- 只说明结论来自哪个数据产品、哪个字段、哪个 provider
+- 不暴露内部思维链
+
+### 5. 仍需继续关注的问题
+
+P0：
+
+- 测试环境当前仍实际使用 Python 3.9，新增代码和测试需要继续避免未收敛的 `|` 联合类型注解
+
+P1：
+
+- `review_report / debate_review / strategy_plan` 还没有完全数据产品化
+- `workspace-bundle` 在 `use_llm=true` 时仍是一次性同步组装，请求时长可能偏长
+
+P2：
+
+- 后续可以继续把 provider/fallback 信息结构化暴露到页面，而不是主要依赖日志
+
 ## 总结
 
 当前系统已经从“能力堆叠阶段”进入“可用性与稳态阶段”。

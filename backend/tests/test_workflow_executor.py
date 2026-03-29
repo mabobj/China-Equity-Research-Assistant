@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -13,9 +14,9 @@ from app.services.workflow_runtime.executor import WorkflowExecutor
 
 
 class FakeWorkflowRequest(BaseModel):
-    start_from: str | None = None
-    stop_after: str | None = None
-    use_llm: bool | None = None
+    start_from: Optional[str] = None
+    stop_after: Optional[str] = None
+    use_llm: Optional[bool] = None
 
 
 class FakeNodeOutput(BaseModel):
@@ -23,7 +24,7 @@ class FakeNodeOutput(BaseModel):
 
 
 class FakeWorkflowOutput(BaseModel):
-    last_value: int | None = None
+    last_value: Optional[int] = None
 
 
 def _build_fake_definition(should_fail: bool = False) -> WorkflowDefinition:

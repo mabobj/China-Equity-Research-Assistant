@@ -12,6 +12,7 @@ from app.api.dependencies import (
     get_market_data_service,
     get_stock_review_service,
     get_trigger_snapshot_service,
+    get_workspace_bundle_service,
 )
 from app.schemas.debate import (
     AnalystView,
@@ -62,7 +63,13 @@ from app.schemas.review import (
     StrategySummary,
     TechnicalView,
 )
-from app.schemas.strategy import PriceRange
+from app.schemas.strategy import PriceRange, StrategyPlan
+from app.schemas.workspace import (
+    FreshnessSummary,
+    WorkspaceBundleResponse,
+    WorkspaceFreshnessItem,
+    WorkspaceModuleStatus,
+)
 
 
 class StubMarketDataService:
@@ -308,6 +315,7 @@ class StubDebateOrchestrator:
         self,
         symbol: str,
         use_llm: Optional[bool] = None,
+        request_id: Optional[str] = None,
     ) -> DebateReviewReport:
         return DebateReviewReport(
             symbol="600519.SH",
@@ -451,6 +459,69 @@ class StubDecisionBriefService:
         )
 
 
+class StubWorkspaceBundleService:
+    def get_workspace_bundle(
+        self,
+        symbol: str,
+        *,
+        use_llm: Optional[bool] = None,
+        force_refresh: bool = False,
+        request_id: Optional[str] = None,
+    ) -> WorkspaceBundleResponse:
+        return WorkspaceBundleResponse(
+            symbol="600519.SH",
+            use_llm=bool(use_llm),
+            profile=StubMarketDataService().get_stock_profile(symbol),
+            factor_snapshot=StubFactorSnapshotService().get_factor_snapshot(symbol),
+            review_report=StubStockReviewService().get_stock_review_report(symbol),
+            debate_review=StubDebateOrchestrator().get_debate_review_report(
+                symbol,
+                use_llm=use_llm,
+                request_id=request_id,
+            ),
+            strategy_plan=StrategyPlan(
+                symbol="600519.SH",
+                name="Kweichow Moutai",
+                as_of_date=date(2024, 1, 2),
+                action="WATCH",
+                strategy_type="wait",
+                entry_window="next_3_to_5_trading_days",
+                ideal_entry_range=PriceRange(low=100.0, high=101.0),
+                entry_triggers=["Wait for a cleaner pullback."],
+                avoid_if=["Avoid chasing a breakout without confirmation."],
+                initial_position_hint="small",
+                stop_loss_price=98.0,
+                stop_loss_rule="Use the support break as the stop-loss reference.",
+                take_profit_range=PriceRange(low=104.0, high=106.0),
+                take_profit_rule="Scale out into the target zone.",
+                hold_rule="Keep reviewing at the daily close.",
+                sell_rule="Exit if the thesis breaks.",
+                review_timeframe="daily_close_review",
+                confidence=68,
+            ),
+            trigger_snapshot=StubTriggerSnapshotService().get_trigger_snapshot(symbol),
+            decision_brief=StubDecisionBriefService().get_decision_brief(
+                symbol,
+                use_llm=use_llm,
+            ),
+            module_status_summary=[
+                WorkspaceModuleStatus(module_name="profile", status="success"),
+                WorkspaceModuleStatus(module_name="debate_review", status="success"),
+            ],
+            freshness_summary=FreshnessSummary(
+                default_as_of_date=date(2024, 1, 2),
+                items=[
+                    WorkspaceFreshnessItem(
+                        item_name="factor_snapshot_daily",
+                        as_of_date=date(2024, 1, 2),
+                        freshness_mode="cache_hit",
+                        source_mode="snapshot",
+                    )
+                ],
+            ),
+        )
+
+
 def test_get_stock_profile_route_returns_structured_payload() -> None:
     """The stock profile endpoint should return the schema payload."""
     app.dependency_overrides[get_market_data_service] = lambda: StubMarketDataService()
@@ -459,6 +530,27 @@ def test_get_stock_profile_route_returns_structured_payload() -> None:
     assert response.status_code == 200
     assert response.json()["symbol"] == "600519.SH"
     assert response.json()["name"] == "Kweichow Moutai"
+
+    app.dependency_overrides.clear()
+
+
+def test_workspace_bundle_route_returns_structured_payload() -> None:
+    """Workspace bundle should expose the stock page primary payload."""
+    app.dependency_overrides[get_workspace_bundle_service] = (
+        lambda: StubWorkspaceBundleService()
+    )
+
+    response = client.get(
+        "/stocks/600519/workspace-bundle?use_llm=true&request_id=req-1"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600519.SH"
+    assert payload["use_llm"] is True
+    assert payload["decision_brief"]["action_now"] == "WAIT_PULLBACK"
+    assert payload["module_status_summary"][0]["module_name"] == "profile"
+    assert payload["freshness_summary"]["default_as_of_date"] == "2024-01-02"
 
     app.dependency_overrides.clear()
 

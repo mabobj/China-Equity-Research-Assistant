@@ -1,0 +1,506 @@
+"""Single-stock workspace bundle service."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import logging
+from typing import TYPE_CHECKING, Any
+
+from app.schemas.decision_brief import DecisionBrief
+from app.schemas.evidence import EvidenceManifest
+from app.schemas.market_data import StockProfile
+from app.schemas.workspace import (
+    FreshnessSummary,
+    WorkspaceBundleResponse,
+    WorkspaceFreshnessItem,
+    WorkspaceModuleStatus,
+)
+from app.services.data_products.datasets.announcements_daily import AnnouncementsDailyDataset
+from app.services.data_products.datasets.daily_bars_daily import DailyBarsDailyDataset
+from app.services.data_products.datasets.decision_brief_daily import DecisionBriefDailyDataset
+from app.services.data_products.datasets.factor_snapshot_daily import FactorSnapshotDailyDataset
+from app.services.data_products.datasets.financial_summary_daily import FinancialSummaryDailyDataset
+from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.decision_brief_service.brief_builder import build_decision_brief
+from app.services.decision_brief_service.evidence_builder import build_evidence_manifest
+from app.services.factor_service.base import FactorBuildInputs
+from app.services.research_service.research_manager import ResearchInputs
+
+if TYPE_CHECKING:
+    from app.services.debate_service.debate_orchestrator import DebateOrchestrator
+    from app.services.factor_service.factor_snapshot_service import FactorSnapshotService
+    from app.services.factor_service.trigger_snapshot_service import TriggerSnapshotService
+    from app.services.feature_service.technical_analysis_service import (
+        TechnicalAnalysisService,
+    )
+    from app.services.llm_debate_service.fallback import DebateRuntimeService
+    from app.services.research_service.research_manager import ResearchManager
+    from app.services.research_service.strategy_planner import StrategyPlanner
+    from app.services.review_service.stock_review_service import StockReviewService
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _WorkspaceState:
+    profile: StockProfile | None = None
+    factor_snapshot: Any | None = None
+    review_report: Any | None = None
+    debate_review: Any | None = None
+    strategy_plan: Any | None = None
+    trigger_snapshot: Any | None = None
+    decision_brief: DecisionBrief | None = None
+    evidence_manifest: EvidenceManifest | None = None
+
+
+class WorkspaceBundleService:
+    """Build the stock workspace bundle in one backend pass."""
+
+    def __init__(
+        self,
+        *,
+        market_data_service,
+        technical_analysis_service: "TechnicalAnalysisService",
+        research_manager: "ResearchManager",
+        factor_snapshot_service: "FactorSnapshotService",
+        stock_review_service: "StockReviewService",
+        debate_orchestrator: "DebateOrchestrator",
+        debate_runtime_service: "DebateRuntimeService",
+        strategy_planner: "StrategyPlanner",
+        trigger_snapshot_service: "TriggerSnapshotService",
+        daily_bars_daily: DailyBarsDailyDataset,
+        announcements_daily: AnnouncementsDailyDataset,
+        financial_summary_daily: FinancialSummaryDailyDataset,
+        factor_snapshot_daily: FactorSnapshotDailyDataset,
+        decision_brief_daily: DecisionBriefDailyDataset,
+    ) -> None:
+        self._market_data_service = market_data_service
+        self._technical_analysis_service = technical_analysis_service
+        self._research_manager = research_manager
+        self._factor_snapshot_service = factor_snapshot_service
+        self._stock_review_service = stock_review_service
+        self._debate_orchestrator = debate_orchestrator
+        self._debate_runtime_service = debate_runtime_service
+        self._strategy_planner = strategy_planner
+        self._trigger_snapshot_service = trigger_snapshot_service
+        self._daily_bars_daily = daily_bars_daily
+        self._announcements_daily = announcements_daily
+        self._financial_summary_daily = financial_summary_daily
+        self._factor_snapshot_daily = factor_snapshot_daily
+        self._decision_brief_daily = decision_brief_daily
+
+    def get_workspace_bundle(
+        self,
+        symbol: str,
+        *,
+        use_llm: bool | None = None,
+        force_refresh: bool = False,
+        request_id: str | None = None,
+    ) -> WorkspaceBundleResponse:
+        statuses: list[WorkspaceModuleStatus] = []
+        freshness_items: list[WorkspaceFreshnessItem] = []
+        state = _WorkspaceState()
+        as_of_date = resolve_last_closed_trading_day()
+        brief_variant = "llm" if bool(use_llm) else "rule_based"
+
+        state.profile = self._run_module(
+            module_name="profile",
+            statuses=statuses,
+            fn=lambda: self._market_data_service.get_stock_profile(symbol),
+        )
+
+        daily_bars_product = self._run_module(
+            module_name="daily_bars_daily",
+            statuses=statuses,
+            fn=lambda: self._daily_bars_daily.get(
+                symbol,
+                force_refresh=force_refresh,
+            ),
+        )
+        if daily_bars_product is not None:
+            freshness_items.append(
+                WorkspaceFreshnessItem(
+                    item_name="daily_bars_daily",
+                    as_of_date=daily_bars_product.as_of_date,
+                    freshness_mode=daily_bars_product.freshness_mode,
+                    source_mode=daily_bars_product.source_mode,
+                )
+            )
+
+        announcements_product = self._run_module(
+            module_name="announcements_daily",
+            statuses=statuses,
+            fn=lambda: self._announcements_daily.get(
+                symbol,
+                force_refresh=force_refresh,
+            ),
+        )
+        if announcements_product is not None:
+            freshness_items.append(
+                WorkspaceFreshnessItem(
+                    item_name="announcements_daily",
+                    as_of_date=announcements_product.as_of_date,
+                    freshness_mode=announcements_product.freshness_mode,
+                    source_mode=announcements_product.source_mode,
+                )
+            )
+
+        financial_summary_product = self._run_module(
+            module_name="financial_summary_daily",
+            statuses=statuses,
+            fn=lambda: self._financial_summary_daily.get(
+                symbol,
+                force_refresh=force_refresh,
+            ),
+        )
+        if financial_summary_product is not None:
+            freshness_items.append(
+                WorkspaceFreshnessItem(
+                    item_name="financial_summary_daily",
+                    as_of_date=financial_summary_product.as_of_date,
+                    freshness_mode=financial_summary_product.freshness_mode,
+                    source_mode=financial_summary_product.source_mode,
+                )
+            )
+
+        technical_snapshot = None
+        if daily_bars_product is not None:
+            technical_snapshot = self._run_module(
+                module_name="technical_snapshot",
+                statuses=statuses,
+                fn=lambda: self._technical_analysis_service.build_snapshot_from_bars(
+                    symbol=symbol,
+                    bars=daily_bars_product.payload.bars,
+                ),
+            )
+
+        if technical_snapshot is not None:
+            state.trigger_snapshot = self._run_module(
+                module_name="trigger_snapshot",
+                statuses=statuses,
+                fn=lambda: self._get_trigger_snapshot_with_fallback(
+                    symbol=symbol,
+                    technical_snapshot=technical_snapshot,
+                ),
+            )
+
+        factor_cached = None if force_refresh else self._factor_snapshot_daily.load(
+            symbol,
+            as_of_date=as_of_date,
+        )
+        if factor_cached is not None:
+            state.factor_snapshot = factor_cached.payload.model_copy(
+                update={
+                    "freshness_mode": factor_cached.freshness_mode,
+                    "source_mode": factor_cached.source_mode,
+                }
+            )
+            statuses.append(
+                WorkspaceModuleStatus(
+                    module_name="factor_snapshot",
+                    status="success",
+                    message="Loaded from same-day snapshot.",
+                )
+            )
+            freshness_items.append(
+                WorkspaceFreshnessItem(
+                    item_name="factor_snapshot_daily",
+                    as_of_date=factor_cached.as_of_date,
+                    freshness_mode=factor_cached.freshness_mode,
+                    source_mode=factor_cached.source_mode,
+                )
+            )
+        elif technical_snapshot is not None and daily_bars_product is not None:
+            computed_factor = self._run_module(
+                module_name="factor_snapshot",
+                statuses=statuses,
+                fn=lambda: self._factor_snapshot_service.build_from_inputs(
+                    FactorBuildInputs(
+                        symbol=symbol,
+                        technical_snapshot=technical_snapshot,
+                        daily_bars=daily_bars_product.payload.bars,
+                        financial_summary=(
+                            financial_summary_product.payload
+                            if financial_summary_product is not None
+                            else None
+                        ),
+                        announcements=(
+                            announcements_product.payload.items
+                            if announcements_product is not None
+                            else []
+                        ),
+                    )
+                ),
+            )
+            if computed_factor is not None:
+                saved_factor = self._factor_snapshot_daily.save(symbol, computed_factor)
+                state.factor_snapshot = saved_factor.payload.model_copy(
+                    update={
+                        "freshness_mode": saved_factor.freshness_mode,
+                        "source_mode": saved_factor.source_mode,
+                    }
+                )
+                freshness_items.append(
+                    WorkspaceFreshnessItem(
+                        item_name="factor_snapshot_daily",
+                        as_of_date=saved_factor.as_of_date,
+                        freshness_mode=saved_factor.freshness_mode,
+                        source_mode=saved_factor.source_mode,
+                    )
+                )
+
+        research_report = None
+        if (
+            state.profile is not None
+            and technical_snapshot is not None
+            and financial_summary_product is not None
+            and announcements_product is not None
+        ):
+            research_report = self._run_module(
+                module_name="research_report",
+                statuses=statuses,
+                fn=lambda: self._research_manager.build_research_report(
+                    ResearchInputs(
+                        profile=state.profile,
+                        technical_snapshot=technical_snapshot,
+                        financial_summary=financial_summary_product.payload,
+                        announcements=announcements_product.payload.items,
+                    )
+                ),
+            )
+
+        if state.profile is not None and technical_snapshot is not None and research_report is not None:
+            state.strategy_plan = self._run_module(
+                module_name="strategy_plan",
+                statuses=statuses,
+                fn=lambda: self._strategy_planner.build_strategy_plan_from_components(
+                    profile_name=state.profile.name,
+                    technical_snapshot=technical_snapshot,
+                    research_report=research_report,
+                ).model_copy(
+                    update={
+                        "freshness_mode": "cache_preferred",
+                        "source_mode": "computed",
+                    }
+                ),
+            )
+            if state.strategy_plan is not None:
+                freshness_items.append(
+                    WorkspaceFreshnessItem(
+                        item_name="strategy_plan_daily",
+                        as_of_date=state.strategy_plan.as_of_date,
+                        freshness_mode=state.strategy_plan.freshness_mode,
+                        source_mode=state.strategy_plan.source_mode,
+                    )
+                )
+
+        if (
+            state.profile is not None
+            and technical_snapshot is not None
+            and state.factor_snapshot is not None
+            and state.trigger_snapshot is not None
+            and state.strategy_plan is not None
+        ):
+            state.review_report = self._run_module(
+                module_name="review_report",
+                statuses=statuses,
+                fn=lambda: self._stock_review_service.build_review_report_from_components(
+                    symbol=symbol,
+                    profile=state.profile,
+                    technical_snapshot=technical_snapshot,
+                    factor_snapshot=state.factor_snapshot,
+                    trigger_snapshot=state.trigger_snapshot,
+                    strategy_plan=state.strategy_plan,
+                    financial_summary=(
+                        financial_summary_product.payload
+                        if financial_summary_product is not None
+                        else None
+                    ),
+                    announcements=(
+                        announcements_product.payload.items
+                        if announcements_product is not None
+                        else []
+                    ),
+                ).model_copy(
+                    update={
+                        "freshness_mode": "cache_preferred",
+                        "source_mode": "computed",
+                    }
+                ),
+            )
+            if state.review_report is not None:
+                freshness_items.append(
+                    WorkspaceFreshnessItem(
+                        item_name="review_report_daily",
+                        as_of_date=state.review_report.as_of_date,
+                        freshness_mode=state.review_report.freshness_mode,
+                        source_mode=state.review_report.source_mode,
+                    )
+                )
+
+        debate_inputs = None
+        if state.review_report is not None and state.factor_snapshot is not None and state.strategy_plan is not None:
+            debate_inputs = self._debate_orchestrator.build_inputs_from_components(
+                review_report=state.review_report,
+                factor_snapshot=state.factor_snapshot,
+                strategy_plan=state.strategy_plan,
+            )
+            state.debate_review = self._run_module(
+                module_name="debate_review",
+                statuses=statuses,
+                fn=lambda: self._debate_runtime_service.get_debate_review_report_from_inputs(
+                    debate_inputs,
+                    use_llm=use_llm,
+                    request_id=request_id,
+                ).model_copy(
+                    update={
+                        "freshness_mode": "cache_preferred",
+                        "source_mode": "llm_or_rule",
+                    }
+                ),
+            )
+            if state.debate_review is not None:
+                freshness_items.append(
+                    WorkspaceFreshnessItem(
+                        item_name="debate_review_daily",
+                        as_of_date=state.debate_review.as_of_date,
+                        freshness_mode=state.debate_review.freshness_mode,
+                        source_mode=state.debate_review.source_mode,
+                    )
+                )
+
+        brief_cached = None if force_refresh else self._decision_brief_daily.load(
+            symbol,
+            as_of_date=as_of_date,
+            variant=brief_variant,
+        )
+        if brief_cached is not None:
+            state.decision_brief = brief_cached.payload.model_copy(
+                update={
+                    "freshness_mode": brief_cached.freshness_mode,
+                    "source_mode": brief_cached.source_mode,
+                }
+            )
+            statuses.append(
+                WorkspaceModuleStatus(
+                    module_name="decision_brief",
+                    status="success",
+                    message="Loaded from same-day snapshot.",
+                )
+            )
+            freshness_items.append(
+                WorkspaceFreshnessItem(
+                    item_name="decision_brief_daily",
+                    as_of_date=brief_cached.as_of_date,
+                    freshness_mode=brief_cached.freshness_mode,
+                    source_mode=brief_cached.source_mode,
+                )
+            )
+        elif (
+            state.profile is not None
+            and state.factor_snapshot is not None
+            and state.review_report is not None
+            and state.debate_review is not None
+            and state.strategy_plan is not None
+            and state.trigger_snapshot is not None
+        ):
+            computed_brief = self._run_module(
+                module_name="decision_brief",
+                statuses=statuses,
+                fn=lambda: build_decision_brief(
+                    profile=state.profile,
+                    factor_snapshot=state.factor_snapshot,
+                    review_report=state.review_report,
+                    debate_review=state.debate_review,
+                    strategy_plan=state.strategy_plan,
+                    trigger_snapshot=state.trigger_snapshot,
+                    freshness_mode="computed",
+                    source_mode="workspace_bundle",
+                ),
+            )
+            if computed_brief is not None:
+                saved_brief = self._decision_brief_daily.save(
+                    symbol,
+                    computed_brief,
+                    variant=brief_variant,
+                )
+                state.decision_brief = saved_brief.payload.model_copy(
+                    update={
+                        "freshness_mode": saved_brief.freshness_mode,
+                        "source_mode": saved_brief.source_mode,
+                    }
+                )
+                freshness_items.append(
+                    WorkspaceFreshnessItem(
+                        item_name="decision_brief_daily",
+                        as_of_date=saved_brief.as_of_date,
+                        freshness_mode=saved_brief.freshness_mode,
+                        source_mode=saved_brief.source_mode,
+                    )
+                )
+
+        if state.decision_brief is not None:
+            state.evidence_manifest = build_evidence_manifest(state.decision_brief)
+
+        debate_progress = None
+        if request_id is not None:
+            debate_progress = self._debate_runtime_service.get_debate_review_progress(
+                symbol,
+                request_id=request_id,
+                use_llm=use_llm,
+            )
+
+        return WorkspaceBundleResponse(
+            symbol=symbol,
+            use_llm=bool(use_llm),
+            profile=state.profile,
+            factor_snapshot=state.factor_snapshot,
+            review_report=state.review_report,
+            debate_review=state.debate_review,
+            strategy_plan=state.strategy_plan,
+            trigger_snapshot=state.trigger_snapshot,
+            decision_brief=state.decision_brief,
+            module_status_summary=statuses,
+            evidence_manifest=state.evidence_manifest,
+            freshness_summary=FreshnessSummary(
+                default_as_of_date=as_of_date,
+                items=freshness_items,
+            ),
+            debate_progress=debate_progress,
+        )
+
+    def _get_trigger_snapshot_with_fallback(
+        self,
+        *,
+        symbol: str,
+        technical_snapshot,
+    ):
+        try:
+            return self._trigger_snapshot_service.get_trigger_snapshot(symbol)
+        except Exception:
+            return self._trigger_snapshot_service.build_daily_fallback_trigger_snapshot(
+                technical_snapshot
+            )
+
+    def _run_module(self, *, module_name: str, statuses: list[WorkspaceModuleStatus], fn):
+        try:
+            value = fn()
+        except Exception as exc:
+            logger.debug("workspace.bundle.module_fail module=%s error=%s", module_name, exc)
+            statuses.append(
+                WorkspaceModuleStatus(
+                    module_name=module_name,
+                    status="error",
+                    message=str(exc) or f"{module_name} failed.",
+                )
+            )
+            return None
+
+        statuses.append(
+            WorkspaceModuleStatus(
+                module_name=module_name,
+                status="success",
+                message=None,
+            )
+        )
+        return value

@@ -1,8 +1,10 @@
-"""股票数据相关路由。"""
+"""Stock data and stock workspace routes."""
+
+from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.dependencies import (
     get_debate_runtime_service,
@@ -12,6 +14,7 @@ from app.api.dependencies import (
     get_stock_review_service,
     get_technical_analysis_service,
     get_trigger_snapshot_service,
+    get_workspace_bundle_service,
 )
 from app.schemas.debate import DebateReviewProgress, DebateReviewReport
 from app.schemas.decision_brief import DecisionBrief
@@ -24,12 +27,10 @@ from app.schemas.market_data import (
     TimelineResponse,
     UniverseResponse,
 )
-from app.schemas.research_inputs import (
-    AnnouncementListResponse,
-    FinancialSummary,
-)
+from app.schemas.research_inputs import AnnouncementListResponse, FinancialSummary
 from app.schemas.review import StockReviewReport
 from app.schemas.technical import TechnicalSnapshot
+from app.schemas.workspace import WorkspaceBundleResponse
 from app.services.data_service.market_data_service import MarketDataService
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -39,7 +40,6 @@ router = APIRouter(prefix="/stocks", tags=["stocks"])
 def get_stock_universe(
     service: MarketDataService = Depends(get_market_data_service),
 ) -> UniverseResponse:
-    """返回当前基础股票池。"""
     return service.get_stock_universe()
 
 
@@ -48,7 +48,6 @@ def get_stock_profile(
     symbol: str,
     service: MarketDataService = Depends(get_market_data_service),
 ) -> StockProfile:
-    """返回单只股票基础信息。"""
     return service.get_stock_profile(symbol)
 
 
@@ -59,7 +58,6 @@ def get_daily_bars(
     end_date: Optional[str] = Query(default=None),
     service: MarketDataService = Depends(get_market_data_service),
 ) -> DailyBarResponse:
-    """返回单只股票日线行情。"""
     return service.get_daily_bars(
         symbol=symbol,
         start_date=start_date,
@@ -76,7 +74,6 @@ def get_intraday_bars(
     limit: Optional[int] = Query(default=None, ge=1),
     service: MarketDataService = Depends(get_market_data_service),
 ) -> IntradayBarResponse:
-    """返回单只股票分钟线行情。"""
     return service.get_intraday_bars(
         symbol=symbol,
         frequency=frequency,
@@ -92,11 +89,7 @@ def get_timeline(
     limit: Optional[int] = Query(default=None, ge=1),
     service: MarketDataService = Depends(get_market_data_service),
 ) -> TimelineResponse:
-    """返回单只股票最新交易日的分时线预览。"""
-    return service.get_timeline(
-        symbol=symbol,
-        limit=limit,
-    )
+    return service.get_timeline(symbol=symbol, limit=limit)
 
 
 @router.get("/{symbol}/trigger-snapshot", response_model=TriggerSnapshot)
@@ -106,12 +99,7 @@ def get_trigger_snapshot(
     limit: int = Query(default=60, ge=1),
     service: Any = Depends(get_trigger_snapshot_service),
 ) -> TriggerSnapshot:
-    """返回基于日线与盘中快照的轻量触发快照。"""
-    return service.get_trigger_snapshot(
-        symbol=symbol,
-        frequency=frequency,
-        limit=limit,
-    )
+    return service.get_trigger_snapshot(symbol=symbol, frequency=frequency, limit=limit)
 
 
 @router.get("/{symbol}/factor-snapshot", response_model=FactorSnapshot)
@@ -121,7 +109,6 @@ def get_factor_snapshot(
     end_date: Optional[str] = Query(default=None),
     service: Any = Depends(get_factor_snapshot_service),
 ) -> FactorSnapshot:
-    """返回单只股票的结构化因子快照。"""
     return service.get_factor_snapshot(
         symbol=symbol,
         start_date=start_date,
@@ -137,7 +124,6 @@ def get_stock_announcements(
     limit: int = Query(default=20, ge=1, le=100),
     service: MarketDataService = Depends(get_market_data_service),
 ) -> AnnouncementListResponse:
-    """返回单只股票公告列表。"""
     return service.get_stock_announcements(
         symbol=symbol,
         start_date=start_date,
@@ -151,7 +137,6 @@ def get_stock_financial_summary(
     symbol: str,
     service: MarketDataService = Depends(get_market_data_service),
 ) -> FinancialSummary:
-    """返回单只股票基础财务摘要。"""
     return service.get_stock_financial_summary(symbol)
 
 
@@ -162,7 +147,6 @@ def get_technical_snapshot(
     end_date: Optional[str] = Query(default=None),
     service: Any = Depends(get_technical_analysis_service),
 ) -> TechnicalSnapshot:
-    """返回最新交易日的技术分析快照。"""
     return service.get_technical_snapshot(
         symbol=symbol,
         start_date=start_date,
@@ -175,7 +159,6 @@ def get_stock_review_report(
     symbol: str,
     service: Any = Depends(get_stock_review_service),
 ) -> StockReviewReport:
-    """返回个股研判 v2 的多维结构化输出。"""
     return service.get_stock_review_report(symbol)
 
 
@@ -185,7 +168,6 @@ def get_stock_decision_brief(
     use_llm: Optional[bool] = Query(default=None),
     service: Any = Depends(get_decision_brief_service),
 ) -> DecisionBrief:
-    """返回统一的结论层 / 证据层 / 行动层简报。"""
     return service.get_decision_brief(symbol, use_llm=use_llm)
 
 
@@ -196,17 +178,19 @@ def get_debate_review_report(
     request_id: Optional[str] = Query(default=None),
     service: Any = Depends(get_debate_runtime_service),
 ) -> DebateReviewReport:
-    """返回角色化裁决骨架版单票报告。"""
-    if request_id is None:
+    try:
         return service.get_debate_review_report(
             symbol,
             use_llm=use_llm,
+            request_id=request_id,
         )
-    return service.get_debate_review_report(
-        symbol,
-        use_llm=use_llm,
-        request_id=request_id,
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Debate review is temporarily unavailable.",
+        ) from exc
 
 
 @router.get("/{symbol}/debate-review-progress", response_model=DebateReviewProgress)
@@ -216,9 +200,32 @@ def get_debate_review_progress(
     request_id: Optional[str] = Query(default=None),
     service: Any = Depends(get_debate_runtime_service),
 ) -> DebateReviewProgress:
-    """返回 Debate Review 当前运行进度。"""
     return service.get_debate_review_progress(
         symbol,
         use_llm=use_llm,
         request_id=request_id,
     )
+
+
+@router.get("/{symbol}/workspace-bundle", response_model=WorkspaceBundleResponse)
+def get_workspace_bundle(
+    symbol: str,
+    use_llm: Optional[bool] = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    request_id: Optional[str] = Query(default=None),
+    service: Any = Depends(get_workspace_bundle_service),
+) -> WorkspaceBundleResponse:
+    try:
+        return service.get_workspace_bundle(
+            symbol,
+            use_llm=use_llm,
+            force_refresh=force_refresh,
+            request_id=request_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Workspace bundle is temporarily unavailable.",
+        ) from exc

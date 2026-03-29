@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.schemas.screener import ScreenerRunResponse
 from app.schemas.workflow import (
@@ -14,12 +14,13 @@ from app.schemas.workflow import (
     WorkflowSymbolFailure,
 )
 from app.services.llm_debate_service.fallback import DebateRuntimeService
-from app.services.research_service.strategy_planner import StrategyPlanner
-from app.services.review_service.stock_review_service import StockReviewService
-from app.services.screener_service.deep_pipeline import _select_candidates_for_deep_review
 from app.services.screener_service.pipeline import ScreenerPipeline
 from app.services.workflow_runtime.base import WorkflowDefinition, WorkflowNode
 from app.services.workflow_runtime.context import WorkflowContext
+
+if TYPE_CHECKING:
+    from app.services.research_service.strategy_planner import StrategyPlanner
+    from app.services.review_service.stock_review_service import StockReviewService
 
 
 class DeepReviewWorkflowDefinitionBuilder:
@@ -92,17 +93,24 @@ class DeepReviewWorkflowDefinitionBuilder:
 
     def _run_screener(self, context: WorkflowContext) -> ScreenerRunResponse:
         request = self._get_request(context)
-        output = self._screener_pipeline.run_screener(
-            max_symbols=request.max_symbols,
-            top_n=request.top_n,
-        )
+        try:
+            output = self._screener_pipeline.run_screener(
+                max_symbols=request.max_symbols,
+                top_n=request.top_n,
+                force_refresh=bool(request.force_refresh),
+            )
+        except TypeError:
+            output = self._screener_pipeline.run_screener(
+                max_symbols=request.max_symbols,
+                top_n=request.top_n,
+            )
         context.set_output("ScreenerRun", output)
         return output
 
     def _select_candidates(self, context: WorkflowContext) -> DeepCandidateSelection:
         request = self._get_request(context)
         screener_run = self._ensure_screener_run(context)
-        selected = _select_candidates_for_deep_review(
+        selected = _select_candidates_for_deep_review_lightweight(
             base_result=screener_run,
             deep_top_k=request.deep_top_k,
         )
@@ -219,6 +227,7 @@ class DeepReviewWorkflowDefinitionBuilder:
             "max_symbols": request.max_symbols,
             "top_n": request.top_n,
             "deep_top_k": request.deep_top_k,
+            "force_refresh": request.force_refresh,
             "start_from": request.start_from,
             "stop_after": request.stop_after,
             "use_llm": request.use_llm,
@@ -230,6 +239,7 @@ class DeepReviewWorkflowDefinitionBuilder:
             "max_symbols": request.max_symbols,
             "top_n": request.top_n,
             "deep_top_k": request.deep_top_k,
+            "force_refresh": request.force_refresh,
             "use_llm": context.use_llm,
         }
 
@@ -365,3 +375,32 @@ def build_deep_review_workflow_definition(
         debate_runtime_service=debate_runtime_service,
         strategy_planner=strategy_planner,
     ).build()
+
+
+def _select_candidates_for_deep_review_lightweight(
+    *,
+    base_result: ScreenerRunResponse,
+    deep_top_k: int | None,
+) -> list:
+    candidates = list(base_result.buy_candidates) + list(base_result.watch_candidates)
+    sorted_candidates = sorted(
+        candidates,
+        key=lambda item: (
+            _base_list_priority(item.list_type),
+            -item.screener_score,
+            item.rank,
+            item.symbol,
+        ),
+    )
+    if deep_top_k is not None:
+        return sorted_candidates[: max(deep_top_k, 0)]
+    return sorted_candidates
+
+
+def _base_list_priority(list_type: str) -> int:
+    priority_map = {
+        "BUY_CANDIDATE": 0,
+        "WATCHLIST": 1,
+        "AVOID": 2,
+    }
+    return priority_map.get(list_type, 9)

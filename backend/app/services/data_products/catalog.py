@@ -1,0 +1,11 @@
+"""Dataset names for daily products."""
+
+DAILY_BARS_DAILY = "daily_bars_daily"
+ANNOUNCEMENTS_DAILY = "announcements_daily"
+FINANCIAL_SUMMARY_DAILY = "financial_summary_daily"
+FACTOR_SNAPSHOT_DAILY = "factor_snapshot_daily"
+REVIEW_REPORT_DAILY = "review_report_daily"
+DEBATE_REVIEW_DAILY = "debate_review_daily"
+STRATEGY_PLAN_DAILY = "strategy_plan_daily"
+DECISION_BRIEF_DAILY = "decision_brief_daily"
+SCREENER_SNAPSHOT_DAILY = "screener_snapshot_daily"

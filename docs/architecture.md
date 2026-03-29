@@ -397,6 +397,97 @@ data/workflow_runs/{run_id}.json
 - DAG 可视化编辑器
 - 自动复盘与持仓管理
 - 新的核心业务能力扩张
+## Workspace Bundle 主入口
+
+当前单票页的主后端入口已经调整为：
+
+```text
+GET /stocks/{symbol}/workspace-bundle
+```
+
+它一次性组装：
+
+- `profile`
+- `factor_snapshot`
+- `review_report`
+- `debate_review`
+- `strategy_plan`
+- `trigger_snapshot`
+- `decision_brief`
+- `module_status_summary`
+- `evidence_manifest`
+- `freshness_summary`
+
+设计原则：
+
+- 页面优先只调用一个主入口
+- 单模块失败时保留 `200 + 模块级状态`
+- 详细模块独立接口仍保留，但不再是前端主路径
+
+## 日级数据产品层
+
+当前正式引入：
+
+```text
+backend/app/services/data_products/
+```
+
+本轮优先接入：
+
+- `daily_bars_daily`
+- `announcements_daily`
+- `financial_summary_daily`
+- `factor_snapshot_daily`
+- `decision_brief_daily`
+- `screener_snapshot_daily`
+
+核心职责：
+
+- 统一按“日”为粒度管理研究产物
+- 本地优先、按日复用、缺啥补啥
+- 只有在显式 `force_refresh=true` 时才主动刷新远端
+
+## Freshness Policy
+
+当前统一规则为：
+
+1. 日级分析默认使用最后一个已收盘交易日
+2. 页面访问时不默认追当天日线
+3. 本地已有同日结果时优先复用
+4. 日级产物尽量携带：
+   - `as_of_date`
+   - `freshness_mode`
+   - `source_mode`
+
+## Screener Workflow 模式
+
+`/screener` 页面已经从同步长请求切换为 workflow 模式：
+
+1. 提交 workflow
+2. 立即拿到 `run_id`
+3. 轮询 `GET /workflows/runs/{run_id}`
+4. 展示步骤摘要与最终结果
+
+当前主路径：
+
+- `POST /workflows/screener/run`
+- `POST /workflows/deep-review/run`
+
+兼容旧路径：
+
+- `GET /screener/run`
+- `GET /screener/deep-run`
+
+## 证据链
+
+当前新增统一证据链结构：
+
+- `EvidenceRef`
+- `EvidenceBundle`
+- `EvidenceManifest`
+
+这层只回答“结论来自哪里”，不暴露内部思维链。
+
 ## DecisionBrief 主输出层
 
 当前单票页新增了一个独立的输出整合层：

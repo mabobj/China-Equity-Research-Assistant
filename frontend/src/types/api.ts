@@ -51,6 +51,8 @@ export type FactorSignalGroup = {
 export type FactorSnapshot = {
   symbol: string;
   as_of_date: string;
+  freshness_mode?: string | null;
+  source_mode?: string | null;
   raw_factors: Record<string, number | null>;
   normalized_factors: Record<string, number | null>;
   factor_group_scores: FactorSignalGroup[];
@@ -269,10 +271,15 @@ export type ScreenerCandidate = {
   top_negative_factors: string[];
   risk_notes: string[];
   short_reason: string;
+  headline_verdict: string | null;
+  action_now: DecisionBriefActionNow | null;
+  evidence_hints: string[];
 };
 
 export type ScreenerRunResponse = {
   as_of_date: string;
+  freshness_mode?: string | null;
+  source_mode?: string | null;
   total_symbols: number;
   scanned_symbols: number;
   buy_candidates: ScreenerCandidate[];
@@ -361,6 +368,7 @@ export type DecisionBriefEvidence = {
     | "debate_review"
     | "strategy_plan"
     | "trigger_snapshot";
+  evidence_refs: EvidenceRef[];
 };
 
 export type DecisionPriceLevel = {
@@ -385,6 +393,8 @@ export type DecisionBrief = {
   symbol: string;
   name: string;
   as_of_date: string;
+  freshness_mode?: string | null;
+  source_mode?: string | null;
   headline_verdict: string;
   action_now: DecisionBriefActionNow;
   conviction_level: DecisionConvictionLevel;
@@ -396,6 +406,84 @@ export type DecisionBrief = {
   what_to_do_next: string[];
   next_review_window: string;
   source_modules: DecisionSourceModule[];
+  evidence_manifest_refs: EvidenceRef[];
+};
+
+export type EvidenceRef = {
+  dataset:
+    | "daily_bars_daily"
+    | "announcements_daily"
+    | "financial_summary_daily"
+    | "factor_snapshot_daily"
+    | "review_report_daily"
+    | "debate_review_daily"
+    | "strategy_plan_daily"
+    | "decision_brief_daily"
+    | "screener_snapshot_daily";
+  provider: string;
+  symbol: string;
+  as_of_date: string;
+  field_path: string;
+  raw_value: string | number | boolean | null;
+  derived_value: string | number | boolean | null;
+  used_by:
+    | "decision_brief"
+    | "workspace_bundle"
+    | "screener_candidate"
+    | "review_report"
+    | "strategy_plan";
+  note: string | null;
+};
+
+export type EvidenceBundle = {
+  bundle_name: string;
+  used_by:
+    | "decision_brief"
+    | "workspace_bundle"
+    | "screener_candidate"
+    | "review_report"
+    | "strategy_plan";
+  refs: EvidenceRef[];
+};
+
+export type EvidenceManifest = {
+  symbol: string;
+  as_of_date: string;
+  bundles: EvidenceBundle[];
+};
+
+export type WorkspaceModuleStatus = {
+  module_name: string;
+  status: "success" | "error" | "skipped";
+  message: string | null;
+};
+
+export type WorkspaceFreshnessItem = {
+  item_name: string;
+  as_of_date: string | null;
+  freshness_mode: string | null;
+  source_mode: string | null;
+};
+
+export type FreshnessSummary = {
+  default_as_of_date: string | null;
+  items: WorkspaceFreshnessItem[];
+};
+
+export type WorkspaceBundleResponse = {
+  symbol: string;
+  use_llm: boolean;
+  profile: StockProfile | null;
+  factor_snapshot: FactorSnapshot | null;
+  review_report: StockReviewReport | null;
+  debate_review: DebateReviewReport | null;
+  strategy_plan: StrategyPlan | null;
+  trigger_snapshot: TriggerSnapshot | null;
+  decision_brief: DecisionBrief | null;
+  module_status_summary: WorkspaceModuleStatus[];
+  evidence_manifest: EvidenceManifest | null;
+  freshness_summary: FreshnessSummary;
+  debate_progress: DebateReviewProgress | null;
 };
 
 export type DataRefreshStatus = {
@@ -465,6 +553,16 @@ export type DeepReviewWorkflowRunRequest = {
   max_symbols?: number;
   top_n?: number;
   deep_top_k?: number;
+  force_refresh?: boolean;
+  start_from?: string;
+  stop_after?: string;
+  use_llm?: boolean;
+};
+
+export type ScreenerWorkflowRunRequest = {
+  max_symbols?: number;
+  top_n?: number;
+  force_refresh?: boolean;
   start_from?: string;
   stop_after?: string;
   use_llm?: boolean;

@@ -1,4 +1,4 @@
-"""Decision brief 统一组装逻辑。"""
+"""Decision brief assembly logic."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from datetime import date, datetime
 
 from app.schemas.debate import DebateReviewReport
 from app.schemas.decision_brief import DecisionBrief, DecisionSourceModule
+from app.schemas.evidence import EvidenceRef
 from app.schemas.factor import FactorSnapshot
 from app.schemas.intraday import TriggerSnapshot
 from app.schemas.market_data import StockProfile
@@ -23,8 +24,12 @@ def build_decision_brief(
     debate_review: DebateReviewReport,
     strategy_plan: StrategyPlan,
     trigger_snapshot: TriggerSnapshot,
+    freshness_mode: str | None = None,
+    source_mode: str | None = None,
+    evidence_manifest_refs: list[EvidenceRef] | None = None,
 ) -> DecisionBrief:
-    """把已有模块输出重组为统一的决策简报。"""
+    """Rebuild the top-level decision brief from existing module outputs."""
+
     action_layer = build_action_layer(
         name=profile.name,
         factor_snapshot=factor_snapshot,
@@ -50,6 +55,8 @@ def build_decision_brief(
         symbol=profile.symbol,
         name=profile.name,
         as_of_date=as_of_date,
+        freshness_mode=freshness_mode,
+        source_mode=source_mode,
         headline_verdict=action_layer.headline_verdict,
         action_now=action_layer.action_now,
         conviction_level=action_layer.conviction_level,
@@ -68,7 +75,15 @@ def build_decision_brief(
             strategy_plan=strategy_plan,
             trigger_snapshot=trigger_snapshot,
         ),
+        evidence_manifest_refs=evidence_manifest_refs or _collect_brief_refs(evidence_layer),
     )
+
+
+def _collect_brief_refs(evidence_layer) -> list[EvidenceRef]:
+    refs: list[EvidenceRef] = []
+    for item in [*evidence_layer.key_evidence, *evidence_layer.key_risks]:
+        refs.extend(item.evidence_refs)
+    return refs
 
 
 def _resolve_as_of_date(
@@ -96,7 +111,7 @@ def _build_source_modules(
     return [
         DecisionSourceModule(
             module_name="stock_profile",
-            note=f"基础资料来源：{profile.source}",
+            note=f"source={profile.source}",
         ),
         DecisionSourceModule(
             module_name="factor_snapshot",

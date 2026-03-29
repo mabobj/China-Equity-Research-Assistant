@@ -1,5 +1,8 @@
-"""API 依赖注入辅助函数。"""
+"""FastAPI dependency helpers."""
 
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -15,19 +18,30 @@ from app.services.data_service.providers.cninfo_provider import CninfoProvider
 from app.services.data_service.providers.mootdx_provider import MootdxProvider
 
 if TYPE_CHECKING:
-    from app.services.decision_brief_service.decision_brief_service import (
-        DecisionBriefService,
+    from app.services.data_products.datasets.announcements_daily import (
+        AnnouncementsDailyDataset,
     )
+    from app.services.data_products.datasets.daily_bars_daily import DailyBarsDailyDataset
+    from app.services.data_products.datasets.decision_brief_daily import (
+        DecisionBriefDailyDataset,
+    )
+    from app.services.data_products.datasets.factor_snapshot_daily import (
+        FactorSnapshotDailyDataset,
+    )
+    from app.services.data_products.datasets.financial_summary_daily import (
+        FinancialSummaryDailyDataset,
+    )
+    from app.services.data_products.datasets.screener_snapshot_daily import (
+        ScreenerSnapshotDailyDataset,
+    )
+    from app.services.data_products.repository import DataProductRepository
     from app.services.data_service.db_inspector_service import DbInspectorService
     from app.services.data_service.intraday_service import IntradayService
     from app.services.data_service.refresh_service import DataRefreshService
     from app.services.debate_service.debate_orchestrator import DebateOrchestrator
-    from app.services.llm_debate_service.fallback import DebateRuntimeService
-    from app.services.llm_debate_service.llm_debate_orchestrator import (
-        LLMDebateOrchestrator,
+    from app.services.decision_brief_service.decision_brief_service import (
+        DecisionBriefService,
     )
-    from app.services.llm_debate_service.llm_role_runner import LLMRoleRunner
-    from app.services.llm_debate_service.progress_tracker import DebateProgressTracker
     from app.services.factor_service.factor_snapshot_service import (
         FactorSnapshotService,
     )
@@ -37,6 +51,12 @@ if TYPE_CHECKING:
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )
+    from app.services.llm_debate_service.fallback import DebateRuntimeService
+    from app.services.llm_debate_service.llm_debate_orchestrator import (
+        LLMDebateOrchestrator,
+    )
+    from app.services.llm_debate_service.llm_role_runner import LLMRoleRunner
+    from app.services.llm_debate_service.progress_tracker import DebateProgressTracker
     from app.services.research_service.research_manager import ResearchManager
     from app.services.research_service.strategy_planner import StrategyPlanner
     from app.services.review_service.stock_review_service import StockReviewService
@@ -44,18 +64,19 @@ if TYPE_CHECKING:
     from app.services.screener_service.pipeline import ScreenerPipeline
     from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
     from app.services.workflow_runtime.workflow_service import WorkflowRuntimeService
+    from app.services.workspace_bundle_service.workspace_bundle_service import (
+        WorkspaceBundleService,
+    )
 
 
 @lru_cache
 def get_local_market_data_store() -> LocalMarketDataStore:
-    """构建本地市场数据仓储。"""
     settings = get_settings()
     return LocalMarketDataStore(database_path=settings.duckdb_path)
 
 
 @lru_cache
 def get_market_data_service() -> MarketDataService:
-    """构建启用中的市场数据 service。"""
     settings = get_settings()
     providers = []
 
@@ -82,7 +103,6 @@ def get_market_data_service() -> MarketDataService:
 
 @lru_cache
 def get_data_refresh_service() -> "DataRefreshService":
-    """构建手动数据补全 service。"""
     from app.services.data_service.refresh_service import DataRefreshService
 
     settings = get_settings()
@@ -98,7 +118,6 @@ def get_data_refresh_service() -> "DataRefreshService":
 
 @lru_cache
 def get_db_inspector_service() -> "DbInspectorService":
-    """构建数据库排查 service。"""
     from app.services.data_service.db_inspector_service import DbInspectorService
 
     return DbInspectorService(local_store=get_local_market_data_store())
@@ -106,29 +125,22 @@ def get_db_inspector_service() -> "DbInspectorService":
 
 @lru_cache
 def get_technical_analysis_service() -> "TechnicalAnalysisService":
-    """构建技术分析 service。"""
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )
 
-    return TechnicalAnalysisService(
-        market_data_service=get_market_data_service(),
-    )
+    return TechnicalAnalysisService(market_data_service=get_market_data_service())
 
 
 @lru_cache
 def get_intraday_service() -> "IntradayService":
-    """构建盘中快照 service。"""
     from app.services.data_service.intraday_service import IntradayService
 
-    return IntradayService(
-        market_data_service=get_market_data_service(),
-    )
+    return IntradayService(market_data_service=get_market_data_service())
 
 
 @lru_cache
 def get_factor_snapshot_service() -> "FactorSnapshotService":
-    """构建 factor snapshot service。"""
     from app.services.factor_service.factor_snapshot_service import (
         FactorSnapshotService,
     )
@@ -141,7 +153,6 @@ def get_factor_snapshot_service() -> "FactorSnapshotService":
 
 @lru_cache
 def get_trigger_snapshot_service() -> "TriggerSnapshotService":
-    """构建轻量触发快照 service。"""
     from app.services.factor_service.trigger_snapshot_service import (
         TriggerSnapshotService,
     )
@@ -154,7 +165,6 @@ def get_trigger_snapshot_service() -> "TriggerSnapshotService":
 
 @lru_cache
 def get_research_manager() -> "ResearchManager":
-    """构建单票研究 manager。"""
     from app.services.research_service.research_manager import ResearchManager
 
     return ResearchManager(
@@ -165,7 +175,6 @@ def get_research_manager() -> "ResearchManager":
 
 @lru_cache
 def get_strategy_planner() -> "StrategyPlanner":
-    """构建结构化交易策略 planner。"""
     from app.services.research_service.strategy_planner import StrategyPlanner
 
     return StrategyPlanner(
@@ -177,7 +186,6 @@ def get_strategy_planner() -> "StrategyPlanner":
 
 @lru_cache
 def get_stock_review_service() -> "StockReviewService":
-    """构建个股研判 v2 service。"""
     from app.services.review_service.stock_review_service import StockReviewService
 
     return StockReviewService(
@@ -190,26 +198,7 @@ def get_stock_review_service() -> "StockReviewService":
 
 
 @lru_cache
-def get_decision_brief_service() -> "DecisionBriefService":
-    """构建统一决策简报 service。"""
-    from app.services.decision_brief_service.decision_brief_service import (
-        DecisionBriefService,
-    )
-
-    return DecisionBriefService(
-        market_data_service=get_market_data_service(),
-        technical_analysis_service=get_technical_analysis_service(),
-        factor_snapshot_service=get_factor_snapshot_service(),
-        stock_review_service=get_stock_review_service(),
-        debate_runtime_service=get_debate_runtime_service(),
-        strategy_planner=get_strategy_planner(),
-        trigger_snapshot_service=get_trigger_snapshot_service(),
-    )
-
-
-@lru_cache
 def get_debate_orchestrator() -> "DebateOrchestrator":
-    """构建角色化裁决骨架编排器。"""
     from app.services.debate_service.debate_orchestrator import DebateOrchestrator
 
     return DebateOrchestrator(
@@ -222,7 +211,6 @@ def get_debate_orchestrator() -> "DebateOrchestrator":
 
 @lru_cache
 def get_llm_role_runner() -> "LLMRoleRunner":
-    """构建受控 LLM 角色执行器。"""
     from app.services.llm_debate_service.base import LLMDebateSettings
     from app.services.llm_debate_service.llm_role_runner import LLMRoleRunner
 
@@ -241,7 +229,6 @@ def get_llm_role_runner() -> "LLMRoleRunner":
 
 @lru_cache
 def get_debate_progress_tracker() -> "DebateProgressTracker":
-    """构建 debate 运行进度跟踪器。"""
     from app.services.llm_debate_service.progress_tracker import DebateProgressTracker
 
     return DebateProgressTracker()
@@ -249,7 +236,6 @@ def get_debate_progress_tracker() -> "DebateProgressTracker":
 
 @lru_cache
 def get_llm_debate_orchestrator() -> "LLMDebateOrchestrator":
-    """构建受控 LLM 裁决编排器。"""
     from app.services.llm_debate_service.llm_debate_orchestrator import (
         LLMDebateOrchestrator,
     )
@@ -263,7 +249,6 @@ def get_llm_debate_orchestrator() -> "LLMDebateOrchestrator":
 
 @lru_cache
 def get_debate_runtime_service() -> "DebateRuntimeService":
-    """构建统一的 debate 运行时服务。"""
     from app.services.llm_debate_service.base import LLMDebateSettings
     from app.services.llm_debate_service.fallback import DebateRuntimeService
 
@@ -284,8 +269,108 @@ def get_debate_runtime_service() -> "DebateRuntimeService":
 
 
 @lru_cache
+def get_data_product_repository() -> "DataProductRepository":
+    from app.services.data_products.repository import DataProductRepository
+
+    settings = get_settings()
+    return DataProductRepository(root_dir=settings.data_dir / "daily_products")
+
+
+@lru_cache
+def get_daily_bars_daily_dataset() -> "DailyBarsDailyDataset":
+    from app.services.data_products.datasets.daily_bars_daily import DailyBarsDailyDataset
+
+    return DailyBarsDailyDataset(market_data_service=get_market_data_service())
+
+
+@lru_cache
+def get_announcements_daily_dataset() -> "AnnouncementsDailyDataset":
+    from app.services.data_products.datasets.announcements_daily import (
+        AnnouncementsDailyDataset,
+    )
+
+    return AnnouncementsDailyDataset(market_data_service=get_market_data_service())
+
+
+@lru_cache
+def get_financial_summary_daily_dataset() -> "FinancialSummaryDailyDataset":
+    from app.services.data_products.datasets.financial_summary_daily import (
+        FinancialSummaryDailyDataset,
+    )
+
+    return FinancialSummaryDailyDataset(market_data_service=get_market_data_service())
+
+
+@lru_cache
+def get_factor_snapshot_daily_dataset() -> "FactorSnapshotDailyDataset":
+    from app.services.data_products.datasets.factor_snapshot_daily import (
+        FactorSnapshotDailyDataset,
+    )
+
+    return FactorSnapshotDailyDataset(repository=get_data_product_repository())
+
+
+@lru_cache
+def get_decision_brief_daily_dataset() -> "DecisionBriefDailyDataset":
+    from app.services.data_products.datasets.decision_brief_daily import (
+        DecisionBriefDailyDataset,
+    )
+
+    return DecisionBriefDailyDataset(repository=get_data_product_repository())
+
+
+@lru_cache
+def get_screener_snapshot_daily_dataset() -> "ScreenerSnapshotDailyDataset":
+    from app.services.data_products.datasets.screener_snapshot_daily import (
+        ScreenerSnapshotDailyDataset,
+    )
+
+    return ScreenerSnapshotDailyDataset(repository=get_data_product_repository())
+
+
+@lru_cache
+def get_workspace_bundle_service() -> "WorkspaceBundleService":
+    from app.services.workspace_bundle_service.workspace_bundle_service import (
+        WorkspaceBundleService,
+    )
+
+    return WorkspaceBundleService(
+        market_data_service=get_market_data_service(),
+        technical_analysis_service=get_technical_analysis_service(),
+        research_manager=get_research_manager(),
+        factor_snapshot_service=get_factor_snapshot_service(),
+        stock_review_service=get_stock_review_service(),
+        debate_orchestrator=get_debate_orchestrator(),
+        debate_runtime_service=get_debate_runtime_service(),
+        strategy_planner=get_strategy_planner(),
+        trigger_snapshot_service=get_trigger_snapshot_service(),
+        daily_bars_daily=get_daily_bars_daily_dataset(),
+        announcements_daily=get_announcements_daily_dataset(),
+        financial_summary_daily=get_financial_summary_daily_dataset(),
+        factor_snapshot_daily=get_factor_snapshot_daily_dataset(),
+        decision_brief_daily=get_decision_brief_daily_dataset(),
+    )
+
+
+@lru_cache
+def get_decision_brief_service() -> "DecisionBriefService":
+    from app.services.decision_brief_service.decision_brief_service import (
+        DecisionBriefService,
+    )
+
+    return DecisionBriefService(
+        market_data_service=get_market_data_service(),
+        technical_analysis_service=get_technical_analysis_service(),
+        factor_snapshot_service=get_factor_snapshot_service(),
+        stock_review_service=get_stock_review_service(),
+        debate_runtime_service=get_debate_runtime_service(),
+        strategy_planner=get_strategy_planner(),
+        trigger_snapshot_service=get_trigger_snapshot_service(),
+    )
+
+
+@lru_cache
 def get_screener_pipeline() -> "ScreenerPipeline":
-    """构建规则初筛选股 pipeline。"""
     from app.services.screener_service.pipeline import ScreenerPipeline
 
     settings = get_settings()
@@ -300,7 +385,6 @@ def get_screener_pipeline() -> "ScreenerPipeline":
 
 @lru_cache
 def get_deep_screener_pipeline() -> "DeepScreenerPipeline":
-    """构建深筛聚合 pipeline。"""
     from app.services.screener_service.deep_pipeline import DeepScreenerPipeline
 
     return DeepScreenerPipeline(
@@ -312,11 +396,15 @@ def get_deep_screener_pipeline() -> "DeepScreenerPipeline":
 
 @lru_cache
 def get_workflow_artifact_store() -> "FileWorkflowArtifactStore":
-    """构建 workflow 运行记录存储。"""
     from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
 
     settings = get_settings()
     return FileWorkflowArtifactStore(root_dir=settings.data_dir / "workflow_runs")
+
+
+@lru_cache
+def get_workflow_background_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=2, thread_name_prefix="workflow-runtime")
 
 
 def get_workflow_runtime_service(
@@ -330,10 +418,15 @@ def get_workflow_runtime_service(
     ),
     strategy_planner: "StrategyPlanner" = Depends(get_strategy_planner),
     screener_pipeline: "ScreenerPipeline" = Depends(get_screener_pipeline),
+    screener_snapshot_daily: "ScreenerSnapshotDailyDataset" = Depends(
+        get_screener_snapshot_daily_dataset
+    ),
 ) -> "WorkflowRuntimeService":
-    """构建 workflow runtime service。"""
     from app.services.workflow_runtime.definitions.deep_review_workflow import (
         build_deep_review_workflow_definition,
+    )
+    from app.services.workflow_runtime.definitions.screener_workflow import (
+        build_screener_workflow_definition,
     )
     from app.services.workflow_runtime.definitions.single_stock_workflow import (
         build_single_stock_workflow_definition,
@@ -358,6 +451,10 @@ def get_workflow_runtime_service(
                 debate_runtime_service=debate_runtime_service,
                 strategy_planner=strategy_planner,
             ),
+            build_screener_workflow_definition(
+                screener_pipeline=screener_pipeline,
+                screener_snapshot_daily=screener_snapshot_daily,
+            ),
         )
     )
     executor = WorkflowExecutor(artifact_store=artifact_store)
@@ -365,4 +462,5 @@ def get_workflow_runtime_service(
         registry=registry,
         executor=executor,
         artifact_store=artifact_store,
+        background_executor=get_workflow_background_executor(),
     )

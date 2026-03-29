@@ -7,6 +7,7 @@ from typing import Optional
 from app.db.market_data_store import DATASET_DAILY_BARS, LocalMarketDataStore
 from app.schemas.market_data import DailyBar, IntradayBar, StockProfile, UniverseItem
 from app.services.data_service.market_data_service import MarketDataService
+from app.services.data_products.freshness import resolve_last_closed_trading_day
 
 
 class FakeProvider:
@@ -261,6 +262,7 @@ def test_service_normalizes_symbol_before_calling_provider() -> None:
 def test_service_refreshes_partial_cached_profile(tmp_path: Path) -> None:
     """本地 profile 不完整时，应继续向 provider 补全并回写。"""
     provider = FakeProvider()
+    latest_trade_date = resolve_last_closed_trading_day()
     local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
     local_store.upsert_stock_profile(
         StockProfile(
@@ -342,6 +344,7 @@ def test_service_rejects_unsupported_intraday_frequency() -> None:
 def test_service_returns_cached_daily_bars_when_range_is_covered(tmp_path: Path) -> None:
     """Covered ranges should be served from local storage first."""
     provider = FakeProvider()
+    latest_trade_date = resolve_last_closed_trading_day()
     local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
     local_store.upsert_daily_bars(
         [
@@ -384,6 +387,7 @@ def test_service_returns_cached_daily_bars_when_range_is_covered(tmp_path: Path)
 def test_service_merges_remote_daily_bars_into_local_store(tmp_path: Path) -> None:
     """Remote bars should be merged into local storage without duplicate dates."""
     provider = FakeProvider()
+    latest_trade_date = resolve_last_closed_trading_day()
     local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
     local_store.upsert_daily_bars(
         [
@@ -438,24 +442,26 @@ def test_refresh_daily_bars_initial_sync_uses_lookback_window(tmp_path: Path) ->
         providers=[provider],
         local_store=local_store,
     )
+    expected_end_date = resolve_last_closed_trading_day()
 
     inserted_count = service.refresh_daily_bars("600519.SH", lookback_days=30)
 
     assert inserted_count == 2
     assert provider.bar_symbol == "600519.SH"
-    assert provider.bar_end_date == date.today()
-    assert provider.bar_start_date == date.today() - timedelta(days=29)
+    assert provider.bar_end_date == expected_end_date
+    assert provider.bar_start_date == expected_end_date - timedelta(days=29)
 
 
 def test_refresh_daily_bars_skips_when_today_already_synced(tmp_path: Path) -> None:
     """若本地已有今日日线，本次增量补全应直接跳过。"""
     provider = FakeProvider()
+    latest_trade_date = resolve_last_closed_trading_day()
     local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
     local_store.upsert_daily_bars(
         [
             DailyBar(
                 symbol="600519.SH",
-                trade_date=date.today(),
+                trade_date=latest_trade_date,
                 open=100.0,
                 high=101.0,
                 low=99.0,
@@ -481,9 +487,10 @@ def test_refresh_daily_bars_incremental_sync_uses_next_day_to_today(
     tmp_path: Path,
 ) -> None:
     """再次补全时，应从本地最新交易日的下一天补到今天。"""
+    expected_end_date = resolve_last_closed_trading_day()
     provider = FakeProvider()
     local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
-    latest_local_trade_date = date.today() - timedelta(days=10)
+    latest_local_trade_date = expected_end_date - timedelta(days=10)
     local_store.upsert_daily_bars(
         [
             DailyBar(
@@ -508,7 +515,7 @@ def test_refresh_daily_bars_incremental_sync_uses_next_day_to_today(
 
     assert provider.daily_bar_call_count == 1
     assert provider.bar_start_date == latest_local_trade_date + timedelta(days=1)
-    assert provider.bar_end_date == date.today()
+    assert provider.bar_end_date == expected_end_date
 
 
 def test_service_wraps_unexpected_provider_daily_bar_error() -> None:
@@ -532,12 +539,13 @@ def test_service_returns_cached_daily_bars_when_incremental_refresh_fails(
     """增量补今日失败时，应优先回退到本地已缓存的日线数据。"""
     empty_provider = EmptyDailyBarProvider()
     broken_provider = BrokenDailyBarProvider()
+    latest_trade_date = resolve_last_closed_trading_day() - timedelta(days=1)
     local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
     local_store.upsert_daily_bars(
         [
             DailyBar(
                 symbol="600519.SH",
-                trade_date=date.today() - timedelta(days=1),
+                trade_date=latest_trade_date,
                 open=100.0,
                 high=101.0,
                 low=99.0,

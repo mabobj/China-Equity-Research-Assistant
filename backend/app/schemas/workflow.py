@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -82,6 +82,15 @@ class DeepReviewWorkflowRunRequest(WorkflowRunRequest):
     max_symbols: Optional[int] = Field(default=None, ge=1)
     top_n: Optional[int] = Field(default=None, ge=1)
     deep_top_k: Optional[int] = Field(default=None, ge=1)
+    force_refresh: Optional[bool] = None
+
+
+class ScreenerWorkflowRunRequest(WorkflowRunRequest):
+    """初筛 workflow 请求。"""
+
+    max_symbols: Optional[int] = Field(default=None, ge=1)
+    top_n: Optional[int] = Field(default=None, ge=1)
+    force_refresh: Optional[bool] = None
 
 
 class WorkflowStepSummary(BaseModel):
@@ -183,4 +192,10 @@ class WorkflowRunResponse(BaseModel):
 class WorkflowRunDetailResponse(WorkflowRunResponse):
     """workflow 运行详情响应。"""
 
-    final_output: Optional[SingleStockWorkflowOutput | DeepReviewWorkflowOutput] = None
+    final_output: Optional[
+        Union[
+            SingleStockWorkflowOutput,
+            DeepReviewWorkflowOutput,
+            ScreenerRunResponse,
+        ]
+    ] = None

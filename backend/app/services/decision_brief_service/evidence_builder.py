@@ -1,11 +1,13 @@
-"""Decision brief 证据层构建逻辑。"""
+"""Decision brief evidence layer and traceable evidence refs."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 from app.schemas.debate import DebateReviewReport
-from app.schemas.decision_brief import DecisionBriefEvidence, DecisionPriceLevel
+from app.schemas.decision_brief import DecisionBrief, DecisionBriefEvidence, DecisionPriceLevel
+from app.schemas.evidence import EvidenceBundle, EvidenceManifest, EvidenceRef
 from app.schemas.factor import FactorSnapshot
 from app.schemas.intraday import TriggerSnapshot
 from app.schemas.review import StockReviewReport
@@ -14,7 +16,7 @@ from app.schemas.strategy import StrategyPlan
 
 @dataclass(frozen=True)
 class EvidenceBuildResult:
-    """证据层输出。"""
+    """Evidence layer derived from existing structured outputs."""
 
     why_it_made_the_list: list[str]
     why_not_all_in: list[str]
@@ -31,7 +33,6 @@ def build_evidence_layer(
     strategy_plan: StrategyPlan,
     trigger_snapshot: TriggerSnapshot,
 ) -> EvidenceBuildResult:
-    """从已有模块里提炼可追溯证据。"""
     key_evidence = _build_positive_evidence(
         factor_snapshot=factor_snapshot,
         review_report=review_report,
@@ -62,6 +63,49 @@ def build_evidence_layer(
     )
 
 
+def build_evidence_manifest(decision_brief: DecisionBrief) -> EvidenceManifest:
+    """Flatten the evidence refs attached to a decision brief into top-level bundles."""
+
+    bundles: list[EvidenceBundle] = []
+    if decision_brief.key_evidence:
+        bundles.append(
+            EvidenceBundle(
+                bundle_name="key_evidence",
+                used_by="decision_brief",
+                refs=[
+                    ref
+                    for item in decision_brief.key_evidence
+                    for ref in item.evidence_refs
+                ],
+            )
+        )
+    if decision_brief.key_risks:
+        bundles.append(
+            EvidenceBundle(
+                bundle_name="key_risks",
+                used_by="decision_brief",
+                refs=[
+                    ref
+                    for item in decision_brief.key_risks
+                    for ref in item.evidence_refs
+                ],
+            )
+        )
+    if decision_brief.evidence_manifest_refs:
+        bundles.append(
+            EvidenceBundle(
+                bundle_name="decision_brief",
+                used_by="decision_brief",
+                refs=decision_brief.evidence_manifest_refs,
+            )
+        )
+    return EvidenceManifest(
+        symbol=decision_brief.symbol,
+        as_of_date=decision_brief.as_of_date,
+        bundles=bundles,
+    )
+
+
 def _build_positive_evidence(
     *,
     factor_snapshot: FactorSnapshot,
@@ -69,6 +113,8 @@ def _build_positive_evidence(
     debate_review: DebateReviewReport,
     trigger_snapshot: TriggerSnapshot,
 ) -> list[DecisionBriefEvidence]:
+    symbol = review_report.symbol
+    as_of_date = review_report.as_of_date
     items: list[DecisionBriefEvidence] = []
 
     strongest_groups = sorted(
@@ -84,14 +130,24 @@ def _build_positive_evidence(
         detail = (
             group.top_positive_signals[0]
             if group.top_positive_signals
-            else f"{group.group_name} 因子组当前相对占优。"
+            else f"{group.group_name} factor group is currently supportive."
         )
         _append_unique(
             items,
             DecisionBriefEvidence(
-                title=f"{group.group_name} 因子偏强",
+                title=f"{group.group_name} factor support",
                 detail=detail,
                 source_module="factor_snapshot",
+                evidence_refs=[
+                    _factor_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path=f"factor_group_scores.{group.group_name}.score",
+                        raw_value=group.score,
+                        derived_value=detail,
+                        used_by="decision_brief",
+                    )
+                ],
             ),
         )
 
@@ -99,39 +155,83 @@ def _build_positive_evidence(
         _append_unique(
             items,
             DecisionBriefEvidence(
-                title="触发位置接近计划观察点",
+                title="Trigger position is actionable",
                 detail=trigger_snapshot.trigger_note,
                 source_module="trigger_snapshot",
+                evidence_refs=[
+                    _daily_bars_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path="trigger_snapshot.trigger_state",
+                        raw_value=trigger_snapshot.trigger_state,
+                        derived_value=trigger_snapshot.trigger_note,
+                        used_by="decision_brief",
+                        note="Derived from daily support/resistance levels.",
+                    )
+                ],
             ),
         )
 
     if review_report.event_view.recent_catalysts:
+        catalyst = review_report.event_view.recent_catalysts[0]
         _append_unique(
             items,
             DecisionBriefEvidence(
-                title="近期存在催化",
-                detail=review_report.event_view.recent_catalysts[0],
+                title="Recent catalyst exists",
+                detail=catalyst,
                 source_module="review_report",
+                evidence_refs=[
+                    _review_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path="event_view.recent_catalysts[0]",
+                        raw_value=catalyst,
+                        derived_value=catalyst,
+                        used_by="decision_brief",
+                    )
+                ],
             ),
         )
 
     if review_report.fundamental_view.key_financial_flags:
+        flag = review_report.fundamental_view.key_financial_flags[0]
         _append_unique(
             items,
             DecisionBriefEvidence(
-                title="财务红旗暂不突出",
-                detail=review_report.fundamental_view.key_financial_flags[0],
+                title="No obvious financial red flag",
+                detail=flag,
                 source_module="review_report",
+                evidence_refs=[
+                    _review_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path="fundamental_view.key_financial_flags[0]",
+                        raw_value=flag,
+                        derived_value=flag,
+                        used_by="decision_brief",
+                    )
+                ],
             ),
         )
 
-    for point in debate_review.bull_case.reasons:
+    for index, point in enumerate(debate_review.bull_case.reasons):
         _append_unique(
             items,
             DecisionBriefEvidence(
                 title=point.title,
                 detail=point.detail,
                 source_module="debate_review",
+                evidence_refs=[
+                    _debate_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path=f"bull_case.reasons[{index}]",
+                        raw_value=point.detail,
+                        derived_value=point.detail,
+                        used_by="decision_brief",
+                        provider=debate_review.runtime_mode,
+                    )
+                ],
             ),
         )
         if len(items) >= 5:
@@ -147,6 +247,8 @@ def _build_risk_evidence(
     debate_review: DebateReviewReport,
     trigger_snapshot: TriggerSnapshot,
 ) -> list[DecisionBriefEvidence]:
+    symbol = review_report.symbol
+    as_of_date = review_report.as_of_date
     items: list[DecisionBriefEvidence] = []
 
     weakest_groups = sorted(
@@ -161,65 +263,130 @@ def _build_risk_evidence(
         detail = (
             group.top_negative_signals[0]
             if group.top_negative_signals
-            else f"{group.group_name} 因子组当前相对偏弱。"
+            else f"{group.group_name} factor group is currently weak."
         )
         _append_unique(
             items,
             DecisionBriefEvidence(
-                title=f"{group.group_name} 因子偏弱",
+                title=f"{group.group_name} factor risk",
                 detail=detail,
                 source_module="factor_snapshot",
+                evidence_refs=[
+                    _factor_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path=f"factor_group_scores.{group.group_name}.score",
+                        raw_value=group.score,
+                        derived_value=detail,
+                        used_by="decision_brief",
+                    )
+                ],
             ),
         )
 
     _append_unique(
         items,
         DecisionBriefEvidence(
-            title="技术失效条件",
+            title="Technical invalidation",
             detail=review_report.technical_view.invalidation_hint,
             source_module="review_report",
+            evidence_refs=[
+                _review_ref(
+                    symbol=symbol,
+                    as_of_date=as_of_date,
+                    field_path="technical_view.invalidation_hint",
+                    raw_value=review_report.technical_view.invalidation_hint,
+                    derived_value=review_report.technical_view.invalidation_hint,
+                    used_by="decision_brief",
+                )
+            ],
         ),
     )
 
     if review_report.fundamental_view.data_completeness_note:
+        note = review_report.fundamental_view.data_completeness_note
         _append_unique(
             items,
             DecisionBriefEvidence(
-                title="基本面结论存在置信度约束",
-                detail=review_report.fundamental_view.data_completeness_note,
+                title="Fundamental confidence is constrained",
+                detail=note,
                 source_module="review_report",
+                evidence_refs=[
+                    _review_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path="fundamental_view.data_completeness_note",
+                        raw_value=note,
+                        derived_value=note,
+                        used_by="decision_brief",
+                    )
+                ],
             ),
         )
 
     if review_report.event_view.recent_risks:
+        risk = review_report.event_view.recent_risks[0]
         _append_unique(
             items,
             DecisionBriefEvidence(
-                title="近期事件风险",
-                detail=review_report.event_view.recent_risks[0],
+                title="Recent event risk",
+                detail=risk,
                 source_module="review_report",
+                evidence_refs=[
+                    _review_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path="event_view.recent_risks[0]",
+                        raw_value=risk,
+                        derived_value=risk,
+                        used_by="decision_brief",
+                    )
+                ],
             ),
         )
 
-    for point in debate_review.bear_case.reasons:
+    for index, point in enumerate(debate_review.bear_case.reasons):
         _append_unique(
             items,
             DecisionBriefEvidence(
                 title=point.title,
                 detail=point.detail,
                 source_module="debate_review",
+                evidence_refs=[
+                    _debate_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path=f"bear_case.reasons[{index}]",
+                        raw_value=point.detail,
+                        derived_value=point.detail,
+                        used_by="decision_brief",
+                        provider=debate_review.runtime_mode,
+                    )
+                ],
             ),
         )
         if len(items) >= 5:
             break
 
     if len(items) < 5 and debate_review.risk_review.execution_reminders:
+        reminder = debate_review.risk_review.execution_reminders[0]
         _append_unique(
             items,
             DecisionBriefEvidence(
-                title="执行层风控提醒",
-                detail=debate_review.risk_review.execution_reminders[0],
+                title="Execution reminder",
+                detail=reminder,
                 source_module="debate_review",
+                evidence_refs=[
+                    _debate_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path="risk_review.execution_reminders[0]",
+                        raw_value=reminder,
+                        derived_value=reminder,
+                        used_by="decision_brief",
+                        provider=debate_review.runtime_mode,
+                    )
+                ],
             ),
         )
 
@@ -227,9 +394,20 @@ def _build_risk_evidence(
         _append_unique(
             items,
             DecisionBriefEvidence(
-                title="触发位置失效",
+                title="Trigger has turned invalid",
                 detail=trigger_snapshot.trigger_note,
                 source_module="trigger_snapshot",
+                evidence_refs=[
+                    _daily_bars_ref(
+                        symbol=symbol,
+                        as_of_date=as_of_date,
+                        field_path="trigger_snapshot.trigger_state",
+                        raw_value=trigger_snapshot.trigger_state,
+                        derived_value=trigger_snapshot.trigger_note,
+                        used_by="decision_brief",
+                        note="Derived from daily support/resistance levels.",
+                    )
+                ],
             ),
         )
 
@@ -246,55 +424,145 @@ def _build_price_levels(
     if strategy_plan.ideal_entry_range is not None:
         levels.append(
             DecisionPriceLevel(
-                label="理想观察区间",
+                label="Ideal entry zone",
                 value_text=(
                     f"{strategy_plan.ideal_entry_range.low:.2f} - "
                     f"{strategy_plan.ideal_entry_range.high:.2f}"
                 ),
-                note="更适合等待价格回到这个区间后再复核。",
+                note="Wait for price to move back into this zone before re-checking.",
             )
         )
 
     if trigger_snapshot.daily_support_level is not None:
         levels.append(
             DecisionPriceLevel(
-                label="日线支撑位",
+                label="Daily support",
                 value_text=f"{trigger_snapshot.daily_support_level:.2f}",
-                note="跌破后需要重新评估原判断。",
+                note="Reassess the thesis if this level breaks on a closing basis.",
             )
         )
 
     if trigger_snapshot.daily_resistance_level is not None:
         levels.append(
             DecisionPriceLevel(
-                label="日线压力位",
+                label="Daily resistance",
                 value_text=f"{trigger_snapshot.daily_resistance_level:.2f}",
-                note="突破并站稳后，执行层信号会更明确。",
+                note="A clean break above this level would improve execution quality.",
             )
         )
 
     if strategy_plan.stop_loss_price is not None:
         levels.append(
             DecisionPriceLevel(
-                label="止损参考位",
+                label="Stop-loss reference",
                 value_text=f"{strategy_plan.stop_loss_price:.2f}",
-                note="触发后优先遵守纪律，而不是继续扛单。",
+                note="Respect this level before discussing averaging down.",
             )
         )
 
     if strategy_plan.take_profit_range is not None:
         levels.append(
             DecisionPriceLevel(
-                label="目标区间",
+                label="Target zone",
                 value_text=(
                     f"{strategy_plan.take_profit_range.low:.2f} - "
                     f"{strategy_plan.take_profit_range.high:.2f}"
                 ),
-                note="进入区间后可考虑分批兑现。",
+                note="Consider phased profit taking once price reaches this zone.",
             )
         )
 
     return levels
+
+
+def _factor_ref(
+    *,
+    symbol: str,
+    as_of_date: date,
+    field_path: str,
+    raw_value,
+    derived_value,
+    used_by,
+) -> EvidenceRef:
+    return EvidenceRef(
+        dataset="factor_snapshot_daily",
+        provider="computed",
+        symbol=symbol,
+        as_of_date=as_of_date,
+        field_path=field_path,
+        raw_value=raw_value,
+        derived_value=derived_value,
+        used_by=used_by,
+        note="Derived from the daily factor snapshot.",
+    )
+
+
+def _review_ref(
+    *,
+    symbol: str,
+    as_of_date: date,
+    field_path: str,
+    raw_value,
+    derived_value,
+    used_by,
+) -> EvidenceRef:
+    return EvidenceRef(
+        dataset="review_report_daily",
+        provider="computed",
+        symbol=symbol,
+        as_of_date=as_of_date,
+        field_path=field_path,
+        raw_value=raw_value,
+        derived_value=derived_value,
+        used_by=used_by,
+        note="Derived from the structured review report.",
+    )
+
+
+def _debate_ref(
+    *,
+    symbol: str,
+    as_of_date: date,
+    field_path: str,
+    raw_value,
+    derived_value,
+    used_by,
+    provider: str,
+) -> EvidenceRef:
+    return EvidenceRef(
+        dataset="debate_review_daily",
+        provider=provider,
+        symbol=symbol,
+        as_of_date=as_of_date,
+        field_path=field_path,
+        raw_value=raw_value,
+        derived_value=derived_value,
+        used_by=used_by,
+        note="Derived from the structured debate review.",
+    )
+
+
+def _daily_bars_ref(
+    *,
+    symbol: str,
+    as_of_date: date,
+    field_path: str,
+    raw_value,
+    derived_value,
+    used_by,
+    note: str | None = None,
+) -> EvidenceRef:
+    return EvidenceRef(
+        dataset="daily_bars_daily",
+        provider="local_first",
+        symbol=symbol,
+        as_of_date=as_of_date,
+        field_path=field_path,
+        raw_value=raw_value,
+        derived_value=derived_value,
+        used_by=used_by,
+        note=note,
+    )
 
 
 def _append_unique(
@@ -311,12 +579,12 @@ def _append_unique(
 
 def _limit_texts(items: list[str]) -> list[str]:
     results: list[str] = []
+    seen: set[str] = set()
     for item in items:
         normalized = _normalize_text(item)
-        if not normalized:
+        if not normalized or normalized in seen:
             continue
-        if normalized in {_normalize_text(existing) for existing in results}:
-            continue
+        seen.add(normalized)
         results.append(item.strip())
         if len(results) >= 3:
             break
