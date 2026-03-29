@@ -257,6 +257,14 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 Set-Location frontend
 npm.cmd run lint
 npm.cmd run type-check
+npm.cmd run test:smoke
+```
+
+### Stability Pack 1 focused backend tests
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py -q
 ```
 
 ## 主要接口

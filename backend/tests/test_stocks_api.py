@@ -70,6 +70,8 @@ from app.schemas.workspace import (
     WorkspaceFreshnessItem,
     WorkspaceModuleStatus,
 )
+from app.services.llm_debate_service.base import LLMDebateSettings
+from app.services.llm_debate_service.fallback import DebateRuntimeService
 
 
 class StubMarketDataService:
@@ -411,6 +413,16 @@ class StubDebateOrchestrator:
         )
 
 
+class _FallbackRuleDebateOrchestrator:
+    def get_debate_review_report(self, symbol: str):
+        return StubDebateOrchestrator().get_debate_review_report(symbol, use_llm=False)
+
+
+class _FailingLLMOrchestrator:
+    def get_debate_review_report(self, symbol: str, request_id: Optional[str] = None):
+        raise TimeoutError("mock timeout")
+
+
 class StubDecisionBriefService:
     def get_decision_brief(
         self,
@@ -522,6 +534,37 @@ class StubWorkspaceBundleService:
         )
 
 
+class StubPartialWorkspaceBundleService:
+    def get_workspace_bundle(
+        self,
+        symbol: str,
+        *,
+        use_llm: Optional[bool] = None,
+        force_refresh: bool = False,
+        request_id: Optional[str] = None,
+    ) -> WorkspaceBundleResponse:
+        return WorkspaceBundleResponse(
+            symbol="600519.SH",
+            use_llm=bool(use_llm),
+            profile=StubMarketDataService().get_stock_profile(symbol),
+            factor_snapshot=StubFactorSnapshotService().get_factor_snapshot(symbol),
+            review_report=None,
+            debate_review=None,
+            strategy_plan=None,
+            trigger_snapshot=None,
+            decision_brief=None,
+            module_status_summary=[
+                WorkspaceModuleStatus(module_name="profile", status="success"),
+                WorkspaceModuleStatus(
+                    module_name="review_report",
+                    status="error",
+                    message="mock review failure",
+                ),
+            ],
+            freshness_summary=FreshnessSummary(default_as_of_date=date(2024, 1, 2), items=[]),
+        )
+
+
 def test_get_stock_profile_route_returns_structured_payload() -> None:
     """The stock profile endpoint should return the schema payload."""
     app.dependency_overrides[get_market_data_service] = lambda: StubMarketDataService()
@@ -551,6 +594,25 @@ def test_workspace_bundle_route_returns_structured_payload() -> None:
     assert payload["decision_brief"]["action_now"] == "WAIT_PULLBACK"
     assert payload["module_status_summary"][0]["module_name"] == "profile"
     assert payload["freshness_summary"]["default_as_of_date"] == "2024-01-02"
+
+    app.dependency_overrides.clear()
+
+
+def test_workspace_bundle_route_returns_200_when_one_module_fails() -> None:
+    """Workspace bundle should still return 200 with module-level error states."""
+    app.dependency_overrides[get_workspace_bundle_service] = (
+        lambda: StubPartialWorkspaceBundleService()
+    )
+
+    response = client.get("/stocks/600519/workspace-bundle")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600519.SH"
+    assert payload["review_report"] is None
+    assert payload["module_status_summary"][1]["module_name"] == "review_report"
+    assert payload["module_status_summary"][1]["status"] == "error"
+    assert payload["module_status_summary"][1]["message"] == "mock review failure"
 
     app.dependency_overrides.clear()
 
@@ -689,6 +751,31 @@ def test_debate_review_route_returns_structured_payload() -> None:
     response = client.get("/stocks/600519/debate-review?use_llm=true")
     payload = response.json()
     assert payload["runtime_mode"] == "llm"
+
+    app.dependency_overrides.clear()
+
+
+def test_debate_review_route_falls_back_to_rule_based_when_llm_timeout() -> None:
+    """When LLM mode fails, the route should still return a controlled rule-based payload."""
+    runtime_service = DebateRuntimeService(
+        rule_based_orchestrator=_FallbackRuleDebateOrchestrator(),
+        llm_orchestrator=_FailingLLMOrchestrator(),
+        settings=LLMDebateSettings(
+            enabled=True,
+            api_key="test-key",
+            model="gpt-test",
+            base_url=None,
+            timeout_seconds=10,
+        ),
+    )
+    app.dependency_overrides[get_debate_runtime_service] = lambda: runtime_service
+
+    response = client.get("/stocks/600519/debate-review?use_llm=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["runtime_mode"] == "rule_based"
+    assert payload["symbol"] == "600519.SH"
 
     app.dependency_overrides.clear()
 

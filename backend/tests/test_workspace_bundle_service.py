@@ -98,6 +98,11 @@ class _StubStockReviewService:
         return build_review_report()
 
 
+class _FailingStockReviewService:
+    def build_review_report_from_components(self, **kwargs):
+        raise RuntimeError("review build failed")
+
+
 class _StubDebateOrchestrator:
     def build_inputs_from_components(self, **kwargs):
         return type("Inputs", (), {"symbol": "600519.SH"})()
@@ -238,3 +243,34 @@ def test_workspace_bundle_service_returns_bundle_with_evidence_and_freshness() -
     assert bundle.evidence_manifest is not None
     assert bundle.freshness_summary.items
     assert any(item.module_name == "decision_brief" for item in bundle.module_status_summary)
+
+
+def test_workspace_bundle_service_returns_partial_bundle_when_module_fails() -> None:
+    service = WorkspaceBundleService(
+        market_data_service=_StubMarketDataService(),
+        technical_analysis_service=_StubTechnicalAnalysisService(),
+        research_manager=_StubResearchManager(),
+        factor_snapshot_service=_StubFactorSnapshotService(),
+        stock_review_service=_FailingStockReviewService(),
+        debate_orchestrator=_StubDebateOrchestrator(),
+        debate_runtime_service=_StubDebateRuntimeService(),
+        strategy_planner=_StubStrategyPlanner(),
+        trigger_snapshot_service=_StubTriggerSnapshotService(),
+        daily_bars_daily=_StubDailyBarsDaily(),
+        announcements_daily=_StubAnnouncementsDaily(),
+        financial_summary_daily=_StubFinancialSummaryDaily(),
+        factor_snapshot_daily=_StubFactorSnapshotDaily(),
+        decision_brief_daily=_StubDecisionBriefDaily(),
+    )
+
+    bundle = service.get_workspace_bundle("600519.SH", use_llm=False)
+
+    assert bundle.profile is not None
+    assert bundle.factor_snapshot is not None
+    assert bundle.review_report is None
+    assert bundle.debate_review is None
+    assert bundle.module_status_summary
+    review_status = next(
+        item for item in bundle.module_status_summary if item.module_name == "review_report"
+    )
+    assert review_status.status == "error"
