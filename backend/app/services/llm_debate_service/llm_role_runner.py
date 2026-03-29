@@ -47,6 +47,10 @@ class LLMRoleRunner:
         )
         self._client: Any | None = None
 
+    @property
+    def provider_name(self) -> str:
+        return self._provider_adapter.provider_name
+
     def run_role(
         self,
         *,

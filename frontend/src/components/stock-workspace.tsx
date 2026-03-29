@@ -166,7 +166,7 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
           </button>
         </form>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <Metric label="Bundle status" value={formatLabel(status)} />
           <Metric
             label="Default as-of"
@@ -177,6 +177,10 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
             value={String(bundle?.module_status_summary.filter((item) => item.status === "success").length ?? 0)}
           />
           <Metric label="Failed modules" value={String(failedModules.length)} />
+          <Metric
+            label="Runtime mode"
+            value={formatLabel(bundle?.runtime_mode_effective ?? "-")}
+          />
         </div>
 
         {status === "loading" ? <LoadingBlock progress={progress} useLlm={useLlm} /> : null}
@@ -191,6 +195,26 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
               title="Partial module failures"
               description={`Failed modules: ${failedModules.map((item) => item.module_name).join(", ")}.`}
               tone="error"
+            />
+          </div>
+        ) : null}
+        {bundle?.fallback_applied ? (
+          <div className="mt-5">
+            <StatusBlock
+              title="Fallback applied"
+              description={
+                bundle.fallback_reason ??
+                "Runtime fallback was applied. See warning messages for details."
+              }
+              tone="error"
+            />
+          </div>
+        ) : null}
+        {bundle && bundle.warning_messages.length > 0 ? (
+          <div className="mt-5">
+            <StatusBlock
+              title="Runtime warnings"
+              description={bundle.warning_messages.join(" | ")}
             />
           </div>
         ) : null}
@@ -314,10 +338,40 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
                 <Panel title="Debate Review">
                   {bundle.debate_review ? (
                     <div className="space-y-3">
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <Metric label="Runtime mode" value={bundle.debate_review.runtime_mode} />
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        <Metric
+                          label="Requested mode"
+                          value={formatLabel(bundle.debate_review.runtime_mode_requested ?? "-")}
+                        />
+                        <Metric
+                          label="Effective mode"
+                          value={formatLabel(bundle.debate_review.runtime_mode_effective ?? bundle.debate_review.runtime_mode)}
+                        />
                         <Metric label="Final action" value={formatAction(bundle.debate_review.final_action)} />
+                        <Metric
+                          label="Provider used"
+                          value={bundle.debate_review.provider_used ?? "-"}
+                        />
+                        <Metric
+                          label="Fallback"
+                          value={bundle.debate_review.fallback_applied ? "yes" : "no"}
+                        />
                       </div>
+                      {bundle.debate_review.fallback_applied ? (
+                        <StatusBlock
+                          title="Debate fallback applied"
+                          description={
+                            bundle.debate_review.fallback_reason ??
+                            "LLM debate switched to rule-based mode."
+                          }
+                        />
+                      ) : null}
+                      {bundle.debate_review.warning_messages.length > 0 ? (
+                        <StatusBlock
+                          title="Debate warnings"
+                          description={bundle.debate_review.warning_messages.join(" | ")}
+                        />
+                      ) : null}
                       <TextPanel title="Chief judgement" content={bundle.debate_review.chief_judgement.summary} />
                       <StringPanel title="Bull case" items={bundle.debate_review.bull_case.reasons.map((item) => item.detail)} />
                       <StringPanel title="Bear case" items={bundle.debate_review.bear_case.reasons.map((item) => item.detail)} />

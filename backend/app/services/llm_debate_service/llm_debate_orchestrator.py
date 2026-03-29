@@ -66,6 +66,10 @@ class LLMDebateOrchestrator:
         self._role_runner = role_runner
         self._progress_tracker = progress_tracker
 
+    @property
+    def provider_name(self) -> str:
+        return self._role_runner.provider_name
+
     def get_debate_review_report(
         self,
         symbol: str,

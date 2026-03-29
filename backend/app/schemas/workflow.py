@@ -187,6 +187,14 @@ class WorkflowRunResponse(BaseModel):
     steps: list[WorkflowStepSummary] = Field(default_factory=list)
     final_output_summary: dict[str, Any] = Field(default_factory=dict)
     error_message: Optional[str] = None
+    provider_used: Optional[str] = None
+    provider_candidates: list[str] = Field(default_factory=list)
+    fallback_applied: bool = False
+    fallback_reason: Optional[str] = None
+    runtime_mode_requested: Optional[str] = None
+    runtime_mode_effective: Optional[str] = None
+    warning_messages: list[str] = Field(default_factory=list)
+    failed_symbols: list[str] = Field(default_factory=list)
 
 
 class WorkflowRunDetailResponse(WorkflowRunResponse):

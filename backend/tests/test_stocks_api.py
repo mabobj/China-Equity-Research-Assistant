@@ -559,9 +559,16 @@ class StubPartialWorkspaceBundleService:
                     module_name="review_report",
                     status="error",
                     message="mock review failure",
+                    fallback_applied=True,
+                    fallback_reason="review_report failed and was skipped.",
                 ),
             ],
             freshness_summary=FreshnessSummary(default_as_of_date=date(2024, 1, 2), items=[]),
+            fallback_applied=True,
+            fallback_reason="One or more workspace modules failed and were skipped.",
+            runtime_mode_requested="rule_based",
+            runtime_mode_effective="rule_based",
+            warning_messages=["Partial workspace result. Failed modules: review_report."],
         )
 
 
@@ -613,6 +620,9 @@ def test_workspace_bundle_route_returns_200_when_one_module_fails() -> None:
     assert payload["module_status_summary"][1]["module_name"] == "review_report"
     assert payload["module_status_summary"][1]["status"] == "error"
     assert payload["module_status_summary"][1]["message"] == "mock review failure"
+    assert payload["fallback_applied"] is True
+    assert payload["fallback_reason"] == "One or more workspace modules failed and were skipped."
+    assert payload["warning_messages"][0].startswith("Partial workspace result")
 
     app.dependency_overrides.clear()
 
@@ -747,10 +757,12 @@ def test_debate_review_route_returns_structured_payload() -> None:
     assert payload["chief_judgement"]["final_action"] == "WATCH"
     assert payload["risk_review"]["risk_level"] == "medium"
     assert payload["runtime_mode"] == "rule_based"
+    assert payload["runtime_mode_effective"] in {None, "rule_based"}
 
     response = client.get("/stocks/600519/debate-review?use_llm=true")
     payload = response.json()
     assert payload["runtime_mode"] == "llm"
+    assert payload["runtime_mode_requested"] in {None, "llm"}
 
     app.dependency_overrides.clear()
 
@@ -776,6 +788,11 @@ def test_debate_review_route_falls_back_to_rule_based_when_llm_timeout() -> None
     payload = response.json()
     assert payload["runtime_mode"] == "rule_based"
     assert payload["symbol"] == "600519.SH"
+    assert payload["fallback_applied"] is True
+    assert payload["fallback_reason"] == "LLM runtime failed or timed out."
+    assert payload["runtime_mode_requested"] == "llm"
+    assert payload["runtime_mode_effective"] == "rule_based"
+    assert payload["provider_used"] == "rule_based"
 
     app.dependency_overrides.clear()
 

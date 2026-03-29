@@ -28,6 +28,11 @@ class WorkspaceModuleStatus(BaseModel):
     module_name: str
     status: ModuleStatus
     message: Optional[str] = None
+    provider_used: Optional[str] = None
+    provider_candidates: list[str] = Field(default_factory=list)
+    fallback_applied: bool = False
+    fallback_reason: Optional[str] = None
+    warning_messages: list[str] = Field(default_factory=list)
 
 
 class WorkspaceFreshnessItem(BaseModel):
@@ -68,3 +73,10 @@ class WorkspaceBundleResponse(BaseModel):
     evidence_manifest: Optional[EvidenceManifest] = None
     freshness_summary: FreshnessSummary = Field(default_factory=FreshnessSummary)
     debate_progress: Optional[DebateReviewProgress] = None
+    provider_used: Optional[str] = None
+    provider_candidates: list[str] = Field(default_factory=list)
+    fallback_applied: bool = False
+    fallback_reason: Optional[str] = None
+    runtime_mode_requested: Optional[str] = None
+    runtime_mode_effective: Optional[str] = None
+    warning_messages: list[str] = Field(default_factory=list)

@@ -267,6 +267,20 @@ $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
 python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py -q
 ```
 
+### Runtime mode and fallback visibility
+
+The following structured fields are now exposed in key responses (`debate-review`, `workspace-bundle`, `workflows/runs/{run_id}`):
+
+- `provider_used`: the provider/runtime actually used.
+- `provider_candidates`: provider/runtime candidates considered by the current path.
+- `fallback_applied`: whether fallback/degrade was applied.
+- `fallback_reason`: short controlled reason for fallback (no raw internal exception).
+- `runtime_mode_requested`: requested mode (for example `llm`).
+- `runtime_mode_effective`: effective mode after runtime decision/fallback.
+- `warning_messages`: non-fatal warnings and degrade hints.
+
+For deep-review workflow run details, `failed_symbols` is exposed when partial failures happen.
+
 ## 主要接口
 
 - `GET /health`

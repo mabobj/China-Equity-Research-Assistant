@@ -99,9 +99,11 @@ class WorkspaceBundleService:
     ) -> WorkspaceBundleResponse:
         statuses: list[WorkspaceModuleStatus] = []
         freshness_items: list[WorkspaceFreshnessItem] = []
+        warning_messages: list[str] = []
         state = _WorkspaceState()
         as_of_date = resolve_last_closed_trading_day()
         brief_variant = "llm" if bool(use_llm) else "rule_based"
+        runtime_mode_requested = "llm" if bool(use_llm) else "rule_based"
 
         state.profile = self._run_module(
             module_name="profile",
@@ -118,6 +120,10 @@ class WorkspaceBundleService:
             ),
         )
         if daily_bars_product is not None:
+            if daily_bars_product.payload.count == 0:
+                warning_messages.append(
+                    "No daily bars are available for the selected trading date."
+                )
             freshness_items.append(
                 WorkspaceFreshnessItem(
                     item_name="daily_bars_daily",
@@ -450,6 +456,38 @@ class WorkspaceBundleService:
                 use_llm=use_llm,
             )
 
+        provider_used = None
+        provider_candidates: list[str] = []
+        runtime_mode_effective = runtime_mode_requested
+        fallback_applied = False
+        fallback_reason = None
+
+        if state.debate_review is not None:
+            provider_used = state.debate_review.provider_used
+            provider_candidates = list(state.debate_review.provider_candidates)
+            runtime_mode_effective = (
+                state.debate_review.runtime_mode_effective
+                or state.debate_review.runtime_mode
+                or runtime_mode_requested
+            )
+            if state.debate_review.fallback_applied:
+                fallback_applied = True
+                fallback_reason = (
+                    state.debate_review.fallback_reason
+                    or "Debate runtime switched to rule-based mode."
+                )
+            warning_messages.extend(state.debate_review.warning_messages)
+
+        failed_modules = [item.module_name for item in statuses if item.status == "error"]
+        if failed_modules:
+            fallback_applied = True
+            if fallback_reason is None:
+                fallback_reason = "One or more workspace modules failed and were skipped."
+            warning_messages.append(
+                "Partial workspace result. Failed modules: %s."
+                % ", ".join(failed_modules)
+            )
+
         return WorkspaceBundleResponse(
             symbol=symbol,
             use_llm=bool(use_llm),
@@ -467,6 +505,13 @@ class WorkspaceBundleService:
                 items=freshness_items,
             ),
             debate_progress=debate_progress,
+            provider_used=provider_used,
+            provider_candidates=provider_candidates,
+            fallback_applied=fallback_applied,
+            fallback_reason=fallback_reason,
+            runtime_mode_requested=runtime_mode_requested,
+            runtime_mode_effective=runtime_mode_effective,
+            warning_messages=warning_messages,
         )
 
     def _get_trigger_snapshot_with_fallback(
@@ -491,7 +536,9 @@ class WorkspaceBundleService:
                 WorkspaceModuleStatus(
                     module_name=module_name,
                     status="error",
-                    message=str(exc) or f"{module_name} failed.",
+                    message=f"{module_name} is temporarily unavailable.",
+                    fallback_applied=True,
+                    fallback_reason=f"{module_name} failed and was skipped.",
                 )
             )
             return None

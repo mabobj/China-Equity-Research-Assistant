@@ -243,6 +243,8 @@ def test_workspace_bundle_service_returns_bundle_with_evidence_and_freshness() -
     assert bundle.evidence_manifest is not None
     assert bundle.freshness_summary.items
     assert any(item.module_name == "decision_brief" for item in bundle.module_status_summary)
+    assert bundle.runtime_mode_effective == "rule_based"
+    assert bundle.fallback_applied is False
 
 
 def test_workspace_bundle_service_returns_partial_bundle_when_module_fails() -> None:
@@ -274,3 +276,6 @@ def test_workspace_bundle_service_returns_partial_bundle_when_module_fails() -> 
         item for item in bundle.module_status_summary if item.module_name == "review_report"
     )
     assert review_status.status == "error"
+    assert bundle.fallback_applied is True
+    assert bundle.fallback_reason == "One or more workspace modules failed and were skipped."
+    assert bundle.warning_messages

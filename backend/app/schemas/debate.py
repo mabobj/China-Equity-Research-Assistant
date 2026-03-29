@@ -107,6 +107,13 @@ class DebateReviewReport(BaseModel):
     strategy_summary: StrategySummary
     confidence: int = Field(ge=0, le=100)
     runtime_mode: Literal["rule_based", "llm"] = "rule_based"
+    provider_used: Optional[str] = None
+    provider_candidates: list[str] = Field(default_factory=list)
+    fallback_applied: bool = False
+    fallback_reason: Optional[str] = None
+    runtime_mode_requested: Optional[Literal["rule_based", "llm"]] = None
+    runtime_mode_effective: Optional[Literal["rule_based", "llm"]] = None
+    warning_messages: list[str] = Field(default_factory=list)
 
 
 class DebateReviewProgress(BaseModel):

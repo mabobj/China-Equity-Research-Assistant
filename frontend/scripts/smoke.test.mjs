@@ -39,6 +39,16 @@ runCheck("stock workspace uses workspace-bundle as primary data source", () => {
     "Loading workspace bundle",
     "stock workspace should expose loading state text",
   );
+  assertContains(
+    source,
+    "runtime_mode_effective",
+    "stock workspace should surface effective runtime mode",
+  );
+  assertContains(
+    source,
+    "Fallback applied",
+    "stock workspace should show fallback status when present",
+  );
 });
 
 runCheck("screener workspace triggers workflow run and polling", () => {
@@ -67,6 +77,11 @@ runCheck("workflow summary component renders status and final output summary", (
     source,
     "final_output_summary",
     "workflow summary should render final output summary",
+  );
+  assertContains(
+    source,
+    "failed_symbols",
+    "workflow summary should render failed symbol summary",
   );
 });
 

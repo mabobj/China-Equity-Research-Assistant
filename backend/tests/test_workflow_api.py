@@ -141,9 +141,17 @@ class StubWorkflowRuntimeService:
                         message="Completed with symbol failures",
                     )
                 ],
-                final_output_summary={"success_count": 1, "failure_count": 1},
+                final_output_summary={
+                    "success_count": 1,
+                    "failure_count": 1,
+                    "failed_symbols": ["000001.SZ"],
+                },
                 final_output=None,
                 error_message=None,
+                failed_symbols=["000001.SZ"],
+                fallback_applied=True,
+                fallback_reason="Some symbols failed and were skipped.",
+                warning_messages=["Partial run with 1 failed symbol(s)."],
             )
 
         return WorkflowRunDetailResponse(
@@ -279,6 +287,7 @@ def test_deep_review_workflow_polling_completes_with_symbol_failures() -> None:
     assert second_poll.json()["status"] == "completed"
     assert second_poll.json()["final_output_summary"]["failure_count"] == 1
     assert second_poll.json()["final_output_summary"]["success_count"] == 1
+    assert second_poll.json()["failed_symbols"] == ["000001.SZ"]
+    assert second_poll.json()["fallback_applied"] is True
 
     app.dependency_overrides.clear()
-

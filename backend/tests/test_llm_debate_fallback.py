@@ -126,6 +126,11 @@ def test_debate_runtime_service_falls_back_when_disabled() -> None:
     report = service.get_debate_review_report("600519.SH", use_llm=True)
 
     assert report.runtime_mode == "rule_based"
+    assert report.runtime_mode_requested == "llm"
+    assert report.runtime_mode_effective == "rule_based"
+    assert report.fallback_applied is True
+    assert report.fallback_reason == "LLM debate is disabled by configuration."
+    assert report.provider_used == "rule_based"
 
 
 def test_debate_runtime_service_falls_back_when_llm_fails() -> None:
@@ -144,6 +149,11 @@ def test_debate_runtime_service_falls_back_when_llm_fails() -> None:
     report = service.get_debate_review_report("600519.SH", use_llm=True)
 
     assert report.runtime_mode == "rule_based"
+    assert report.runtime_mode_requested == "llm"
+    assert report.runtime_mode_effective == "rule_based"
+    assert report.fallback_applied is True
+    assert report.fallback_reason == "LLM runtime failed or timed out."
+    assert report.provider_used == "rule_based"
 
 
 def test_debate_runtime_service_uses_llm_when_available() -> None:
@@ -162,3 +172,7 @@ def test_debate_runtime_service_uses_llm_when_available() -> None:
     report = service.get_debate_review_report("600519.SH", use_llm=True)
 
     assert report.runtime_mode == "llm"
+    assert report.runtime_mode_requested == "llm"
+    assert report.runtime_mode_effective == "llm"
+    assert report.fallback_applied is False
+    assert report.provider_used == "llm"

@@ -331,6 +331,7 @@ class DeepReviewWorkflowDefinitionBuilder:
             ),
             "success_count": len(output.candidates),
             "failure_count": len(output.failures),
+            "failed_symbols": [failure.symbol for failure in output.failures],
             "candidate_symbols": [item.symbol for item in output.candidates],
         }
 

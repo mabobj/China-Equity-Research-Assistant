@@ -207,6 +207,13 @@ export type DebateReviewReport = {
   strategy_summary: StrategySummary;
   confidence: number;
   runtime_mode: "rule_based" | "llm";
+  provider_used: string | null;
+  provider_candidates: string[];
+  fallback_applied: boolean;
+  fallback_reason: string | null;
+  runtime_mode_requested: "rule_based" | "llm" | null;
+  runtime_mode_effective: "rule_based" | "llm" | null;
+  warning_messages: string[];
 };
 
 export type DebateReviewProgress = {
@@ -456,6 +463,11 @@ export type WorkspaceModuleStatus = {
   module_name: string;
   status: "success" | "error" | "skipped";
   message: string | null;
+  provider_used: string | null;
+  provider_candidates: string[];
+  fallback_applied: boolean;
+  fallback_reason: string | null;
+  warning_messages: string[];
 };
 
 export type WorkspaceFreshnessItem = {
@@ -484,6 +496,13 @@ export type WorkspaceBundleResponse = {
   evidence_manifest: EvidenceManifest | null;
   freshness_summary: FreshnessSummary;
   debate_progress: DebateReviewProgress | null;
+  provider_used: string | null;
+  provider_candidates: string[];
+  fallback_applied: boolean;
+  fallback_reason: string | null;
+  runtime_mode_requested: string | null;
+  runtime_mode_effective: string | null;
+  warning_messages: string[];
 };
 
 export type DataRefreshStatus = {
@@ -536,6 +555,14 @@ export type WorkflowRunResponse = {
   steps: WorkflowStepSummary[];
   final_output_summary: Record<string, unknown>;
   error_message: string | null;
+  provider_used: string | null;
+  provider_candidates: string[];
+  fallback_applied: boolean;
+  fallback_reason: string | null;
+  runtime_mode_requested: string | null;
+  runtime_mode_effective: string | null;
+  warning_messages: string[];
+  failed_symbols: string[];
 };
 
 export type WorkflowRunDetailResponse = WorkflowRunResponse & {

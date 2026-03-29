@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 from app.schemas.screener import ScreenerRunResponse
@@ -63,6 +64,12 @@ class WorkflowRuntimeService:
 
     def get_run_detail(self, run_id: str) -> WorkflowRunDetailResponse:
         artifact = self._artifact_store.load_run(run_id)
+        visibility = self._build_runtime_visibility(
+            workflow_name=artifact.workflow_name,
+            input_summary=artifact.input_summary,
+            final_output_summary=artifact.final_output_summary,
+            final_output=artifact.final_output,
+        )
         return WorkflowRunDetailResponse.model_validate(
             {
                 "run_id": artifact.run_id,
@@ -75,6 +82,7 @@ class WorkflowRuntimeService:
                 "final_output_summary": artifact.final_output_summary,
                 "final_output": artifact.final_output,
                 "error_message": artifact.error_message,
+                **visibility,
             }
         )
 
@@ -107,6 +115,12 @@ class WorkflowRuntimeService:
             started_at=started_at,
             persist_initial_state=False,
         )
+        visibility = self._build_runtime_visibility(
+            workflow_name=definition.name,
+            input_summary=initial_artifact.input_summary,
+            final_output_summary={},
+            final_output=None,
+        )
         return WorkflowRunResponse.model_validate(
             {
                 "run_id": run_id,
@@ -118,10 +132,22 @@ class WorkflowRuntimeService:
                 "steps": [],
                 "final_output_summary": {},
                 "error_message": None,
+                **visibility,
             }
         )
 
     def _to_run_response(self, result) -> WorkflowRunResponse:
+        final_output_dump = (
+            result.final_output.model_dump(mode="json")
+            if result.final_output is not None
+            else None
+        )
+        visibility = self._build_runtime_visibility(
+            workflow_name=result.workflow_name,
+            input_summary=result.input_summary,
+            final_output_summary=result.final_output_summary,
+            final_output=final_output_dump,
+        )
         return WorkflowRunResponse.model_validate(
             {
                 "run_id": result.run_id,
@@ -133,6 +159,7 @@ class WorkflowRuntimeService:
                 "steps": self._to_step_summaries(result.steps),
                 "final_output_summary": result.final_output_summary,
                 "error_message": result.error_message,
+                **visibility,
             }
         )
 
@@ -153,3 +180,68 @@ class WorkflowRuntimeService:
             )
             for step in steps
         ]
+
+    def _build_runtime_visibility(
+        self,
+        *,
+        workflow_name: str,
+        input_summary: dict[str, Any],
+        final_output_summary: dict[str, Any],
+        final_output: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        requested_mode = self._requested_runtime_mode(input_summary=input_summary)
+        debate_payload = self._extract_debate_payload(final_output=final_output)
+        effective_mode = (
+            debate_payload.get("runtime_mode_effective")
+            or debate_payload.get("runtime_mode")
+            or requested_mode
+        )
+        failed_symbols = self._extract_failed_symbols(final_output_summary=final_output_summary)
+        fallback_applied = bool(debate_payload.get("fallback_applied")) or bool(failed_symbols)
+        fallback_reason = debate_payload.get("fallback_reason")
+        warning_messages = list(debate_payload.get("warning_messages") or [])
+
+        if failed_symbols:
+            if fallback_reason is None:
+                fallback_reason = "Some symbols failed and were skipped."
+            warning_messages.append(
+                f"Partial run with {len(failed_symbols)} failed symbol(s)."
+            )
+
+        provider_used = debate_payload.get("provider_used") or "workflow_runtime"
+        provider_candidates = debate_payload.get("provider_candidates") or [provider_used]
+
+        return {
+            "provider_used": provider_used,
+            "provider_candidates": provider_candidates,
+            "fallback_applied": fallback_applied,
+            "fallback_reason": fallback_reason,
+            "runtime_mode_requested": requested_mode,
+            "runtime_mode_effective": effective_mode,
+            "warning_messages": warning_messages,
+            "failed_symbols": failed_symbols,
+        }
+
+    def _requested_runtime_mode(self, *, input_summary: dict[str, Any]) -> str | None:
+        use_llm = input_summary.get("use_llm")
+        if use_llm is None:
+            return None
+        return "llm" if bool(use_llm) else "rule_based"
+
+    def _extract_debate_payload(self, *, final_output: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(final_output, dict):
+            return {}
+        debate_review = final_output.get("debate_review")
+        if not isinstance(debate_review, dict):
+            return {}
+        return debate_review
+
+    def _extract_failed_symbols(self, *, final_output_summary: dict[str, Any]) -> list[str]:
+        raw = final_output_summary.get("failed_symbols")
+        if not isinstance(raw, list):
+            return []
+        symbols: list[str] = []
+        for item in raw:
+            if isinstance(item, str) and item:
+                symbols.append(item)
+        return symbols
