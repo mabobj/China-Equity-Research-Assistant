@@ -13,6 +13,16 @@ from app.schemas.workflow import (
     DeepReviewWorkflowRunRequest,
     WorkflowSymbolFailure,
 )
+from app.services.data_products.datasets.debate_review_daily import (
+    DebateReviewDailyDataset,
+)
+from app.services.data_products.datasets.review_report_daily import (
+    ReviewReportDailyDataset,
+)
+from app.services.data_products.datasets.strategy_plan_daily import (
+    StrategyPlanDailyDataset,
+)
+from app.services.data_products.freshness import resolve_last_closed_trading_day
 from app.services.llm_debate_service.fallback import DebateRuntimeService
 from app.services.screener_service.pipeline import ScreenerPipeline
 from app.services.workflow_runtime.base import WorkflowDefinition, WorkflowNode
@@ -32,11 +42,17 @@ class DeepReviewWorkflowDefinitionBuilder:
         stock_review_service: StockReviewService,
         debate_runtime_service: DebateRuntimeService,
         strategy_planner: StrategyPlanner,
+        review_report_daily: ReviewReportDailyDataset,
+        strategy_plan_daily: StrategyPlanDailyDataset,
+        debate_review_daily: DebateReviewDailyDataset,
     ) -> None:
         self._screener_pipeline = screener_pipeline
         self._stock_review_service = stock_review_service
         self._debate_runtime_service = debate_runtime_service
         self._strategy_planner = strategy_planner
+        self._review_report_daily = review_report_daily
+        self._strategy_plan_daily = strategy_plan_daily
+        self._debate_review_daily = debate_review_daily
 
     def build(self) -> WorkflowDefinition:
         """返回深筛复核 workflow 定义。"""
@@ -125,12 +141,32 @@ class DeepReviewWorkflowDefinitionBuilder:
         selection = self._ensure_selection(context)
         items: list[CandidateWorkflowItem] = []
         failures: list[WorkflowSymbolFailure] = []
+        as_of_date = resolve_last_closed_trading_day()
 
         for candidate in selection.selected_candidates:
             try:
-                review_report = self._stock_review_service.get_stock_review_report(
-                    candidate.symbol
+                cached = self._review_report_daily.load(
+                    candidate.symbol,
+                    as_of_date=as_of_date,
                 )
+                if cached is not None:
+                    review_report = cached.payload.model_copy(
+                        update={
+                            "freshness_mode": cached.freshness_mode,
+                            "source_mode": cached.source_mode,
+                        }
+                    )
+                else:
+                    computed = self._stock_review_service.get_stock_review_report(
+                        candidate.symbol
+                    )
+                    saved = self._review_report_daily.save(candidate.symbol, computed)
+                    review_report = saved.payload.model_copy(
+                        update={
+                            "freshness_mode": saved.freshness_mode,
+                            "source_mode": saved.source_mode,
+                        }
+                    )
             except Exception as exc:
                 failures.append(
                     WorkflowSymbolFailure(
@@ -158,13 +194,47 @@ class DeepReviewWorkflowDefinitionBuilder:
         review_batch = self._ensure_review_batch(context)
         items: list[CandidateWorkflowItem] = []
         failures = list(review_batch.failures)
+        as_of_date = resolve_last_closed_trading_day()
+        variant = "llm" if bool(context.use_llm) else "rule_based"
 
         for item in review_batch.items:
             try:
-                debate_review = self._debate_runtime_service.get_debate_review_report(
+                cached = self._debate_review_daily.load(
                     item.symbol,
-                    use_llm=context.use_llm,
+                    as_of_date=as_of_date,
+                    variant=variant,
                 )
+                if cached is not None:
+                    debate_review = cached.payload.model_copy(
+                        update={
+                            "freshness_mode": cached.freshness_mode,
+                            "source_mode": cached.source_mode,
+                        }
+                    )
+                else:
+                    computed = self._debate_runtime_service.get_debate_review_report(
+                        item.symbol,
+                        use_llm=context.use_llm,
+                    )
+                    variant_to_save = (
+                        "llm"
+                        if (
+                            computed.runtime_mode_effective == "llm"
+                            or computed.runtime_mode == "llm"
+                        )
+                        else "rule_based"
+                    )
+                    saved = self._debate_review_daily.save(
+                        item.symbol,
+                        computed,
+                        variant=variant_to_save,
+                    )
+                    debate_review = saved.payload.model_copy(
+                        update={
+                            "freshness_mode": saved.freshness_mode,
+                            "source_mode": saved.source_mode,
+                        }
+                    )
             except Exception as exc:
                 failures.append(
                     WorkflowSymbolFailure(
@@ -192,10 +262,30 @@ class DeepReviewWorkflowDefinitionBuilder:
         debate_batch = self._ensure_debate_batch(context)
         items: list[CandidateWorkflowItem] = []
         failures = list(debate_batch.failures)
+        as_of_date = resolve_last_closed_trading_day()
 
         for item in debate_batch.items:
             try:
-                strategy_plan = self._strategy_planner.get_strategy_plan(item.symbol)
+                cached = self._strategy_plan_daily.load(
+                    item.symbol,
+                    as_of_date=as_of_date,
+                )
+                if cached is not None:
+                    strategy_plan = cached.payload.model_copy(
+                        update={
+                            "freshness_mode": cached.freshness_mode,
+                            "source_mode": cached.source_mode,
+                        }
+                    )
+                else:
+                    computed = self._strategy_planner.get_strategy_plan(item.symbol)
+                    saved = self._strategy_plan_daily.save(item.symbol, computed)
+                    strategy_plan = saved.payload.model_copy(
+                        update={
+                            "freshness_mode": saved.freshness_mode,
+                            "source_mode": saved.source_mode,
+                        }
+                    )
             except Exception as exc:
                 failures.append(
                     WorkflowSymbolFailure(
@@ -368,6 +458,9 @@ def build_deep_review_workflow_definition(
     stock_review_service: StockReviewService,
     debate_runtime_service: DebateRuntimeService,
     strategy_planner: StrategyPlanner,
+    review_report_daily: ReviewReportDailyDataset,
+    strategy_plan_daily: StrategyPlanDailyDataset,
+    debate_review_daily: DebateReviewDailyDataset,
 ) -> WorkflowDefinition:
     """构建深筛复核 workflow 定义。"""
     return DeepReviewWorkflowDefinitionBuilder(
@@ -375,6 +468,9 @@ def build_deep_review_workflow_definition(
         stock_review_service=stock_review_service,
         debate_runtime_service=debate_runtime_service,
         strategy_planner=strategy_planner,
+        review_report_daily=review_report_daily,
+        strategy_plan_daily=strategy_plan_daily,
+        debate_review_daily=debate_review_daily,
     ).build()
 
 

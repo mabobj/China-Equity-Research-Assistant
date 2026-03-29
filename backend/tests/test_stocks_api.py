@@ -759,7 +759,7 @@ def test_debate_review_route_returns_structured_payload() -> None:
     assert payload["runtime_mode"] == "rule_based"
     assert payload["runtime_mode_effective"] in {None, "rule_based"}
 
-    response = client.get("/stocks/600519/debate-review?use_llm=true")
+    response = client.get("/stocks/600519/debate-review?use_llm=true&force_refresh=true")
     payload = response.json()
     assert payload["runtime_mode"] == "llm"
     assert payload["runtime_mode_requested"] in {None, "llm"}

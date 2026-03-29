@@ -12,6 +12,16 @@ from app.schemas.workflow import (
     SingleStockWorkflowOutput,
     SingleStockWorkflowRunRequest,
 )
+from app.services.data_products.datasets.debate_review_daily import (
+    DebateReviewDailyDataset,
+)
+from app.services.data_products.datasets.review_report_daily import (
+    ReviewReportDailyDataset,
+)
+from app.services.data_products.datasets.strategy_plan_daily import (
+    StrategyPlanDailyDataset,
+)
+from app.services.data_products.freshness import resolve_last_closed_trading_day
 from app.services.debate_service.debate_orchestrator import DebateOrchestrator
 from app.services.factor_service.factor_snapshot_service import FactorSnapshotService
 from app.services.llm_debate_service.fallback import DebateRuntimeService
@@ -31,12 +41,18 @@ class SingleStockWorkflowDefinitionBuilder:
         stock_review_service: StockReviewService,
         debate_runtime_service: DebateRuntimeService,
         strategy_planner: StrategyPlanner,
+        review_report_daily: ReviewReportDailyDataset,
+        strategy_plan_daily: StrategyPlanDailyDataset,
+        debate_review_daily: DebateReviewDailyDataset,
     ) -> None:
         self._debate_orchestrator = debate_orchestrator
         self._factor_snapshot_service = factor_snapshot_service
         self._stock_review_service = stock_review_service
         self._debate_runtime_service = debate_runtime_service
         self._strategy_planner = strategy_planner
+        self._review_report_daily = review_report_daily
+        self._strategy_plan_daily = strategy_plan_daily
+        self._debate_review_daily = debate_review_daily
 
     def build(self) -> WorkflowDefinition:
         """返回单票 workflow 定义。"""
@@ -105,22 +121,96 @@ class SingleStockWorkflowDefinitionBuilder:
 
     def _build_review_report(self, context: WorkflowContext) -> StockReviewReport:
         request = self._get_request(context)
-        output = self._stock_review_service.get_stock_review_report(request.symbol)
+        as_of_date = resolve_last_closed_trading_day()
+        cached = self._review_report_daily.load(request.symbol, as_of_date=as_of_date)
+        if cached is not None:
+            output = cached.payload.model_copy(
+                update={
+                    "freshness_mode": cached.freshness_mode,
+                    "source_mode": cached.source_mode,
+                }
+            )
+            context.set_output("ReviewReportBuild", output)
+            return output
+
+        computed = self._stock_review_service.get_stock_review_report(request.symbol)
+        saved = self._review_report_daily.save(request.symbol, computed)
+        output = saved.payload.model_copy(
+            update={
+                "freshness_mode": saved.freshness_mode,
+                "source_mode": saved.source_mode,
+            }
+        )
         context.set_output("ReviewReportBuild", output)
         return output
 
     def _build_debate_review(self, context: WorkflowContext) -> DebateReviewReport:
         request = self._get_request(context)
-        output = self._debate_runtime_service.get_debate_review_report(
+        as_of_date = resolve_last_closed_trading_day()
+        variant = "llm" if bool(context.use_llm) else "rule_based"
+        cached = self._debate_review_daily.load(
+            request.symbol,
+            as_of_date=as_of_date,
+            variant=variant,
+        )
+        if cached is not None:
+            output = cached.payload.model_copy(
+                update={
+                    "freshness_mode": cached.freshness_mode,
+                    "source_mode": cached.source_mode,
+                }
+            )
+            context.set_output("DebateReviewBuild", output)
+            return output
+
+        computed = self._debate_runtime_service.get_debate_review_report(
             request.symbol,
             use_llm=context.use_llm,
+        )
+        variant_to_save = (
+            "llm"
+            if (
+                computed.runtime_mode_effective == "llm"
+                or computed.runtime_mode == "llm"
+            )
+            else "rule_based"
+        )
+        saved = self._debate_review_daily.save(
+            request.symbol,
+            computed,
+            variant=variant_to_save,
+        )
+        output = saved.payload.model_copy(
+            update={
+                "freshness_mode": saved.freshness_mode,
+                "source_mode": saved.source_mode,
+            }
         )
         context.set_output("DebateReviewBuild", output)
         return output
 
     def _build_strategy_plan(self, context: WorkflowContext) -> StrategyPlan:
         request = self._get_request(context)
-        output = self._strategy_planner.get_strategy_plan(request.symbol)
+        as_of_date = resolve_last_closed_trading_day()
+        cached = self._strategy_plan_daily.load(request.symbol, as_of_date=as_of_date)
+        if cached is not None:
+            output = cached.payload.model_copy(
+                update={
+                    "freshness_mode": cached.freshness_mode,
+                    "source_mode": cached.source_mode,
+                }
+            )
+            context.set_output("StrategyPlanBuild", output)
+            return output
+
+        computed = self._strategy_planner.get_strategy_plan(request.symbol)
+        saved = self._strategy_plan_daily.save(request.symbol, computed)
+        output = saved.payload.model_copy(
+            update={
+                "freshness_mode": saved.freshness_mode,
+                "source_mode": saved.source_mode,
+            }
+        )
         context.set_output("StrategyPlanBuild", output)
         return output
 
@@ -232,6 +322,9 @@ def build_single_stock_workflow_definition(
     stock_review_service: StockReviewService,
     debate_runtime_service: DebateRuntimeService,
     strategy_planner: StrategyPlanner,
+    review_report_daily: ReviewReportDailyDataset,
+    strategy_plan_daily: StrategyPlanDailyDataset,
+    debate_review_daily: DebateReviewDailyDataset,
 ) -> WorkflowDefinition:
     """构建单票完整研判 workflow 定义。"""
     return SingleStockWorkflowDefinitionBuilder(
@@ -240,4 +333,7 @@ def build_single_stock_workflow_definition(
         stock_review_service=stock_review_service,
         debate_runtime_service=debate_runtime_service,
         strategy_planner=strategy_planner,
+        review_report_daily=review_report_daily,
+        strategy_plan_daily=strategy_plan_daily,
+        debate_review_daily=debate_review_daily,
     ).build()

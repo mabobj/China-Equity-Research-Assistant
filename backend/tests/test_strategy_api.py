@@ -1,43 +1,55 @@
-"""结构化交易策略 API 测试。"""
+"""API tests for strategy routes."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_strategy_planner
+from app.api.dependencies import (
+    get_strategy_plan_daily_dataset,
+    get_strategy_planner,
+)
 from app.main import app
 from app.schemas.strategy import PriceRange, StrategyPlan
+from app.services.data_products.base import DataProductResult
 
 
 class StubStrategyPlanner:
-    """用于策略 API 测试的 planner 桩。"""
-
     def get_strategy_plan(self, symbol: str) -> StrategyPlan:
         return StrategyPlan(
             symbol="600519.SH",
-            name="贵州茅台",
+            name="Kweichow Moutai",
             as_of_date=date(2024, 3, 25),
             action="BUY",
             strategy_type="pullback",
             entry_window="next_3_to_5_trading_days",
             ideal_entry_range=PriceRange(low=1600.0, high=1625.0),
-            entry_triggers=[
-                "价格回踩支撑区后企稳。",
-                "趋势状态保持非下行。",
-            ],
-            avoid_if=[
-                "日线收盘跌破关键支撑位。",
-                "研究报告 action 下修为 AVOID。",
-            ],
+            entry_triggers=["Pullback holds support", "Trend remains non-down"],
+            avoid_if=["Daily close breaks support", "Research action drops to AVOID"],
             initial_position_hint="small",
             stop_loss_price=1578.0,
-            stop_loss_rule="若买入后日线收盘跌破 1578.00，则执行止损。",
+            stop_loss_rule="Stop after support break.",
             take_profit_range=PriceRange(low=1688.0, high=1712.0),
-            take_profit_rule="价格进入目标区间后分批止盈。",
-            hold_rule="趋势未转弱且支撑未失守时继续持有。",
-            sell_rule="若跌破止损位或趋势显著走弱，则卖出。",
+            take_profit_rule="Scale out in target range.",
+            hold_rule="Hold while trend is intact.",
+            sell_rule="Exit when stop-loss or invalidation is hit.",
             review_timeframe="daily_close_review",
             confidence=71,
+        )
+
+
+class StubStrategyPlanDaily:
+    def load(self, symbol: str, *, as_of_date):
+        return None
+
+    def save(self, symbol: str, payload: StrategyPlan):
+        return DataProductResult(
+            dataset="strategy_plan_daily",
+            symbol=symbol,
+            as_of_date=payload.as_of_date,
+            payload=payload,
+            freshness_mode="computed",
+            source_mode="snapshot",
+            updated_at=datetime.now(timezone.utc),
         )
 
 
@@ -45,8 +57,10 @@ client = TestClient(app)
 
 
 def test_get_strategy_plan_route_returns_structured_payload() -> None:
-    """策略接口应返回结构化响应。"""
     app.dependency_overrides[get_strategy_planner] = lambda: StubStrategyPlanner()
+    app.dependency_overrides[get_strategy_plan_daily_dataset] = (
+        lambda: StubStrategyPlanDaily()
+    )
 
     response = client.get("/strategy/600519")
 
@@ -54,5 +68,7 @@ def test_get_strategy_plan_route_returns_structured_payload() -> None:
     assert response.json()["symbol"] == "600519.SH"
     assert response.json()["strategy_type"] == "pullback"
     assert response.json()["ideal_entry_range"]["low"] == 1600.0
+    assert response.json()["freshness_mode"] == "computed"
+    assert response.json()["source_mode"] == "snapshot"
 
     app.dependency_overrides.clear()

@@ -341,3 +341,54 @@ scripts/   本地启动与测试脚本
 data/      DuckDB、workflow run records 等本地数据
 logs/      后端日志
 ```
+
+## Pack 3 Update: Mainline Data Products and Bundle Reuse
+
+This round completed the mainline daily productization for:
+
+- `review_report_daily`
+- `debate_review_daily`
+- `strategy_plan_daily`
+
+These are now reused by:
+
+- `GET /stocks/{symbol}/review-report`
+- `GET /stocks/{symbol}/debate-review`
+- `GET /strategy/{symbol}`
+- `single_stock_full_review` workflow
+- `deep_candidate_review` workflow
+- `GET /stocks/{symbol}/workspace-bundle`
+
+### Workspace Bundle Reuse Policy
+
+`workspace-bundle` now reads same-day snapshots first, then computes only missing parts.
+
+- Default (`force_refresh=false`):
+  - Prefer local daily products.
+  - Reuse `review/debate/strategy` snapshots whenever available.
+- `use_llm=true` bundle path:
+  - Prefer cached LLM debate snapshot.
+  - If no same-day LLM snapshot is available, bundle will reuse or compute rule-based debate output to avoid long blocking requests.
+  - Response fields (`runtime_mode_*`, `fallback_*`, `warning_messages`) explicitly mark this downgrade.
+- `force_refresh=true`:
+  - Skip same-day snapshot reuse for relevant modules and rebuild on-demand.
+  - Debate path can attempt live LLM execution again.
+
+### Daily vs On-Demand Boundary (Current)
+
+Already productized as daily snapshots:
+
+- `daily_bars_daily`
+- `announcements_daily`
+- `financial_summary_daily`
+- `factor_snapshot_daily`
+- `review_report_daily`
+- `debate_review_daily`
+- `strategy_plan_daily`
+- `decision_brief_daily`
+- `screener_snapshot_daily`
+
+Still on-demand (not fully productized in this round):
+
+- Intraday-dependent `trigger_snapshot` (kept as lightweight runtime/fallback output)
+- Progress tracking objects (for example debate progress polling state)

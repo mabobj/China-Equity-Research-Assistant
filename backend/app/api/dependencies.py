@@ -22,6 +22,9 @@ if TYPE_CHECKING:
         AnnouncementsDailyDataset,
     )
     from app.services.data_products.datasets.daily_bars_daily import DailyBarsDailyDataset
+    from app.services.data_products.datasets.debate_review_daily import (
+        DebateReviewDailyDataset,
+    )
     from app.services.data_products.datasets.decision_brief_daily import (
         DecisionBriefDailyDataset,
     )
@@ -31,8 +34,14 @@ if TYPE_CHECKING:
     from app.services.data_products.datasets.financial_summary_daily import (
         FinancialSummaryDailyDataset,
     )
+    from app.services.data_products.datasets.review_report_daily import (
+        ReviewReportDailyDataset,
+    )
     from app.services.data_products.datasets.screener_snapshot_daily import (
         ScreenerSnapshotDailyDataset,
+    )
+    from app.services.data_products.datasets.strategy_plan_daily import (
+        StrategyPlanDailyDataset,
     )
     from app.services.data_products.repository import DataProductRepository
     from app.services.data_service.db_inspector_service import DbInspectorService
@@ -311,6 +320,33 @@ def get_factor_snapshot_daily_dataset() -> "FactorSnapshotDailyDataset":
 
 
 @lru_cache
+def get_review_report_daily_dataset() -> "ReviewReportDailyDataset":
+    from app.services.data_products.datasets.review_report_daily import (
+        ReviewReportDailyDataset,
+    )
+
+    return ReviewReportDailyDataset(repository=get_data_product_repository())
+
+
+@lru_cache
+def get_strategy_plan_daily_dataset() -> "StrategyPlanDailyDataset":
+    from app.services.data_products.datasets.strategy_plan_daily import (
+        StrategyPlanDailyDataset,
+    )
+
+    return StrategyPlanDailyDataset(repository=get_data_product_repository())
+
+
+@lru_cache
+def get_debate_review_daily_dataset() -> "DebateReviewDailyDataset":
+    from app.services.data_products.datasets.debate_review_daily import (
+        DebateReviewDailyDataset,
+    )
+
+    return DebateReviewDailyDataset(repository=get_data_product_repository())
+
+
+@lru_cache
 def get_decision_brief_daily_dataset() -> "DecisionBriefDailyDataset":
     from app.services.data_products.datasets.decision_brief_daily import (
         DecisionBriefDailyDataset,
@@ -348,6 +384,9 @@ def get_workspace_bundle_service() -> "WorkspaceBundleService":
         announcements_daily=get_announcements_daily_dataset(),
         financial_summary_daily=get_financial_summary_daily_dataset(),
         factor_snapshot_daily=get_factor_snapshot_daily_dataset(),
+        review_report_daily=get_review_report_daily_dataset(),
+        strategy_plan_daily=get_strategy_plan_daily_dataset(),
+        debate_review_daily=get_debate_review_daily_dataset(),
         decision_brief_daily=get_decision_brief_daily_dataset(),
     )
 
@@ -444,12 +483,18 @@ def get_workflow_runtime_service(
                 stock_review_service=stock_review_service,
                 debate_runtime_service=debate_runtime_service,
                 strategy_planner=strategy_planner,
+                review_report_daily=get_review_report_daily_dataset(),
+                strategy_plan_daily=get_strategy_plan_daily_dataset(),
+                debate_review_daily=get_debate_review_daily_dataset(),
             ),
             build_deep_review_workflow_definition(
                 screener_pipeline=screener_pipeline,
                 stock_review_service=stock_review_service,
                 debate_runtime_service=debate_runtime_service,
                 strategy_planner=strategy_planner,
+                review_report_daily=get_review_report_daily_dataset(),
+                strategy_plan_daily=get_strategy_plan_daily_dataset(),
+                debate_review_daily=get_debate_review_daily_dataset(),
             ),
             build_screener_workflow_definition(
                 screener_pipeline=screener_pipeline,

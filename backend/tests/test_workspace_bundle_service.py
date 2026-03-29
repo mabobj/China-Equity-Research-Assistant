@@ -201,6 +201,54 @@ class _StubFactorSnapshotDaily:
         )
 
 
+class _StubReviewReportDaily:
+    def load(self, symbol: str, *, as_of_date):
+        return None
+
+    def save(self, symbol: str, payload):
+        return DataProductResult(
+            dataset="review_report_daily",
+            symbol=symbol,
+            as_of_date=payload.as_of_date,
+            payload=payload,
+            freshness_mode="computed",
+            source_mode="snapshot",
+            updated_at=datetime.now(),
+        )
+
+
+class _StubStrategyPlanDaily:
+    def load(self, symbol: str, *, as_of_date):
+        return None
+
+    def save(self, symbol: str, payload):
+        return DataProductResult(
+            dataset="strategy_plan_daily",
+            symbol=symbol,
+            as_of_date=payload.as_of_date,
+            payload=payload,
+            freshness_mode="computed",
+            source_mode="snapshot",
+            updated_at=datetime.now(),
+        )
+
+
+class _StubDebateReviewDaily:
+    def load(self, symbol: str, *, as_of_date, variant: str = "rule_based"):
+        return None
+
+    def save(self, symbol: str, payload, *, variant: str = "rule_based"):
+        return DataProductResult(
+            dataset="debate_review_daily",
+            symbol=symbol,
+            as_of_date=payload.as_of_date,
+            payload=payload,
+            freshness_mode="computed",
+            source_mode="snapshot",
+            updated_at=datetime.now(),
+        )
+
+
 class _StubDecisionBriefDaily:
     def load(self, symbol: str, *, as_of_date, variant: str = "rule_based"):
         return None
@@ -215,6 +263,90 @@ class _StubDecisionBriefDaily:
             source_mode="snapshot",
             updated_at=datetime.now(),
         )
+
+
+class _CachedReviewReportDaily(_StubReviewReportDaily):
+    def load(self, symbol: str, *, as_of_date):
+        payload = build_review_report().model_copy(
+            update={
+                "as_of_date": as_of_date,
+            }
+        )
+        return DataProductResult(
+            dataset="review_report_daily",
+            symbol=symbol,
+            as_of_date=as_of_date,
+            payload=payload,
+            freshness_mode="cache_hit",
+            source_mode="snapshot",
+            updated_at=datetime.now(),
+        )
+
+
+class _CachedStrategyPlanDaily(_StubStrategyPlanDaily):
+    def load(self, symbol: str, *, as_of_date):
+        payload = build_strategy_plan().model_copy(
+            update={
+                "as_of_date": as_of_date,
+            }
+        )
+        return DataProductResult(
+            dataset="strategy_plan_daily",
+            symbol=symbol,
+            as_of_date=as_of_date,
+            payload=payload,
+            freshness_mode="cache_hit",
+            source_mode="snapshot",
+            updated_at=datetime.now(),
+        )
+
+
+class _CachedDebateReviewDaily(_StubDebateReviewDaily):
+    def __init__(self, *, llm_cached: bool = False, rule_cached: bool = False) -> None:
+        self._llm_cached = llm_cached
+        self._rule_cached = rule_cached
+
+    def load(self, symbol: str, *, as_of_date, variant: str = "rule_based"):
+        if variant == "llm" and not self._llm_cached:
+            return None
+        if variant == "rule_based" and not self._rule_cached:
+            return None
+        payload = build_debate_review_report().model_copy(
+            update={
+                "as_of_date": as_of_date,
+                "runtime_mode": "llm" if variant == "llm" else "rule_based",
+                "runtime_mode_effective": "llm" if variant == "llm" else "rule_based",
+                "runtime_mode_requested": "llm" if variant == "llm" else "rule_based",
+                "provider_used": variant,
+            }
+        )
+        return DataProductResult(
+            dataset="debate_review_daily",
+            symbol=symbol,
+            as_of_date=as_of_date,
+            payload=payload,
+            freshness_mode="cache_hit",
+            source_mode="snapshot",
+            updated_at=datetime.now(),
+        )
+
+
+class _FailingStrategyPlanner:
+    def build_strategy_plan_from_components(self, **kwargs):
+        raise RuntimeError("strategy should not be recomputed")
+
+
+class _FailingReviewService:
+    def build_review_report_from_components(self, **kwargs):
+        raise RuntimeError("review should not be recomputed")
+
+
+class _FailingDebateRuntimeService:
+    def get_debate_review_report_from_inputs(self, inputs, **kwargs):
+        raise RuntimeError("debate should not be recomputed")
+
+    def get_debate_review_progress(self, symbol: str, **kwargs):
+        return None
 
 
 def test_workspace_bundle_service_returns_bundle_with_evidence_and_freshness() -> None:
@@ -232,6 +364,9 @@ def test_workspace_bundle_service_returns_bundle_with_evidence_and_freshness() -
         announcements_daily=_StubAnnouncementsDaily(),
         financial_summary_daily=_StubFinancialSummaryDaily(),
         factor_snapshot_daily=_StubFactorSnapshotDaily(),
+        review_report_daily=_StubReviewReportDaily(),
+        strategy_plan_daily=_StubStrategyPlanDaily(),
+        debate_review_daily=_StubDebateReviewDaily(),
         decision_brief_daily=_StubDecisionBriefDaily(),
     )
 
@@ -262,6 +397,9 @@ def test_workspace_bundle_service_returns_partial_bundle_when_module_fails() -> 
         announcements_daily=_StubAnnouncementsDaily(),
         financial_summary_daily=_StubFinancialSummaryDaily(),
         factor_snapshot_daily=_StubFactorSnapshotDaily(),
+        review_report_daily=_StubReviewReportDaily(),
+        strategy_plan_daily=_StubStrategyPlanDaily(),
+        debate_review_daily=_StubDebateReviewDaily(),
         decision_brief_daily=_StubDecisionBriefDaily(),
     )
 
@@ -279,3 +417,71 @@ def test_workspace_bundle_service_returns_partial_bundle_when_module_fails() -> 
     assert bundle.fallback_applied is True
     assert bundle.fallback_reason == "One or more workspace modules failed and were skipped."
     assert bundle.warning_messages
+
+
+def test_workspace_bundle_service_reuses_review_strategy_and_debate_snapshots() -> None:
+    service = WorkspaceBundleService(
+        market_data_service=_StubMarketDataService(),
+        technical_analysis_service=_StubTechnicalAnalysisService(),
+        research_manager=_StubResearchManager(),
+        factor_snapshot_service=_StubFactorSnapshotService(),
+        stock_review_service=_FailingReviewService(),
+        debate_orchestrator=_StubDebateOrchestrator(),
+        debate_runtime_service=_FailingDebateRuntimeService(),
+        strategy_planner=_FailingStrategyPlanner(),
+        trigger_snapshot_service=_StubTriggerSnapshotService(),
+        daily_bars_daily=_StubDailyBarsDaily(),
+        announcements_daily=_StubAnnouncementsDaily(),
+        financial_summary_daily=_StubFinancialSummaryDaily(),
+        factor_snapshot_daily=_StubFactorSnapshotDaily(),
+        review_report_daily=_CachedReviewReportDaily(),
+        strategy_plan_daily=_CachedStrategyPlanDaily(),
+        debate_review_daily=_CachedDebateReviewDaily(rule_cached=True),
+        decision_brief_daily=_StubDecisionBriefDaily(),
+    )
+
+    bundle = service.get_workspace_bundle("600519.SH", use_llm=False)
+
+    assert bundle.review_report is not None
+    assert bundle.strategy_plan is not None
+    assert bundle.debate_review is not None
+    assert bundle.review_report.freshness_mode == "cache_hit"
+    assert bundle.strategy_plan.freshness_mode == "cache_hit"
+    assert bundle.debate_review.freshness_mode == "cache_hit"
+    assert bundle.fallback_applied is False
+
+
+def test_workspace_bundle_service_use_llm_prefers_rule_snapshot_when_llm_snapshot_missing() -> None:
+    service = WorkspaceBundleService(
+        market_data_service=_StubMarketDataService(),
+        technical_analysis_service=_StubTechnicalAnalysisService(),
+        research_manager=_StubResearchManager(),
+        factor_snapshot_service=_StubFactorSnapshotService(),
+        stock_review_service=_StubStockReviewService(),
+        debate_orchestrator=_StubDebateOrchestrator(),
+        debate_runtime_service=_FailingDebateRuntimeService(),
+        strategy_planner=_StubStrategyPlanner(),
+        trigger_snapshot_service=_StubTriggerSnapshotService(),
+        daily_bars_daily=_StubDailyBarsDaily(),
+        announcements_daily=_StubAnnouncementsDaily(),
+        financial_summary_daily=_StubFinancialSummaryDaily(),
+        factor_snapshot_daily=_StubFactorSnapshotDaily(),
+        review_report_daily=_StubReviewReportDaily(),
+        strategy_plan_daily=_StubStrategyPlanDaily(),
+        debate_review_daily=_CachedDebateReviewDaily(rule_cached=True, llm_cached=False),
+        decision_brief_daily=_StubDecisionBriefDaily(),
+    )
+
+    bundle = service.get_workspace_bundle("600519.SH", use_llm=True)
+
+    assert bundle.debate_review is not None
+    assert bundle.debate_review.runtime_mode_requested == "llm"
+    assert bundle.debate_review.runtime_mode_effective == "rule_based"
+    assert bundle.debate_review.fallback_applied is True
+    assert bundle.debate_review.fallback_reason is not None
+    assert bundle.runtime_mode_requested == "llm"
+    assert bundle.runtime_mode_effective == "rule_based"
+    assert any(
+        item.module_name == "debate_review" and item.fallback_applied
+        for item in bundle.module_status_summary
+    )

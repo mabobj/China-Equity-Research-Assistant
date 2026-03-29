@@ -7,10 +7,12 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.dependencies import (
+    get_debate_review_daily_dataset,
     get_debate_runtime_service,
     get_decision_brief_service,
     get_factor_snapshot_service,
     get_market_data_service,
+    get_review_report_daily_dataset,
     get_stock_review_service,
     get_technical_analysis_service,
     get_trigger_snapshot_service,
@@ -31,6 +33,7 @@ from app.schemas.research_inputs import AnnouncementListResponse, FinancialSumma
 from app.schemas.review import StockReviewReport
 from app.schemas.technical import TechnicalSnapshot
 from app.schemas.workspace import WorkspaceBundleResponse
+from app.services.data_products.freshness import resolve_last_closed_trading_day
 from app.services.data_service.market_data_service import MarketDataService
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -157,9 +160,28 @@ def get_technical_snapshot(
 @router.get("/{symbol}/review-report", response_model=StockReviewReport)
 def get_stock_review_report(
     symbol: str,
+    force_refresh: bool = Query(default=False),
     service: Any = Depends(get_stock_review_service),
+    review_report_daily: Any = Depends(get_review_report_daily_dataset),
 ) -> StockReviewReport:
-    return service.get_stock_review_report(symbol)
+    as_of_date = resolve_last_closed_trading_day()
+    if not force_refresh:
+        cached = review_report_daily.load(symbol, as_of_date=as_of_date)
+        if cached is not None:
+            return cached.payload.model_copy(
+                update={
+                    "freshness_mode": cached.freshness_mode,
+                    "source_mode": cached.source_mode,
+                }
+            )
+    computed = service.get_stock_review_report(symbol)
+    saved = review_report_daily.save(symbol, computed)
+    return saved.payload.model_copy(
+        update={
+            "freshness_mode": saved.freshness_mode,
+            "source_mode": saved.source_mode,
+        }
+    )
 
 
 @router.get("/{symbol}/decision-brief", response_model=DecisionBrief)
@@ -175,14 +197,50 @@ def get_stock_decision_brief(
 def get_debate_review_report(
     symbol: str,
     use_llm: Optional[bool] = Query(default=None),
+    force_refresh: bool = Query(default=False),
     request_id: Optional[str] = Query(default=None),
     service: Any = Depends(get_debate_runtime_service),
+    debate_review_daily: Any = Depends(get_debate_review_daily_dataset),
 ) -> DebateReviewReport:
+    as_of_date = resolve_last_closed_trading_day()
+    requested_variant = "llm" if bool(use_llm) else "rule_based"
+    if not force_refresh:
+        cached = debate_review_daily.load(
+            symbol,
+            as_of_date=as_of_date,
+            variant=requested_variant,
+        )
+        if cached is not None:
+            return cached.payload.model_copy(
+                update={
+                    "freshness_mode": cached.freshness_mode,
+                    "source_mode": cached.source_mode,
+                }
+            )
     try:
-        return service.get_debate_review_report(
+        report = service.get_debate_review_report(
             symbol,
             use_llm=use_llm,
             request_id=request_id,
+        )
+        variant_to_save = (
+            "llm"
+            if (
+                report.runtime_mode_effective == "llm"
+                or report.runtime_mode == "llm"
+            )
+            else "rule_based"
+        )
+        saved = debate_review_daily.save(
+            symbol,
+            report,
+            variant=variant_to_save,
+        )
+        return saved.payload.model_copy(
+            update={
+                "freshness_mode": saved.freshness_mode,
+                "source_mode": saved.source_mode,
+            }
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
