@@ -137,7 +137,7 @@ export function ScreenerWorkspace() {
 
       <SectionCard
         title="Initial Screener Workflow"
-        description="The page now starts the screener workflow immediately, returns a run_id, and polls workflow run details until the result snapshot is ready."
+        description="The page starts screener_run immediately, returns run_id, and polls workflow run records until the screener snapshot is ready."
       >
         <form className="grid gap-4 md:grid-cols-3" onSubmit={handleScreenerRun}>
           <Field label="max_symbols" value={maxSymbols} onChange={setMaxSymbols} />
@@ -160,7 +160,7 @@ export function ScreenerWorkspace() {
 
       <SectionCard
         title="Deep Review Workflow"
-        description="Deep review also runs as a workflow now, so the page can show run_id, current step, and final output without keeping one long HTTP request open."
+        description="Deep review runs in the same workflow mode, so the page shows run_id, current step, partial failures, and final output without one long blocking request."
       >
         <form className="grid gap-4 md:grid-cols-4" onSubmit={handleDeepRun}>
           <Field label="max_symbols" value={maxSymbols} onChange={setMaxSymbols} />

@@ -13,8 +13,8 @@ export default async function StockPage({ params }: StockPageProps) {
 
   return (
     <PageShell
-      title={`单票工作台：${decodedSymbol}`}
-      description="按固定顺序查看基础信息、因子快照、review-report v2、debate-review、strategy plan 和 trigger snapshot，并可直接运行 single_stock_full_review。"
+      title={`Single-Stock Workspace: ${decodedSymbol}`}
+      description="Follow the main chain in order: profile, factor snapshot, review-report v2 (primary research artifact), debate-review (structured adjudication), strategy plan, and trigger snapshot."
     >
       <StockWorkspace symbol={decodedSymbol} />
     </PageShell>

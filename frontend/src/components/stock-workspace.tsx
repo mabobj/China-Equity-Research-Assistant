@@ -321,7 +321,7 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
                   )}
                 </Panel>
 
-                <Panel title="Review Report">
+                <Panel title="Review Report v2 (Primary Research Artifact)">
                   {bundle.review_report ? (
                     <div className="space-y-3">
                       <Metric label="Final action" value={formatAction(bundle.review_report.final_judgement.action)} />
@@ -335,7 +335,7 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
               </div>
 
               <div className="grid gap-4 lg:grid-cols-2">
-                <Panel title="Debate Review">
+                <Panel title="Debate Review (Structured Adjudication)">
                   {bundle.debate_review ? (
                     <div className="space-y-3">
                       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
