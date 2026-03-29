@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,6 +44,9 @@ class ScreenerCandidate(BaseModel):
     top_negative_factors: list[str] = Field(default_factory=list)
     risk_notes: list[str] = Field(default_factory=list)
     short_reason: str
+    calculated_at: Optional[datetime] = None
+    rule_version: Optional[str] = None
+    rule_summary: Optional[str] = None
     headline_verdict: Optional[str] = None
     action_now: Optional[Literal[
         "BUY_NOW",
@@ -111,3 +114,88 @@ class DeepScreenerRunResponse(BaseModel):
     scanned_symbols: int = Field(ge=0)
     selected_for_deep_review: int = Field(ge=0)
     deep_candidates: list[DeepScreenerCandidate]
+
+
+class ScreenerBatchRecord(BaseModel):
+    """初筛批次台账记录。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    batch_id: str
+    trade_date: date
+    run_id: str
+    status: Literal["running", "completed", "failed"]
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    universe_size: int = Field(default=0, ge=0)
+    scanned_size: int = Field(default=0, ge=0)
+    rule_version: str
+    max_symbols: Optional[int] = Field(default=None, ge=1)
+    top_n: Optional[int] = Field(default=None, ge=1)
+    workflow_name: str = "screener_run"
+    warning_messages: list[str] = Field(default_factory=list)
+    failure_reason: Optional[str] = None
+
+
+class ScreenerSymbolResult(BaseModel):
+    """批次下单只股票的筛选结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    batch_id: str
+    symbol: str
+    name: str
+    list_type: ScreenerListType
+    screener_score: int = Field(ge=0, le=100)
+    trend_state: Literal["up", "neutral", "down"]
+    trend_score: int = Field(ge=0, le=100)
+    latest_close: float
+    support_level: Optional[float] = None
+    resistance_level: Optional[float] = None
+    short_reason: str
+    calculated_at: datetime
+    rule_version: str
+    rule_summary: str
+    action_now: Optional[Literal[
+        "BUY_NOW",
+        "WAIT_PULLBACK",
+        "WAIT_BREAKOUT",
+        "RESEARCH_ONLY",
+        "AVOID",
+    ]] = None
+    headline_verdict: Optional[str] = None
+    evidence_hints: list[str] = Field(default_factory=list)
+
+
+class ScreenerLatestBatchResponse(BaseModel):
+    """最新可查看批次摘要。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    batch: Optional[ScreenerBatchRecord] = None
+
+
+class ScreenerBatchDetailResponse(BaseModel):
+    """批次详情。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    batch: ScreenerBatchRecord
+
+
+class ScreenerBatchResultsResponse(BaseModel):
+    """批次结果列表。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    batch: ScreenerBatchRecord
+    results: list[ScreenerSymbolResult] = Field(default_factory=list)
+
+
+class ScreenerSymbolResultResponse(BaseModel):
+    """单只股票筛选结果详情。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    batch: ScreenerBatchRecord
+    result: ScreenerSymbolResult

@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from app.services.review_service.stock_review_service import StockReviewService
     from app.services.screener_service.deep_pipeline import DeepScreenerPipeline
     from app.services.screener_service.pipeline import ScreenerPipeline
+    from app.services.screener_service.batch_service import ScreenerBatchService
     from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
     from app.services.workflow_runtime.workflow_service import WorkflowRuntimeService
     from app.services.workspace_bundle_service.workspace_bundle_service import (
@@ -434,6 +435,14 @@ def get_deep_screener_pipeline() -> "DeepScreenerPipeline":
 
 
 @lru_cache
+def get_screener_batch_service() -> "ScreenerBatchService":
+    from app.services.screener_service.batch_service import ScreenerBatchService
+
+    settings = get_settings()
+    return ScreenerBatchService(root_dir=settings.data_dir / "screener_batches")
+
+
+@lru_cache
 def get_workflow_artifact_store() -> "FileWorkflowArtifactStore":
     from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
 
@@ -459,6 +468,9 @@ def get_workflow_runtime_service(
     screener_pipeline: "ScreenerPipeline" = Depends(get_screener_pipeline),
     screener_snapshot_daily: "ScreenerSnapshotDailyDataset" = Depends(
         get_screener_snapshot_daily_dataset
+    ),
+    screener_batch_service: "ScreenerBatchService" = Depends(
+        get_screener_batch_service
     ),
 ) -> "WorkflowRuntimeService":
     from app.services.workflow_runtime.definitions.deep_review_workflow import (
@@ -508,4 +520,5 @@ def get_workflow_runtime_service(
         executor=executor,
         artifact_store=artifact_store,
         background_executor=get_workflow_background_executor(),
+        screener_batch_service=screener_batch_service,
     )

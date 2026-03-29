@@ -10,6 +10,10 @@ import type {
   FactorSnapshot,
   ResearchReport,
   ScreenerRunResponse,
+  ScreenerBatchDetailResponse,
+  ScreenerBatchResultsResponse,
+  ScreenerLatestBatchResponse,
+  ScreenerSymbolResultResponse,
   ScreenerWorkflowRunRequest,
   SingleStockWorkflowRunRequest,
   StockProfile,
@@ -103,6 +107,42 @@ export async function getDeepScreenerRun(
     {
       timeoutMs: resolveDeepScreenerTimeoutMs(params.maxSymbols),
     },
+  );
+}
+
+export async function getLatestScreenerBatch(): Promise<ScreenerLatestBatchResponse> {
+  return fetchBackend<ScreenerLatestBatchResponse>("/screener/latest-batch", {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+  });
+}
+
+export async function getScreenerBatchDetail(
+  batchId: string,
+): Promise<ScreenerBatchDetailResponse> {
+  return fetchBackend<ScreenerBatchDetailResponse>(
+    `/screener/batches/${encodeURIComponent(batchId)}`,
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function getScreenerBatchResults(
+  batchId: string,
+): Promise<ScreenerBatchResultsResponse> {
+  return fetchBackend<ScreenerBatchResultsResponse>(
+    `/screener/batches/${encodeURIComponent(batchId)}/results`,
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function getScreenerBatchSymbolResult(
+  batchId: string,
+  symbol: string,
+): Promise<ScreenerSymbolResultResponse> {
+  return fetchBackend<ScreenerSymbolResultResponse>(
+    `/screener/batches/${encodeURIComponent(batchId)}/results/${encodeURIComponent(
+      normalizeSymbolInput(symbol),
+    )}`,
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
   );
 }
 

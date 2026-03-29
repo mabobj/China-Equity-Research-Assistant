@@ -180,3 +180,21 @@ python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/te
 - 外部数据统一通过 provider 层接入。
 - 核心输出优先结构化与类型化。
 - 以稳定、可解释、可维护为先。
+
+## 选股工作台（第一阶段产品化）
+
+当前 `/screener` 主链路已支持：
+- 初筛互斥运行：同一时刻仅允许一个 `screener_run` 处于 `running`。
+- 批次台账落盘：每次初筛会生成批次记录与股票明细结果。
+- 结果可回看：支持按批次查询摘要、结果列表和单股票详情。
+
+新增接口：
+- `GET /screener/latest-batch`
+- `GET /screener/batches/{batch_id}`
+- `GET /screener/batches/{batch_id}/results`
+- `GET /screener/batches/{batch_id}/results/{symbol}`
+
+批次规则：
+- 手动触发初筛后写入批次记录。
+- 本地时间 17:00 后触发时，默认归属当日收盘后批次。
+- 前端默认展示最新可查看批次（优先已完成批次）。

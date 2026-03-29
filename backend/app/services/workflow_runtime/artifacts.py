@@ -55,6 +55,45 @@ class FileWorkflowArtifactStore:
             raise FileNotFoundError(f"Workflow run '{run_id}' not found.")
 
         payload = json.loads(file_path.read_text(encoding="utf-8"))
+        return self._parse_payload(payload)
+
+    def find_latest_run(
+        self,
+        *,
+        workflow_name: str,
+        status: str | None = None,
+    ) -> WorkflowArtifact | None:
+        latest: WorkflowArtifact | None = None
+        for file_path in self._root_dir.glob("*.json"):
+            try:
+                payload = json.loads(file_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if payload.get("workflow_name") != workflow_name:
+                continue
+            if status is not None and payload.get("status") != status:
+                continue
+            artifact = self._parse_payload(payload)
+            if latest is None:
+                latest = artifact
+                continue
+            if artifact.started_at >= latest.started_at:
+                latest = artifact
+        return latest
+
+    def _get_file_path(self, run_id: str) -> Path:
+        return self._root_dir / f"{run_id}.json"
+
+    def _serialize_artifact(self, artifact: WorkflowArtifact) -> dict[str, Any]:
+        payload = asdict(artifact)
+        payload["started_at"] = artifact.started_at.isoformat()
+        payload["finished_at"] = (
+            artifact.finished_at.isoformat() if artifact.finished_at is not None else None
+        )
+        payload["steps"] = [self._serialize_step(step) for step in artifact.steps]
+        return payload
+
+    def _parse_payload(self, payload: dict[str, Any]) -> WorkflowArtifact:
         return WorkflowArtifact(
             run_id=payload["run_id"],
             workflow_name=payload["workflow_name"],
@@ -91,18 +130,6 @@ class FileWorkflowArtifactStore:
             final_output=payload.get("final_output"),
             error_message=payload.get("error_message"),
         )
-
-    def _get_file_path(self, run_id: str) -> Path:
-        return self._root_dir / f"{run_id}.json"
-
-    def _serialize_artifact(self, artifact: WorkflowArtifact) -> dict[str, Any]:
-        payload = asdict(artifact)
-        payload["started_at"] = artifact.started_at.isoformat()
-        payload["finished_at"] = (
-            artifact.finished_at.isoformat() if artifact.finished_at is not None else None
-        )
-        payload["steps"] = [self._serialize_step(step) for step in artifact.steps]
-        return payload
 
     def _serialize_step(self, step: WorkflowStepResult) -> dict[str, Any]:
         payload = asdict(step)

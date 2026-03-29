@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any
+import logging
+from typing import Any, Callable
 from uuid import uuid4
 
 from app.schemas.screener import ScreenerRunResponse
@@ -17,9 +18,16 @@ from app.schemas.workflow import (
     WorkflowStepSummary,
 )
 from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
-from app.services.workflow_runtime.base import WorkflowArtifact, WorkflowDefinition, WorkflowStepResult
+from app.services.workflow_runtime.base import (
+    WorkflowArtifact,
+    WorkflowDefinition,
+    WorkflowRunResult,
+    WorkflowStepResult,
+)
 from app.services.workflow_runtime.executor import WorkflowExecutor
 from app.services.workflow_runtime.registry import WorkflowRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowRuntimeService:
@@ -31,6 +39,7 @@ class WorkflowRuntimeService:
         executor: WorkflowExecutor,
         artifact_store: FileWorkflowArtifactStore,
         background_executor: ThreadPoolExecutor | None = None,
+        screener_batch_service: Any | None = None,
     ) -> None:
         self._registry = registry
         self._executor = executor
@@ -39,6 +48,7 @@ class WorkflowRuntimeService:
             max_workers=2,
             thread_name_prefix="workflow-runtime",
         )
+        self._screener_batch_service = screener_batch_service
 
     def run_single_stock_workflow(
         self,
@@ -60,7 +70,46 @@ class WorkflowRuntimeService:
         request: ScreenerWorkflowRunRequest,
     ) -> WorkflowRunResponse:
         definition = self._registry.get_definition("screener_run")
-        return self._start_background_workflow(definition, request)
+        running_artifact = self._artifact_store.find_latest_run(
+            workflow_name=definition.name,
+            status="running",
+        )
+        if running_artifact is not None:
+            return self._build_existing_running_response(running_artifact)
+
+        def _on_started(artifact: WorkflowArtifact) -> None:
+            if self._screener_batch_service is None:
+                return
+            self._screener_batch_service.create_running_batch(
+                run_id=artifact.run_id,
+                max_symbols=request.max_symbols,
+                top_n=request.top_n,
+                started_at=artifact.started_at,
+            )
+
+        def _on_completed(result: WorkflowRunResult) -> None:
+            if self._screener_batch_service is None:
+                return
+            final_output_dump = (
+                result.final_output.model_dump(mode="json")
+                if result.final_output is not None
+                else None
+            )
+            self._screener_batch_service.finalize_batch(
+                run_id=result.run_id,
+                status=result.status,
+                finished_at=result.finished_at,
+                final_output=final_output_dump,
+                final_output_summary=result.final_output_summary,
+                error_message=result.error_message,
+            )
+
+        return self._start_background_workflow(
+            definition,
+            request,
+            on_started=_on_started,
+            on_completed=_on_completed,
+        )
 
     def get_run_detail(self, run_id: str) -> WorkflowRunDetailResponse:
         artifact = self._artifact_store.load_run(run_id)
@@ -90,6 +139,9 @@ class WorkflowRuntimeService:
         self,
         definition: WorkflowDefinition,
         request,
+        *,
+        on_started: Callable[[WorkflowArtifact], None] | None = None,
+        on_completed: Callable[[WorkflowRunResult], None] | None = None,
     ) -> WorkflowRunResponse:
         validated_request = definition.request_contract.model_validate(request)
         run_id = uuid4().hex
@@ -107,13 +159,22 @@ class WorkflowRuntimeService:
             error_message=None,
         )
         self._artifact_store.save_artifact(initial_artifact)
+        if on_started is not None:
+            try:
+                on_started(initial_artifact)
+            except Exception:
+                logger.exception(
+                    "workflow.runtime.on_started_failed workflow=%s run_id=%s",
+                    definition.name,
+                    run_id,
+                )
         self._background_executor.submit(
-            self._executor.execute,
+            self._run_background_workflow,
             definition,
             validated_request,
-            run_id=run_id,
-            started_at=started_at,
-            persist_initial_state=False,
+            run_id,
+            started_at,
+            on_completed,
         )
         visibility = self._build_runtime_visibility(
             workflow_name=definition.name,
@@ -135,6 +196,40 @@ class WorkflowRuntimeService:
                 **visibility,
             }
         )
+
+    def _run_background_workflow(
+        self,
+        definition: WorkflowDefinition,
+        validated_request,
+        run_id: str,
+        started_at: datetime,
+        on_completed: Callable[[WorkflowRunResult], None] | None,
+    ) -> None:
+        try:
+            result = self._executor.execute(
+                definition,
+                validated_request,
+                run_id=run_id,
+                started_at=started_at,
+                persist_initial_state=False,
+            )
+        except Exception:
+            logger.exception(
+                "workflow.runtime.background_failed workflow=%s run_id=%s",
+                definition.name,
+                run_id,
+            )
+            return
+        if on_completed is None:
+            return
+        try:
+            on_completed(result)
+        except Exception:
+            logger.exception(
+                "workflow.runtime.on_completed_failed workflow=%s run_id=%s",
+                definition.name,
+                run_id,
+            )
 
     def _to_run_response(self, result) -> WorkflowRunResponse:
         final_output_dump = (
@@ -221,6 +316,34 @@ class WorkflowRuntimeService:
             "warning_messages": warning_messages,
             "failed_symbols": failed_symbols,
         }
+
+    def _build_existing_running_response(
+        self,
+        artifact: WorkflowArtifact,
+    ) -> WorkflowRunResponse:
+        visibility = self._build_runtime_visibility(
+            workflow_name=artifact.workflow_name,
+            input_summary=artifact.input_summary,
+            final_output_summary=artifact.final_output_summary,
+            final_output=artifact.final_output,
+        )
+        warning_messages = list(visibility.get("warning_messages", []))
+        warning_messages.append("已有运行中的初筛任务，本次请求复用现有运行记录。")
+        visibility["warning_messages"] = warning_messages
+        return WorkflowRunResponse.model_validate(
+            {
+                "run_id": artifact.run_id,
+                "workflow_name": artifact.workflow_name,
+                "status": artifact.status,
+                "started_at": artifact.started_at,
+                "finished_at": artifact.finished_at,
+                "input_summary": artifact.input_summary,
+                "steps": self._to_step_summaries(artifact.steps),
+                "final_output_summary": artifact.final_output_summary,
+                "error_message": artifact.error_message,
+                **visibility,
+            }
+        )
 
     def _requested_runtime_mode(self, *, input_summary: dict[str, Any]) -> str | None:
         use_llm = input_summary.get("use_llm")

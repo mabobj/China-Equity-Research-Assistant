@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import logging
 from time import perf_counter
 from typing import TYPE_CHECKING, Optional
@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+_RULE_VERSION = "screener_workflow_v1"
+_RULE_SUMMARY = "基于趋势评分、因子快照与风险约束的规则初筛。"
 
 
 class ScreenerPipeline:
@@ -352,6 +354,9 @@ def _build_candidate(
         top_negative_factors=score_result.top_negative_factors,
         risk_notes=score_result.risk_notes,
         short_reason=score_result.short_reason,
+        calculated_at=datetime.now(timezone.utc),
+        rule_version=_RULE_VERSION,
+        rule_summary=_RULE_SUMMARY,
         headline_verdict=_build_headline_verdict(item.name, v2_list_type, score_result.short_reason),
         action_now=_build_action_now(v2_list_type),
         evidence_hints=evidence_hints[:3],

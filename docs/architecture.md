@@ -146,3 +146,30 @@ data/workflow_runs/{run_id}.json
 - `GET /workflows/runs/{run_id}`
 
 本轮未引入运行记录列表检索接口。
+
+## Screener 批次持久化
+
+为解决 `/screener` 重复触发和结果不可追溯问题，新增轻量批次台账层：
+
+目录：
+```text
+backend/app/services/screener_service/batch_service.py
+```
+
+核心模型：
+- `ScreenerBatchRecord`
+- `ScreenerSymbolResult`
+
+设计要点：
+- `screener_run` 增加业务级互斥，运行中再次触发会复用 existing run。
+- workflow 完成后将 `final_output` 落盘为批次摘要 + 股票结果明细。
+- 默认交易日归属规则：
+- 17:00 后触发：归属当日批次
+- 17:00 前触发：归属最近已收盘交易日
+- 前端 `/screener` 以“运行状态 + 最新批次 + 结果详情”方式展示。
+
+查询接口：
+- `GET /screener/latest-batch`
+- `GET /screener/batches/{batch_id}`
+- `GET /screener/batches/{batch_id}/results`
+- `GET /screener/batches/{batch_id}/results/{symbol}`

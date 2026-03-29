@@ -278,6 +278,9 @@ export type ScreenerCandidate = {
   top_negative_factors: string[];
   risk_notes: string[];
   short_reason: string;
+  calculated_at: string | null;
+  rule_version: string | null;
+  rule_summary: string | null;
   headline_verdict: string | null;
   action_now: DecisionBriefActionNow | null;
   evidence_hints: string[];
@@ -296,6 +299,63 @@ export type ScreenerRunResponse = {
   watch_pullback_candidates: ScreenerCandidate[];
   watch_breakout_candidates: ScreenerCandidate[];
   research_only_candidates: ScreenerCandidate[];
+};
+
+export type ScreenerBatchStatus = "running" | "completed" | "failed";
+
+export type ScreenerBatchRecord = {
+  batch_id: string;
+  trade_date: string;
+  run_id: string;
+  status: ScreenerBatchStatus;
+  started_at: string;
+  finished_at: string | null;
+  universe_size: number;
+  scanned_size: number;
+  rule_version: string;
+  max_symbols: number | null;
+  top_n: number | null;
+  workflow_name: string;
+  warning_messages: string[];
+  failure_reason: string | null;
+};
+
+export type ScreenerSymbolResult = {
+  batch_id: string;
+  symbol: string;
+  name: string;
+  list_type: ScreenerListType;
+  screener_score: number;
+  trend_state: "up" | "neutral" | "down";
+  trend_score: number;
+  latest_close: number;
+  support_level: number | null;
+  resistance_level: number | null;
+  short_reason: string;
+  calculated_at: string;
+  rule_version: string;
+  rule_summary: string;
+  action_now: DecisionBriefActionNow | null;
+  headline_verdict: string | null;
+  evidence_hints: string[];
+};
+
+export type ScreenerLatestBatchResponse = {
+  batch: ScreenerBatchRecord | null;
+};
+
+export type ScreenerBatchDetailResponse = {
+  batch: ScreenerBatchRecord;
+};
+
+export type ScreenerBatchResultsResponse = {
+  batch: ScreenerBatchRecord;
+  results: ScreenerSymbolResult[];
+};
+
+export type ScreenerSymbolResultResponse = {
+  batch: ScreenerBatchRecord;
+  result: ScreenerSymbolResult;
 };
 
 export type DeepScreenerCandidate = {

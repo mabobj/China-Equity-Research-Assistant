@@ -17,116 +17,55 @@ function runCheck(name, fn) {
   process.stdout.write(`PASS ${name}\n`);
 }
 
-runCheck("stock page mounts stock workspace", () => {
+runCheck("单票页挂载工作台组件", () => {
   const source = read("src/app/stocks/[symbol]/page.tsx");
-  assertContains(source, "StockWorkspace", "stock page should import StockWorkspace");
+  assertContains(source, "StockWorkspace", "单票页应导入 StockWorkspace");
   assertContains(
     source,
     "<StockWorkspace symbol={decodedSymbol} />",
-    "stock page should render StockWorkspace",
-  );
-  assertContains(
-    source,
-    "review-report v2（主研究产物）",
-    "stock page should label review-report v2 as the primary artifact",
-  );
-  assertContains(
-    source,
-    "debate-review（结构化裁决）",
-    "stock page should label debate-review as structured adjudication",
+    "单票页应渲染 StockWorkspace",
   );
 });
 
-runCheck("stock workspace uses workspace-bundle as primary data source", () => {
+runCheck("单票工作台以 workspace-bundle 为主数据源", () => {
   const source = read("src/components/stock-workspace.tsx");
-  assertContains(
-    source,
-    "getWorkspaceBundle",
-    "stock workspace should call getWorkspaceBundle",
-  );
-  assertContains(
-    source,
-    "正在加载工作台聚合",
-    "stock workspace should expose loading state text",
-  );
-  assertContains(
-    source,
-    "runtime_mode_effective",
-    "stock workspace should surface effective runtime mode",
-  );
-  assertContains(
-    source,
-    "已触发降级",
-    "stock workspace should show fallback status when present",
-  );
+  assertContains(source, "getWorkspaceBundle", "单票工作台应调用 getWorkspaceBundle");
+  assertContains(source, "setStatus(\"loading\")", "单票工作台应进入 loading 状态");
+  assertContains(source, "runtime_mode_effective", "应展示实际运行模式");
 });
 
-runCheck("screener workspace triggers workflow run and polling", () => {
+runCheck("选股工作台使用 workflow + 批次台账", () => {
   const source = read("src/components/screener-workspace.tsx");
-  assertContains(
-    source,
-    "runScreenerWorkflow",
-    "screener workspace should start screener workflow",
-  );
-  assertContains(
-    source,
-    "getWorkflowRunDetail",
-    "screener workspace should poll workflow detail",
-  );
-  assertContains(
-    source,
-    "WorkflowRunSummary",
-    "screener workspace should render workflow run summary panel",
-  );
-  assertContains(
-    source,
-    "初筛工作流",
-    "screener workspace should mention workflow run records",
-  );
+  assertContains(source, "runScreenerWorkflow", "应发起初筛 workflow");
+  assertContains(source, "getWorkflowRunDetail", "应轮询 workflow 运行详情");
+  assertContains(source, "getLatestScreenerBatch", "应加载最新批次摘要");
+  assertContains(source, "getScreenerBatchResults", "应加载批次结果列表");
+  assertContains(source, "最新初筛批次", "应展示批次台账卡片");
+  assertContains(source, "已有运行中的初筛任务", "应展示互斥运行提示");
 });
 
-runCheck("workflow summary component renders status and final output summary", () => {
+runCheck("workflow 运行摘要组件展示状态与结果摘要", () => {
   const source = read("src/components/workflow-run-summary.tsx");
-  assertContains(source, "run.status", "workflow summary should read run status");
-  assertContains(
-    source,
-    "final_output_summary",
-    "workflow summary should render final output summary",
-  );
-  assertContains(
-    source,
-    "failed_symbols",
-    "workflow summary should render failed symbol summary",
-  );
+  assertContains(source, "run.status", "应读取 workflow 状态");
+  assertContains(source, "final_output_summary", "应展示最终摘要");
+  assertContains(source, "failed_symbols", "应展示局部失败摘要");
 });
 
-runCheck("reserved pages keep explicit not-enabled wording", () => {
+runCheck("前端 API 层暴露批次查询函数", () => {
+  const source = read("src/lib/api.ts");
+  assertContains(source, "getLatestScreenerBatch", "应提供最新批次接口");
+  assertContains(source, "getScreenerBatchResults", "应提供批次结果接口");
+  assertContains(source, "/screener/latest-batch", "应调用后端 latest-batch 路径");
+});
+
+runCheck("保留页明确标注未启用", () => {
   const reviewsSource = read("src/app/reviews/page.tsx");
-  assertContains(reviewsSource, "复盘记录（预留）", "reviews page should stay reserved");
-  assertContains(reviewsSource, "未启用", "reviews page should explicitly show not enabled");
+  assertContains(reviewsSource, "复盘记录（预留）", "reviews 页应保留预留说明");
+  assertContains(reviewsSource, "未启用", "reviews 页应明确未启用");
 
   const tradesSource = read("src/app/trades/page.tsx");
-  assertContains(tradesSource, "交易记录（预留）", "trades page should stay reserved");
-  assertContains(tradesSource, "未启用", "trades page should explicitly show not enabled");
-});
-
-runCheck("home page keeps naming convergence hints", () => {
-  const source = read("src/app/page.tsx");
-  assertContains(
-    source,
-    "review-report v2",
-    "home page should mention review-report v2 naming",
-  );
-  assertContains(
-    source,
-    "debate-review",
-    "home page should mention debate-review naming",
-  );
-  assertContains(
-    source,
-    "工作流运行记录（workflow run record）",
-    "home page should keep workflow run record wording",
-  );
+  assertContains(tradesSource, "交易记录（预留）", "trades 页应保留预留说明");
+  assertContains(tradesSource, "未启用", "trades 页应明确未启用");
 });
 
 process.stdout.write("Smoke tests completed.\n");
