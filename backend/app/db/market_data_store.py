@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 from pathlib import Path
 from typing import Optional
@@ -1017,8 +1017,41 @@ class LocalMarketDataStore:
                 cursor_key, cursor_value, updated_at
             ) VALUES (?, ?, ?)
             """,
-            [cursor_key, cursor_value, datetime.utcnow()],
+            [cursor_key, cursor_value, datetime.now(timezone.utc)],
         )
+
+    def scale_daily_bar_volume_by_source(
+        self,
+        *,
+        source: str,
+        factor: float,
+    ) -> int:
+        """按来源批量缩放日线成交量并返回影响行数。"""
+        if factor <= 0:
+            raise ValueError("factor must be greater than 0.")
+
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS row_count
+                FROM daily_bars
+                WHERE source = ? AND volume IS NOT NULL
+                """,
+                [source],
+            ).fetchone()
+            row_count = int(row[0] or 0) if row is not None else 0
+            if row_count <= 0:
+                return 0
+
+            connection.execute(
+                """
+                UPDATE daily_bars
+                SET volume = volume * ?, updated_at = ?
+                WHERE source = ? AND volume IS NOT NULL
+                """,
+                [factor, datetime.now(timezone.utc), source],
+            )
+            return row_count
 
     def list_queryable_tables(self) -> list[dict[str, object]]:
         """列出当前数据库可查询表及行数。"""

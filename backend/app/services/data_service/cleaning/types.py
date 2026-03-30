@@ -10,7 +10,7 @@ _MISSING_STRINGS = {"", "--", "—", "none", "null", "nan", "na", "n/a"}
 _VOLUME_UNIT_BY_SOURCE = {
     "akshare": "hand",
     "baostock": "share",
-    "mootdx": "share",
+    "mootdx": "hand",
 }
 
 _AMOUNT_UNIT_BY_SOURCE = {

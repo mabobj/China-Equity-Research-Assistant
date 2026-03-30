@@ -276,6 +276,14 @@ def test_run_screener_returns_compatible_and_v2_candidates() -> None:
     assert len(response.research_only_candidates) == 1
     assert len(response.watch_candidates) == 1
     assert len(response.avoid_candidates) == 0
+    all_candidates = (
+        response.buy_candidates
+        + response.watch_candidates
+        + response.avoid_candidates
+    )
+    for candidate in all_candidates:
+        assert "is worth tracking" not in candidate.short_reason.lower()
+        assert "is worth tracking" not in candidate.headline_verdict.lower()
     assert market_data_service.session_scope_entered == 1
     assert len(market_data_service.requested_start_dates) == 3
 

@@ -53,6 +53,7 @@ from app.services.data_products.freshness import resolve_last_closed_trading_day
 
 logger = logging.getLogger(__name__)
 _BAR_PROVIDER_PRIORITY = ("mootdx", "baostock", "akshare")
+_MOOTDX_VOLUME_MIGRATION_CURSOR = "migration:mootdx_volume_to_share:v1"
 
 
 class MarketDataService:
@@ -68,6 +69,28 @@ class MarketDataService:
         else:
             self._provider_registry = ProviderRegistry(providers)
         self._local_store = local_store
+        self._run_local_migrations()
+
+    def _run_local_migrations(self) -> None:
+        if self._local_store is None:
+            return
+        self._ensure_mootdx_volume_migrated()
+
+    def _ensure_mootdx_volume_migrated(self) -> None:
+        if self._local_store is None:
+            return
+        if self._local_store.get_refresh_cursor(_MOOTDX_VOLUME_MIGRATION_CURSOR) == "done":
+            return
+
+        updated_rows = self._local_store.scale_daily_bar_volume_by_source(
+            source="mootdx",
+            factor=100.0,
+        )
+        self._local_store.set_refresh_cursor(_MOOTDX_VOLUME_MIGRATION_CURSOR, "done")
+        logger.info(
+            "market_data.migration.done name=mootdx_volume_to_share_v1 updated_rows=%s",
+            updated_rows,
+        )
 
     def get_stock_profile(self, symbol: str) -> StockProfile:
         canonical_symbol = normalize_symbol(symbol)
@@ -279,6 +302,7 @@ class MarketDataService:
                     normalized_start_date,
                     normalized_end_date,
                     cached_bars,
+                    additional_warnings=["remote_failed_use_cache"],
                 )
             raise
         self._local_store.upsert_daily_bars(remote_result.bars)
@@ -320,6 +344,7 @@ class MarketDataService:
                 normalized_start_date,
                 normalized_end_date,
                 cached_bars,
+                additional_warnings=["cache_fallback_use_existing_snapshot"],
             )
 
         raise DataNotFoundError(
@@ -1111,6 +1136,7 @@ def _build_daily_bar_response(
     bars: list[DailyBar],
     *,
     cleaning_summary: DailyBarsCleaningSummary | None = None,
+    additional_warnings: Sequence[str] | None = None,
 ) -> DailyBarResponse:
     warning_messages: list[str] = []
     quality_status: str | None = None
@@ -1121,6 +1147,13 @@ def _build_daily_bar_response(
         quality_status = cleaning_summary.quality_status
         dropped_rows = cleaning_summary.dropped_rows
         dropped_duplicate_rows = cleaning_summary.dropped_duplicate_rows
+    elif bars:
+        quality_status = "ok"
+    if additional_warnings:
+        warning_messages.extend(item for item in additional_warnings if item)
+    warning_messages = list(dict.fromkeys(warning_messages))
+    if quality_status is None and bars:
+        quality_status = "ok"
     return DailyBarResponse(
         symbol=symbol,
         start_date=start_date,

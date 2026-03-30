@@ -9,10 +9,7 @@ from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.services.data_products.base import DataProductResult
 from app.services.data_products.catalog import SCREENER_SNAPSHOT_DAILY
 from app.services.data_products.repository import DataProductRepository
-from app.services.screener_service.texts import (
-    ensure_chinese_headline_verdict,
-    ensure_chinese_short_reason,
-)
+from app.services.screener_service.texts import normalize_candidate_display_fields
 
 _SCREENER_SNAPSHOT_VERSION = "20260329_cn_v2"
 
@@ -136,27 +133,44 @@ def _normalize_candidates(
 ) -> list[ScreenerCandidate]:
     normalized: list[ScreenerCandidate] = []
     for candidate in candidates:
-        short_reason = ensure_chinese_short_reason(
-            list_type=candidate.v2_list_type,
-            short_reason=candidate.short_reason,
-        )
-        headline_verdict = ensure_chinese_headline_verdict(
+        display_fields = normalize_candidate_display_fields(
             name=candidate.name,
             list_type=candidate.v2_list_type,
-            short_reason=short_reason,
+            short_reason=candidate.short_reason,
             headline_verdict=candidate.headline_verdict,
+            top_positive_factors=candidate.top_positive_factors,
+            top_negative_factors=candidate.top_negative_factors,
+            risk_notes=candidate.risk_notes,
+            evidence_hints=candidate.evidence_hints,
         )
+        short_reason = str(display_fields["short_reason"])
+        headline_verdict = str(display_fields["headline_verdict"])
+        normalized_name = str(display_fields["name"])
+        normalized_positive = list(display_fields["top_positive_factors"])
+        normalized_negative = list(display_fields["top_negative_factors"])
+        normalized_risks = list(display_fields["risk_notes"])
+        normalized_hints = list(display_fields["evidence_hints"])
         if (
             headline_verdict == candidate.headline_verdict
             and short_reason == candidate.short_reason
+            and normalized_name == candidate.name
+            and normalized_positive == candidate.top_positive_factors
+            and normalized_negative == candidate.top_negative_factors
+            and normalized_risks == candidate.risk_notes
+            and normalized_hints == candidate.evidence_hints
         ):
             normalized.append(candidate)
             continue
         normalized.append(
             candidate.model_copy(
                 update={
+                    "name": normalized_name,
                     "short_reason": short_reason,
                     "headline_verdict": headline_verdict,
+                    "top_positive_factors": normalized_positive,
+                    "top_negative_factors": normalized_negative,
+                    "risk_notes": normalized_risks,
+                    "evidence_hints": normalized_hints,
                 }
             )
         )

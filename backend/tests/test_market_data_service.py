@@ -457,6 +457,60 @@ def test_service_returns_cached_daily_bars_when_range_is_covered(tmp_path: Path)
     assert provider.daily_bar_call_count == 0
     assert response.count == 1
     assert response.bars[0].source == "local"
+    assert response.quality_status == "ok"
+    assert response.cleaning_warnings == []
+    assert response.dropped_rows == 0
+    assert response.dropped_duplicate_rows == 0
+
+
+def test_service_runs_mootdx_volume_migration_only_once(tmp_path: Path) -> None:
+    """mootdx 历史成交量迁移应幂等执行，避免二次放大。"""
+    local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
+    local_store.upsert_daily_bars(
+        [
+            DailyBar(
+                symbol="000001.SZ",
+                trade_date=date(2024, 1, 2),
+                open=10.0,
+                high=10.3,
+                low=9.8,
+                close=10.1,
+                volume=30087.0,
+                amount=12345678.0,
+                source="mootdx",
+            )
+        ]
+    )
+    local_store.mark_range_covered(
+        DATASET_DAILY_BARS,
+        "000001.SZ",
+        date(2024, 1, 2),
+        date(2024, 1, 2),
+    )
+
+    service = MarketDataService(
+        providers=[FakeProvider()],
+        local_store=local_store,
+    )
+    first = service.get_daily_bars(
+        symbol="000001.SZ",
+        start_date="2024-01-02",
+        end_date="2024-01-02",
+    )
+    assert first.count == 1
+    assert first.bars[0].volume == 3008700.0
+
+    second_service = MarketDataService(
+        providers=[FakeProvider()],
+        local_store=local_store,
+    )
+    second = second_service.get_daily_bars(
+        symbol="000001.SZ",
+        start_date="2024-01-02",
+        end_date="2024-01-02",
+    )
+    assert second.count == 1
+    assert second.bars[0].volume == 3008700.0
 
 
 def test_service_merges_remote_daily_bars_into_local_store(tmp_path: Path) -> None:
@@ -642,6 +696,8 @@ def test_service_returns_cached_daily_bars_when_incremental_refresh_fails(
     assert empty_provider.daily_bar_call_count == 1
     assert response.count == 1
     assert response.bars[0].source == "local"
+    assert response.quality_status == "ok"
+    assert "remote_failed_use_cache" in response.cleaning_warnings
 
 
 def test_service_remains_compatible_with_split_capability_providers() -> None:

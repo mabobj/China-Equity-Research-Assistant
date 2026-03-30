@@ -22,7 +22,7 @@ from app.services.screener_service.scoring import (
     score_factor_snapshot,
     score_technical_snapshot,
 )
-from app.services.screener_service.texts import build_headline_verdict
+from app.services.screener_service.texts import normalize_candidate_display_fields
 from app.services.screener_service.universe import load_scan_universe
 
 if TYPE_CHECKING:
@@ -341,13 +341,26 @@ def _build_candidate(
     score_result,
 ) -> ScreenerCandidate:
     v2_list_type = score_result.v2_list_type
+    display_fields = normalize_candidate_display_fields(
+        name=item.name,
+        list_type=v2_list_type,
+        short_reason=score_result.short_reason,
+        headline_verdict=None,
+        top_positive_factors=score_result.top_positive_factors,
+        top_negative_factors=score_result.top_negative_factors,
+        risk_notes=score_result.risk_notes,
+        evidence_hints=[
+            *score_result.top_positive_factors[:2],
+            *score_result.risk_notes[:1],
+        ],
+    )
     evidence_hints = [
         *score_result.top_positive_factors[:2],
         *score_result.risk_notes[:1],
     ]
     return ScreenerCandidate(
         symbol=item.symbol,
-        name=item.name,
+        name=str(display_fields["name"]),
         list_type=score_result.list_type,
         v2_list_type=v2_list_type,
         rank=1,
@@ -360,20 +373,16 @@ def _build_candidate(
         latest_close=technical_snapshot.latest_close,
         support_level=technical_snapshot.support_level,
         resistance_level=technical_snapshot.resistance_level,
-        top_positive_factors=score_result.top_positive_factors,
-        top_negative_factors=score_result.top_negative_factors,
-        risk_notes=score_result.risk_notes,
-        short_reason=score_result.short_reason,
+        top_positive_factors=list(display_fields["top_positive_factors"]),
+        top_negative_factors=list(display_fields["top_negative_factors"]),
+        risk_notes=list(display_fields["risk_notes"]),
+        short_reason=str(display_fields["short_reason"]),
         calculated_at=datetime.now(timezone.utc),
         rule_version=_RULE_VERSION,
         rule_summary=_RULE_SUMMARY,
-        headline_verdict=build_headline_verdict(
-            item.name,
-            v2_list_type,
-            score_result.short_reason,
-        ),
+        headline_verdict=str(display_fields["headline_verdict"]),
         action_now=_build_action_now(v2_list_type),
-        evidence_hints=evidence_hints[:3],
+        evidence_hints=list(display_fields["evidence_hints"])[:3] or evidence_hints[:3],
     )
 
 

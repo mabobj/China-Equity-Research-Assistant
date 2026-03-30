@@ -113,3 +113,28 @@ def test_clean_daily_bars_accepts_daily_bar_schema() -> None:
     assert result.summary.output_rows == 1
     assert result.bars[0].symbol == "600519.SH"
     assert result.bars[0].source == "baostock"
+
+
+def test_clean_daily_bars_converts_mootdx_volume_to_share() -> None:
+    """mootdx 日线成交量应统一转换为“股”口径。"""
+    result = clean_daily_bars(
+        symbol="000001.SZ",
+        rows=[
+            {
+                "symbol": "000001.SZ",
+                "trade_date": "2024-01-03",
+                "open": 10.0,
+                "high": 10.5,
+                "low": 9.8,
+                "close": 10.2,
+                "volume": 30087.0,
+                "amount": 123456789.0,
+                "source": "mootdx",
+            }
+        ],
+        as_of_date=date(2024, 1, 3),
+    )
+
+    assert result.summary.quality_status == "ok"
+    assert len(result.bars) == 1
+    assert result.bars[0].volume == 3008700.0

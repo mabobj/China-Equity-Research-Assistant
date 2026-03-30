@@ -16,10 +16,7 @@ from app.schemas.screener import (
     ScreenerSymbolResult,
 )
 from app.services.data_products.freshness import resolve_last_closed_trading_day
-from app.services.screener_service.texts import (
-    ensure_chinese_headline_verdict,
-    ensure_chinese_short_reason,
-)
+from app.services.screener_service.texts import normalize_candidate_display_fields
 
 _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 _DEFAULT_RULE_VERSION = "screener_workflow_v1"
@@ -300,15 +297,18 @@ class ScreenerBatchService:
         candidates = _iter_unique_candidates(output)
         results: list[ScreenerSymbolResult] = []
         for candidate in candidates:
-            short_reason = ensure_chinese_short_reason(
+            display_fields = normalize_candidate_display_fields(
+                name=candidate.name,
                 list_type=candidate.v2_list_type,
                 short_reason=candidate.short_reason,
+                headline_verdict=candidate.headline_verdict,
+                evidence_hints=candidate.evidence_hints,
             )
             results.append(
                 ScreenerSymbolResult(
                     batch_id=batch_id,
                     symbol=candidate.symbol,
-                    name=candidate.name,
+                    name=str(display_fields["name"]),
                     list_type=candidate.v2_list_type,
                     screener_score=candidate.screener_score,
                     trend_state=candidate.trend_state,
@@ -316,18 +316,13 @@ class ScreenerBatchService:
                     latest_close=candidate.latest_close,
                     support_level=candidate.support_level,
                     resistance_level=candidate.resistance_level,
-                    short_reason=short_reason,
+                    short_reason=str(display_fields["short_reason"]),
                     calculated_at=candidate.calculated_at or calculated_at,
                     rule_version=candidate.rule_version or rule_version,
                     rule_summary=candidate.rule_summary or _DEFAULT_RULE_SUMMARY,
                     action_now=candidate.action_now,
-                    headline_verdict=ensure_chinese_headline_verdict(
-                        name=candidate.name,
-                        list_type=candidate.v2_list_type,
-                        short_reason=short_reason,
-                        headline_verdict=candidate.headline_verdict,
-                    ),
-                    evidence_hints=candidate.evidence_hints,
+                    headline_verdict=str(display_fields["headline_verdict"]),
+                    evidence_hints=list(display_fields["evidence_hints"]),
                 )
             )
         return results
@@ -420,21 +415,29 @@ def _iter_unique_candidates(output: ScreenerRunResponse) -> Iterable:
 
 
 def _normalize_symbol_result(result: ScreenerSymbolResult) -> ScreenerSymbolResult:
-    short_reason = ensure_chinese_short_reason(
-        list_type=result.list_type,
-        short_reason=result.short_reason,
-    )
-    headline = ensure_chinese_headline_verdict(
+    display_fields = normalize_candidate_display_fields(
         name=result.name,
         list_type=result.list_type,
-        short_reason=short_reason,
+        short_reason=result.short_reason,
         headline_verdict=result.headline_verdict,
+        evidence_hints=result.evidence_hints,
     )
-    if short_reason == result.short_reason and headline == result.headline_verdict:
+    short_reason = str(display_fields["short_reason"])
+    headline = str(display_fields["headline_verdict"])
+    normalized_name = str(display_fields["name"])
+    normalized_hints = list(display_fields["evidence_hints"])
+    if (
+        short_reason == result.short_reason
+        and headline == result.headline_verdict
+        and normalized_name == result.name
+        and normalized_hints == result.evidence_hints
+    ):
         return result
     return result.model_copy(
         update={
+            "name": normalized_name,
             "short_reason": short_reason,
             "headline_verdict": headline,
+            "evidence_hints": normalized_hints,
         }
     )
