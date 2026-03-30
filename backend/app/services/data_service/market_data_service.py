@@ -31,7 +31,9 @@ from app.schemas.research_inputs import (
     FinancialSummary,
 )
 from app.services.data_service.cleaning.bars import clean_daily_bars
+from app.services.data_service.cleaning.financials import clean_financial_summary
 from app.services.data_service.contracts.bars import DailyBarsCleaningSummary
+from app.services.data_service.contracts.financials import FinancialSummaryCleaningSummary
 from app.services.data_service.exceptions import (
     DataNotFoundError,
     InvalidDateError,
@@ -578,6 +580,13 @@ class MarketDataService:
                 canonical_symbol,
             )
             if cached_summary is not None:
+                cached_summary = _normalize_financial_summary_response(
+                    cached_summary,
+                    source_mode=cached_summary.source_mode or "local",
+                    freshness_mode=cached_summary.freshness_mode or "cache_preferred",
+                    provider_used=cached_summary.provider_used or cached_summary.source,
+                    as_of_date=cached_summary.as_of_date or resolve_last_closed_trading_day(),
+                )
                 logger.debug(
                     "market_data.financial_summary.cache_hit symbol=%s source=%s",
                     canonical_symbol,
@@ -585,7 +594,32 @@ class MarketDataService:
                 )
                 return cached_summary
 
-        summary = self._load_stock_financial_summary_from_providers(canonical_symbol)
+        fetched = self._load_stock_financial_summary_from_providers(canonical_symbol)
+        cleaned = clean_financial_summary(
+            symbol=canonical_symbol,
+            rows=[fetched.summary],
+            as_of_date=resolve_last_closed_trading_day(),
+            default_source=fetched.provider_name,
+            provider_used=fetched.provider_name,
+            fallback_applied=False,
+            fallback_reason=None,
+            source_mode="provider_only",
+            freshness_mode="force_refreshed" if force_refresh else "provider_fetch",
+        )
+        if cleaned.summary is None:
+            raise DataNotFoundError(
+                "No financial summary found for symbol {symbol}.".format(
+                    symbol=canonical_symbol,
+                ),
+            )
+        summary = _normalize_financial_summary_response(
+            cleaned.summary.to_financial_summary(),
+            cleaning_summary=cleaned.cleaning_summary,
+            source_mode="provider_only",
+            freshness_mode="force_refreshed" if force_refresh else "provider_fetch",
+            provider_used=fetched.provider_name,
+            as_of_date=cleaned.summary.as_of_date,
+        )
         if self._local_store is not None:
             self._local_store.upsert_stock_financial_summary(summary)
         logger.debug(
@@ -707,11 +741,7 @@ class MarketDataService:
         return len(items)
 
     def refresh_stock_financial_summary(self, symbol: str) -> FinancialSummary:
-        canonical_symbol = normalize_symbol(symbol)
-        summary = self._load_stock_financial_summary_from_providers(canonical_symbol)
-        if self._local_store is not None:
-            self._local_store.upsert_stock_financial_summary(summary)
-        return summary
+        return self._get_stock_financial_summary(symbol, force_refresh=True)
 
     def get_provider_capability_reports(self) -> list[ProviderCapabilityReport]:
         return self._provider_registry.get_capability_reports()
@@ -1052,7 +1082,10 @@ class MarketDataService:
             ) from last_error
         return []
 
-    def _load_stock_financial_summary_from_providers(self, symbol: str) -> FinancialSummary:
+    def _load_stock_financial_summary_from_providers(
+        self,
+        symbol: str,
+    ) -> "_FinancialSummaryFetchResult":
         providers = self._iter_available_providers(FINANCIAL_SUMMARY_CAPABILITY)
         last_error = None
         provider_errors: list[str] = []
@@ -1077,7 +1110,10 @@ class MarketDataService:
                 )
                 continue
             if summary is not None:
-                return summary
+                return _FinancialSummaryFetchResult(
+                    summary=summary,
+                    provider_name=provider.name,
+                )
 
         if last_error is not None:
             raise ProviderError(
@@ -1171,6 +1207,59 @@ def _build_daily_bar_response(
 class _DailyBarsFetchResult:
     bars: list[DailyBar]
     cleaning_summary: DailyBarsCleaningSummary | None
+
+
+@dataclass(frozen=True)
+class _FinancialSummaryFetchResult:
+    summary: FinancialSummary
+    provider_name: str
+
+
+def _normalize_financial_summary_response(
+    summary: FinancialSummary,
+    *,
+    cleaning_summary: FinancialSummaryCleaningSummary | None = None,
+    source_mode: str | None = None,
+    freshness_mode: str | None = None,
+    provider_used: str | None = None,
+    as_of_date: date | None = None,
+) -> FinancialSummary:
+    normalized_warnings = list(summary.cleaning_warnings)
+    normalized_missing_fields = list(summary.missing_fields)
+    normalized_coerced_fields = list(summary.coerced_fields)
+    quality_status = summary.quality_status
+    if cleaning_summary is not None:
+        normalized_warnings.extend(cleaning_summary.warning_messages)
+        normalized_missing_fields.extend(cleaning_summary.missing_fields)
+        normalized_coerced_fields.extend(cleaning_summary.coerced_fields)
+        if quality_status is None:
+            quality_status = cleaning_summary.quality_status
+
+    deduped_warnings = list(dict.fromkeys(item for item in normalized_warnings if item))
+    deduped_missing_fields = list(
+        dict.fromkeys(item for item in normalized_missing_fields if item),
+    )
+    deduped_coerced_fields = list(
+        dict.fromkeys(item for item in normalized_coerced_fields if item),
+    )
+
+    if quality_status is None:
+        quality_status = "ok"
+        if deduped_warnings or deduped_missing_fields:
+            quality_status = "warning"
+
+    return summary.model_copy(
+        update={
+            "quality_status": quality_status,
+            "cleaning_warnings": deduped_warnings,
+            "missing_fields": deduped_missing_fields,
+            "coerced_fields": deduped_coerced_fields,
+            "provider_used": provider_used or summary.provider_used or summary.source,
+            "source_mode": source_mode or summary.source_mode,
+            "freshness_mode": freshness_mode or summary.freshness_mode,
+            "as_of_date": as_of_date or summary.as_of_date or resolve_last_closed_trading_day(),
+        }
+    )
 
 
 def _parse_optional_date(value: Optional[str], field_name: str) -> Optional[date]:

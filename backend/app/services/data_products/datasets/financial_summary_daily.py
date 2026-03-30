@@ -26,13 +26,20 @@ class FinancialSummaryDailyDataset:
             symbol,
             force_refresh=force_refresh,
         )
+        payload_as_of_date = payload.as_of_date or as_of_date
+        freshness_mode = payload.freshness_mode or (
+            "force_refreshed" if force_refresh else "cache_preferred"
+        )
+        source_mode = payload.source_mode or (
+            "local_plus_provider" if force_refresh else "local"
+        )
         return DataProductResult(
             dataset=FINANCIAL_SUMMARY_DAILY,
             symbol=payload.symbol,
-            as_of_date=as_of_date,
+            as_of_date=payload_as_of_date,
             payload=payload,
-            freshness_mode="force_refreshed" if force_refresh else "cache_preferred",
-            source_mode="local_plus_provider" if force_refresh else "local",
+            freshness_mode=freshness_mode,
+            source_mode=source_mode,
             updated_at=datetime_utcnow(),
         )
 

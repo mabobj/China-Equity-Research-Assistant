@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 import hashlib
+import json
 from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
@@ -356,7 +357,18 @@ class LocalMarketDataStore:
                 fr.debt_ratio,
                 fr.eps,
                 fr.bps,
-                fr.source
+                fr.source,
+                fr.report_type,
+                fr.quality_status,
+                fr.cleaning_warnings_json,
+                fr.missing_fields_json,
+                fr.coerced_fields_json,
+                fr.provider_used,
+                fr.fallback_applied,
+                fr.fallback_reason,
+                fr.source_mode,
+                fr.freshness_mode,
+                fr.as_of_date
             FROM financial_reports AS fr
             LEFT JOIN instruments AS i
               ON fr.symbol = i.symbol
@@ -383,6 +395,17 @@ class LocalMarketDataStore:
             eps=row["eps"],
             bps=row["bps"],
             source=row["source"],
+            report_type=row["report_type"],
+            quality_status=row["quality_status"],
+            cleaning_warnings=_load_json_text_list(row["cleaning_warnings_json"]),
+            missing_fields=_load_json_text_list(row["missing_fields_json"]),
+            coerced_fields=_load_json_text_list(row["coerced_fields_json"]),
+            provider_used=row["provider_used"],
+            fallback_applied=bool(row["fallback_applied"]) if row["fallback_applied"] is not None else False,
+            fallback_reason=row["fallback_reason"],
+            source_mode=row["source_mode"],
+            freshness_mode=row["freshness_mode"],
+            as_of_date=row["as_of_date"],
         )
 
     def upsert_stock_financial_summary(self, summary: FinancialSummary) -> None:
@@ -403,8 +426,11 @@ class LocalMarketDataStore:
             INSERT OR REPLACE INTO financial_reports (
                 symbol, report_period_key, report_period, revenue, revenue_yoy,
                 net_profit, net_profit_yoy, roe, gross_margin, debt_ratio,
-                eps, bps, source, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                eps, bps, source, report_type, quality_status,
+                cleaning_warnings_json, missing_fields_json, coerced_fields_json,
+                provider_used, fallback_applied, fallback_reason,
+                source_mode, freshness_mode, as_of_date, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 summary.symbol,
@@ -420,7 +446,18 @@ class LocalMarketDataStore:
                 summary.eps,
                 summary.bps,
                 summary.source,
-                datetime.utcnow(),
+                summary.report_type,
+                summary.quality_status,
+                _dump_json_text_list(summary.cleaning_warnings),
+                _dump_json_text_list(summary.missing_fields),
+                _dump_json_text_list(summary.coerced_fields),
+                summary.provider_used,
+                summary.fallback_applied,
+                summary.fallback_reason,
+                summary.source_mode,
+                summary.freshness_mode,
+                summary.as_of_date,
+                datetime.now(timezone.utc),
             ],
         )
 
@@ -692,11 +729,23 @@ class LocalMarketDataStore:
                     eps DOUBLE,
                     bps DOUBLE,
                     source TEXT NOT NULL,
+                    report_type TEXT,
+                    quality_status TEXT,
+                    cleaning_warnings_json TEXT,
+                    missing_fields_json TEXT,
+                    coerced_fields_json TEXT,
+                    provider_used TEXT,
+                    fallback_applied BOOLEAN,
+                    fallback_reason TEXT,
+                    source_mode TEXT,
+                    freshness_mode TEXT,
+                    as_of_date DATE,
                     updated_at TIMESTAMP NOT NULL,
                     PRIMARY KEY(symbol, report_period_key)
                 )
                 """
             )
+            self._ensure_financial_report_columns(connection)
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS range_sync_state (
@@ -741,6 +790,35 @@ class LocalMarketDataStore:
             self._migrate_legacy_financial_summaries(connection)
         if self._table_exists(connection, "announcements"):
             self._migrate_legacy_announcements(connection)
+
+    def _ensure_financial_report_columns(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+    ) -> None:
+        """确保 financial_reports 具备增量演进所需列。"""
+        expected_columns = {
+            "report_type": "TEXT",
+            "quality_status": "TEXT",
+            "cleaning_warnings_json": "TEXT",
+            "missing_fields_json": "TEXT",
+            "coerced_fields_json": "TEXT",
+            "provider_used": "TEXT",
+            "fallback_applied": "BOOLEAN",
+            "fallback_reason": "TEXT",
+            "source_mode": "TEXT",
+            "freshness_mode": "TEXT",
+            "as_of_date": "DATE",
+        }
+        existing_columns = self._table_columns(connection, "financial_reports")
+        for column_name, column_type in expected_columns.items():
+            if column_name in existing_columns:
+                continue
+            connection.execute(
+                "ALTER TABLE financial_reports ADD COLUMN {column_name} {column_type}".format(
+                    column_name=column_name,
+                    column_type=column_type,
+                ),
+            )
 
     def _migrate_legacy_stock_profiles(
         self,
@@ -946,6 +1024,22 @@ class LocalMarketDataStore:
             [table_name],
         ).fetchone()
         return row is not None and row[0] > 0
+
+    def _table_columns(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        table_name: str,
+    ) -> set[str]:
+        """读取指定表的列名集合。"""
+        rows = connection.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'main' AND table_name = ?
+            """,
+            [table_name],
+        ).fetchall()
+        return {str(row[0]) for row in rows}
 
     def _table_has_rows(
         self,
@@ -1162,3 +1256,31 @@ def _serialize_sql_value(value: object) -> object:
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     return value
+
+
+def _dump_json_text_list(values: Optional[list[str]]) -> Optional[str]:
+    """把字符串列表安全序列化为 JSON 文本。"""
+    if not values:
+        return None
+    normalized = [str(value) for value in values if str(value).strip() != ""]
+    if not normalized:
+        return None
+    return json.dumps(normalized, ensure_ascii=False)
+
+
+def _load_json_text_list(value: object) -> list[str]:
+    """把 JSON 文本反序列化为字符串列表。"""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip() != ""]
+    text = str(value).strip()
+    if text == "":
+        return []
+    try:
+        loaded = json.loads(text)
+    except Exception:
+        return [text]
+    if not isinstance(loaded, list):
+        return [str(loaded)]
+    return [str(item) for item in loaded if str(item).strip() != ""]

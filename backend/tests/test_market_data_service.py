@@ -6,6 +6,7 @@ from typing import Optional
 
 from app.db.market_data_store import DATASET_DAILY_BARS, LocalMarketDataStore
 from app.schemas.market_data import DailyBar, IntradayBar, StockProfile, UniverseItem
+from app.schemas.research_inputs import FinancialSummary
 from app.services.data_service.market_data_service import MarketDataService
 from app.services.data_products.freshness import resolve_last_closed_trading_day
 
@@ -321,6 +322,33 @@ class DirtyDailyBarProvider(FakeProvider):
                 source=self.name,
             ),
         ]
+
+
+class FinancialSummaryProvider(FakeProvider):
+    """用于验证财务清洗接入与缓存元数据补齐。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.name = "financial_provider"
+        self.financial_call_count = 0
+
+    def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
+        self.financial_call_count += 1
+        return FinancialSummary(
+            symbol=symbol,
+            name="贵州茅台",
+            report_period=date(2024, 12, 31),
+            revenue=1250000000.0,
+            revenue_yoy=0.148,
+            net_profit=650000000.0,
+            net_profit_yoy=12.0,
+            roe=0.186,
+            gross_margin=88.2,
+            debt_ratio=36.5,
+            eps=42.6,
+            bps=210.3,
+            source="akshare",
+        )
 
 
 def test_service_normalizes_symbol_before_calling_provider() -> None:
@@ -767,3 +795,52 @@ def test_service_daily_bars_exposes_cleaning_summary() -> None:
     assert response.quality_status == "failed"
     assert response.dropped_rows == 1
     assert any("invalid_close_price" in item for item in response.cleaning_warnings)
+
+
+def test_service_financial_summary_runs_cleaning_and_sets_runtime_fields() -> None:
+    """财务摘要应走清洗层，并补齐质量与运行可见字段。"""
+    provider = FinancialSummaryProvider()
+    service = MarketDataService(providers=[provider])
+
+    summary = service.get_stock_financial_summary("sh600519")
+
+    assert provider.financial_call_count == 1
+    assert summary.symbol == "600519.SH"
+    assert summary.report_type == "annual"
+    assert summary.quality_status in {"ok", "warning"}
+    assert summary.provider_used == "financial_provider"
+    assert summary.source_mode == "provider_only"
+    assert summary.freshness_mode == "provider_fetch"
+    assert summary.as_of_date == resolve_last_closed_trading_day()
+    assert summary.roe == 18.6
+    assert summary.revenue_yoy is not None
+    assert abs(summary.revenue_yoy - 14.8) < 1e-9
+
+
+def test_service_financial_summary_cache_hit_backfills_quality_fields(tmp_path: Path) -> None:
+    """旧缓存缺少质量字段时，返回层应自动补齐默认值。"""
+    provider = FinancialSummaryProvider()
+    local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
+    local_store.upsert_stock_financial_summary(
+        FinancialSummary(
+            symbol="600519.SH",
+            name="贵州茅台",
+            report_period=date(2024, 9, 30),
+            revenue=1000000000.0,
+            source="legacy_cache",
+        )
+    )
+    service = MarketDataService(
+        providers=[provider],
+        local_store=local_store,
+    )
+
+    summary = service.get_stock_financial_summary("600519.SH")
+
+    assert provider.financial_call_count == 0
+    assert summary.quality_status == "ok"
+    assert summary.cleaning_warnings == []
+    assert summary.provider_used == "legacy_cache"
+    assert summary.source_mode == "local"
+    assert summary.freshness_mode == "cache_preferred"
+    assert summary.as_of_date == resolve_last_closed_trading_day()

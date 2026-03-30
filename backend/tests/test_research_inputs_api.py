@@ -54,6 +54,7 @@ class StubResearchService:
             symbol="600519.SH",
             name="贵州茅台",
             report_period=date(2024, 9, 30),
+            report_type="q3",
             revenue=123.0,
             revenue_yoy=9.5,
             net_profit=60.0,
@@ -64,6 +65,12 @@ class StubResearchService:
             eps=3.0,
             bps=13.0,
             source="stub",
+            quality_status="ok",
+            cleaning_warnings=[],
+            provider_used="stub",
+            source_mode="local",
+            freshness_mode="cache_preferred",
+            as_of_date=date(2026, 3, 27),
         )
 
 
@@ -90,5 +97,9 @@ def test_get_financial_summary_route_returns_structured_payload() -> None:
     assert response.status_code == 200
     assert response.json()["symbol"] == "600519.SH"
     assert response.json()["name"] == "贵州茅台"
+    assert response.json()["report_type"] == "q3"
+    assert response.json()["quality_status"] == "ok"
+    assert response.json()["provider_used"] == "stub"
+    assert response.json()["source_mode"] == "local"
 
     app.dependency_overrides.clear()

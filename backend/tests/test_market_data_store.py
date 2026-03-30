@@ -39,6 +39,44 @@ def test_local_store_keeps_multiple_financial_report_periods(tmp_path: Path) -> 
     assert latest_summary.revenue == 120.0
 
 
+def test_local_store_persists_financial_cleaning_fields(tmp_path: Path) -> None:
+    """财务清洗扩展字段应可落库并读回。"""
+    store = LocalMarketDataStore(tmp_path / "market.duckdb")
+    expected_date = date(2026, 3, 30)
+    store.upsert_stock_financial_summary(
+        FinancialSummary(
+            symbol="600519.SH",
+            name="贵州茅台",
+            report_period=date(2024, 12, 31),
+            report_type="annual",
+            revenue=120.0,
+            source="akshare",
+            quality_status="warning",
+            cleaning_warnings=["unknown_report_type"],
+            missing_fields=["gross_margin"],
+            coerced_fields=["revenue_yoy"],
+            provider_used="akshare",
+            fallback_applied=False,
+            source_mode="provider_only",
+            freshness_mode="provider_fetch",
+            as_of_date=expected_date,
+        )
+    )
+
+    summary = store.get_stock_financial_summary("600519.SH")
+
+    assert summary is not None
+    assert summary.report_type == "annual"
+    assert summary.quality_status == "warning"
+    assert summary.cleaning_warnings == ["unknown_report_type"]
+    assert summary.missing_fields == ["gross_margin"]
+    assert summary.coerced_fields == ["revenue_yoy"]
+    assert summary.provider_used == "akshare"
+    assert summary.source_mode == "provider_only"
+    assert summary.freshness_mode == "provider_fetch"
+    assert summary.as_of_date == expected_date
+
+
 def test_local_store_migrates_legacy_announcements_table(tmp_path: Path) -> None:
     """旧版公告表应能迁移到新的原子化公告事件表。"""
     database_path = tmp_path / "market.duckdb"
