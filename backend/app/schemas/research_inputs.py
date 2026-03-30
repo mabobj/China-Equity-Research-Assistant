@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 FinancialReportType = Literal["annual", "q1", "half", "q3", "ttm", "unknown"]
 FinancialQualityStatus = Literal["ok", "warning", "degraded", "failed"]
+AnnouncementQualityStatus = Literal["ok", "warning", "degraded", "failed"]
 
 
 class AnnouncementItem(BaseModel):
@@ -19,9 +20,21 @@ class AnnouncementItem(BaseModel):
     symbol: str
     title: str
     publish_date: date
-    announcement_type: str
+    announcement_type: str = "other"
+    announcement_subtype: Optional[str] = None
     source: str
-    url: str
+    url: Optional[str] = None
+    quality_status: Optional[AnnouncementQualityStatus] = None
+    cleaning_warnings: list[str] = Field(default_factory=list)
+    missing_fields: list[str] = Field(default_factory=list)
+    coerced_fields: list[str] = Field(default_factory=list)
+    provider_used: Optional[str] = None
+    fallback_applied: bool = False
+    fallback_reason: Optional[str] = None
+    source_mode: Optional[str] = None
+    freshness_mode: Optional[str] = None
+    dedupe_key: Optional[str] = None
+    as_of_date: Optional[date] = None
 
 
 class AnnouncementListResponse(BaseModel):
@@ -32,6 +45,16 @@ class AnnouncementListResponse(BaseModel):
     symbol: str
     count: int = Field(ge=0)
     items: list[AnnouncementItem]
+    quality_status: Optional[AnnouncementQualityStatus] = None
+    cleaning_warnings: list[str] = Field(default_factory=list)
+    dropped_rows: int = Field(default=0, ge=0)
+    dropped_duplicate_rows: int = Field(default=0, ge=0)
+    provider_used: Optional[str] = None
+    fallback_applied: bool = False
+    fallback_reason: Optional[str] = None
+    source_mode: Optional[str] = None
+    freshness_mode: Optional[str] = None
+    as_of_date: Optional[date] = None
 
 
 class FinancialSummary(BaseModel):

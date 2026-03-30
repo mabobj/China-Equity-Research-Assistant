@@ -174,3 +174,112 @@ def _append_range_warning(
         return
     if value < min_value or value > max_value:
         warnings.append("{field}_out_of_range".format(field=field_name))
+
+
+_ANNOUNCEMENT_TYPE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("forecast", ("业绩预告", "业绩快报", "performance forecast")),
+    ("dividend", ("利润分配", "分红", "派息", "dividend")),
+    ("buyback", ("回购", "buyback", "repurchase")),
+    ("shareholding_change", ("增持", "减持", "shareholding change")),
+    ("equity_incentive", ("股权激励", "equity incentive")),
+    ("major_contract", ("重大合同", "major contract")),
+    ("merger_restructuring", ("重组", "并购", "merger", "restructuring")),
+    ("litigation", ("诉讼", "仲裁", "litigation", "arbitration")),
+    ("governance", ("董事会", "监事会", "股东大会", "governance")),
+    ("risk_alert", ("风险提示", "异常波动", "risk alert")),
+    (
+        "earnings",
+        (
+            "年度报告",
+            "年报",
+            "第一季度报告",
+            "第三季度报告",
+            "半年度报告",
+            "一季报",
+            "三季报",
+            "半年报",
+            "earnings",
+            "quarterly report",
+            "annual report",
+        ),
+    ),
+)
+
+_ANNOUNCEMENT_TYPE_SET = {
+    "earnings",
+    "forecast",
+    "dividend",
+    "buyback",
+    "shareholding_change",
+    "equity_incentive",
+    "major_contract",
+    "merger_restructuring",
+    "litigation",
+    "governance",
+    "risk_alert",
+    "other",
+}
+
+
+def classify_announcement_type(
+    *,
+    title: str,
+    existing_type: Optional[str] = None,
+) -> str:
+    """按公告标题进行粗分类。"""
+    normalized_existing = (existing_type or "").strip().lower()
+    if normalized_existing in _ANNOUNCEMENT_TYPE_SET and normalized_existing != "other":
+        return normalized_existing
+
+    lowered_title = title.lower()
+    for announcement_type, keywords in _ANNOUNCEMENT_TYPE_RULES:
+        if any(keyword in title or keyword in lowered_title for keyword in keywords):
+            return announcement_type
+    return "other"
+
+
+def build_announcement_dedupe_key(
+    *,
+    symbol: str,
+    publish_date: date,
+    normalized_title: str,
+) -> str:
+    """构造公告去重键。"""
+    return "{symbol}|{publish_date}|{title}".format(
+        symbol=symbol,
+        publish_date=publish_date.isoformat(),
+        title=normalized_title,
+    )
+
+
+def validate_announcement_row(
+    *,
+    title: str,
+    publish_date: Optional[date],
+    url: Optional[str],
+) -> tuple[str, list[str], list[str]]:
+    """校验公告项并返回 (quality_status, warnings, missing_fields)。"""
+    warnings: list[str] = []
+    missing_fields: list[str] = []
+
+    if title.strip() == "":
+        warnings.append("missing_title")
+        missing_fields.append("title")
+        return "failed", warnings, missing_fields
+
+    if publish_date is None:
+        warnings.append("invalid_publish_date")
+        missing_fields.append("publish_date")
+        return "failed", warnings, missing_fields
+
+    quality_status = "ok"
+    if url is None:
+        warnings.append("missing_url")
+        missing_fields.append("url")
+        quality_status = "warning"
+
+    if len(title.strip()) <= 4:
+        warnings.append("short_title")
+        quality_status = "warning"
+
+    return quality_status, warnings, missing_fields

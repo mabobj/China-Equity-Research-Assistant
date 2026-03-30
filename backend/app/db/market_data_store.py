@@ -280,9 +280,9 @@ class LocalMarketDataStore:
                 symbol=row["symbol"],
                 title=row["title"],
                 publish_date=row["publish_date"],
-                announcement_type=row["announcement_type"],
+                announcement_type=row["announcement_type"] or "other",
                 source=row["source"],
-                url=row["url"],
+                url=row["url"] or None,
             )
             for row in rows
         ]
@@ -331,8 +331,8 @@ class LocalMarketDataStore:
                     item.symbol,
                     item.title,
                     item.publish_date,
-                    item.announcement_type,
-                    item.url,
+                    item.announcement_type or "other",
+                    item.url or "",
                     item.source,
                     datetime.utcnow(),
                 ]
@@ -1208,7 +1208,8 @@ class LocalMarketDataStore:
 
 def _build_announcement_external_id(item: AnnouncementItem) -> str:
     """构造稳定的公告外部标识。"""
-    parsed_url = urlparse(item.url)
+    normalized_url = item.url or ""
+    parsed_url = urlparse(normalized_url)
     query = parse_qs(parsed_url.query)
 
     announcement_id = _pick_first_query_value(query, "announcementId")
@@ -1232,7 +1233,7 @@ def _build_announcement_external_id(item: AnnouncementItem) -> str:
                 symbol=item.symbol,
                 publish_date=item.publish_date.isoformat(),
                 title=item.title,
-                url=item.url,
+                url=normalized_url,
             )
         ).encode("utf-8")
     ).hexdigest()

@@ -30,6 +30,8 @@ from app.schemas.research_inputs import (
     AnnouncementListResponse,
     FinancialSummary,
 )
+from app.services.common.text_normalization import normalize_display_text
+from app.services.data_service.cleaning.announcements import clean_announcements
 from app.services.data_service.cleaning.bars import clean_daily_bars
 from app.services.data_service.cleaning.financials import clean_financial_summary
 from app.services.data_service.contracts.bars import DailyBarsCleaningSummary
@@ -482,6 +484,7 @@ class MarketDataService:
             start_date=start_date,
             end_date=end_date,
         )
+        as_of_date = resolve_last_closed_trading_day()
 
         if (
             not force_refresh
@@ -500,16 +503,19 @@ class MarketDataService:
                 limit=limit,
             )
             if cached_items:
+                cleaned_cached = clean_announcements(
+                    symbol=canonical_symbol,
+                    rows=cached_items,
+                    as_of_date=as_of_date,
+                    source_mode="local_cache",
+                    freshness_mode="cache_preferred",
+                )
                 logger.debug(
                     "market_data.announcements.cache_hit symbol=%s count=%s",
                     canonical_symbol,
-                    len(cached_items),
+                    len(cleaned_cached.items),
                 )
-                return AnnouncementListResponse(
-                    symbol=canonical_symbol,
-                    count=len(cached_items),
-                    items=cached_items,
-                )
+                return cleaned_cached.to_announcement_list_response()
 
         items = self._load_stock_announcements_from_providers(
             canonical_symbol,
@@ -517,9 +523,18 @@ class MarketDataService:
             normalized_end_date,
             limit,
         )
+        cleaned_remote = clean_announcements(
+            symbol=canonical_symbol,
+            rows=items,
+            as_of_date=as_of_date,
+            source_mode="provider_fetch",
+            freshness_mode="force_refreshed" if force_refresh else "provider_fetch",
+        )
 
         if self._local_store is not None:
-            self._local_store.upsert_stock_announcements(items)
+            self._local_store.upsert_stock_announcements(
+                cleaned_remote.to_announcement_items(),
+            )
             self._local_store.mark_range_covered(
                 DATASET_ANNOUNCEMENTS,
                 canonical_symbol,
@@ -533,28 +548,35 @@ class MarketDataService:
                 limit=limit,
             )
             if merged_items:
+                cleaned_merged = clean_announcements(
+                    symbol=canonical_symbol,
+                    rows=merged_items,
+                    as_of_date=as_of_date,
+                    provider_used=cleaned_remote.provider_used,
+                    fallback_applied=cleaned_remote.fallback_applied,
+                    fallback_reason=cleaned_remote.fallback_reason,
+                    source_mode="local_plus_provider",
+                    freshness_mode="force_refreshed" if force_refresh else "provider_fetch",
+                )
                 logger.debug(
                     "market_data.announcements.done symbol=%s count=%s source_mode=local_plus_provider",
                     canonical_symbol,
-                    len(merged_items),
+                    len(cleaned_merged.items),
                 )
-                return AnnouncementListResponse(
-                    symbol=canonical_symbol,
-                    count=len(merged_items),
-                    items=merged_items,
-                )
+                return cleaned_merged.to_announcement_list_response()
 
-        if items:
+        if cleaned_remote.items:
             logger.debug(
                 "market_data.announcements.done symbol=%s count=%s source_mode=provider_only",
                 canonical_symbol,
-                len(items),
+                len(cleaned_remote.items),
             )
-            return AnnouncementListResponse(
-                symbol=canonical_symbol,
-                count=len(items),
-                items=items,
-            )
+            return cleaned_remote.model_copy(
+                update={
+                    "source_mode": "provider_only",
+                    "freshness_mode": "force_refreshed" if force_refresh else "provider_fetch",
+                }
+            ).to_announcement_list_response()
 
         raise DataNotFoundError(
             "No announcements found for symbol {symbol}.".format(
@@ -1227,13 +1249,26 @@ def _normalize_financial_summary_response(
     normalized_warnings = list(summary.cleaning_warnings)
     normalized_missing_fields = list(summary.missing_fields)
     normalized_coerced_fields = list(summary.coerced_fields)
-    quality_status = summary.quality_status
+    quality_status: str | None = summary.quality_status
+    report_type = summary.report_type
+    normalized_name = normalize_display_text(summary.name) or summary.name
     if cleaning_summary is not None:
         normalized_warnings.extend(cleaning_summary.warning_messages)
         normalized_missing_fields.extend(cleaning_summary.missing_fields)
         normalized_coerced_fields.extend(cleaning_summary.coerced_fields)
         if quality_status is None:
             quality_status = cleaning_summary.quality_status
+
+    if report_type is None and summary.report_period is not None:
+        inferred_report_type = _infer_financial_report_type_from_period(summary.report_period)
+        if inferred_report_type is not None:
+            report_type = inferred_report_type
+        else:
+            normalized_warnings.append("unknown_report_type_from_report_period")
+
+    recomputed_missing_fields = _recompute_financial_missing_fields(summary)
+    if recomputed_missing_fields:
+        normalized_missing_fields.extend(recomputed_missing_fields)
 
     deduped_warnings = list(dict.fromkeys(item for item in normalized_warnings if item))
     deduped_missing_fields = list(
@@ -1243,13 +1278,17 @@ def _normalize_financial_summary_response(
         dict.fromkeys(item for item in normalized_coerced_fields if item),
     )
 
-    if quality_status is None:
-        quality_status = "ok"
-        if deduped_warnings or deduped_missing_fields:
-            quality_status = "warning"
+    quality_status = _resolve_financial_quality_status(
+        summary=summary,
+        existing_status=quality_status,
+        missing_fields=deduped_missing_fields,
+        warning_messages=deduped_warnings,
+    )
 
     return summary.model_copy(
         update={
+            "name": normalized_name,
+            "report_type": report_type,
             "quality_status": quality_status,
             "cleaning_warnings": deduped_warnings,
             "missing_fields": deduped_missing_fields,
@@ -1260,6 +1299,94 @@ def _normalize_financial_summary_response(
             "as_of_date": as_of_date or summary.as_of_date or resolve_last_closed_trading_day(),
         }
     )
+
+
+def _infer_financial_report_type_from_period(report_period: date) -> str | None:
+    if report_period.month == 3 and report_period.day == 31:
+        return "q1"
+    if report_period.month == 6 and report_period.day == 30:
+        return "half"
+    if report_period.month == 9 and report_period.day == 30:
+        return "q3"
+    if report_period.month == 12 and report_period.day == 31:
+        return "annual"
+    return None
+
+
+def _recompute_financial_missing_fields(summary: FinancialSummary) -> list[str]:
+    candidate_fields = (
+        "revenue",
+        "revenue_yoy",
+        "net_profit",
+        "net_profit_yoy",
+        "roe",
+        "gross_margin",
+        "debt_ratio",
+        "eps",
+        "bps",
+    )
+    missing: list[str] = []
+    for field_name in candidate_fields:
+        value = getattr(summary, field_name)
+        if value is None:
+            missing.append(field_name)
+    return missing
+
+
+def _resolve_financial_quality_status(
+    *,
+    summary: FinancialSummary,
+    existing_status: str | None,
+    missing_fields: list[str],
+    warning_messages: list[str],
+) -> str:
+    key_missing_fields = {
+        "revenue",
+        "revenue_yoy",
+        "net_profit",
+        "net_profit_yoy",
+        "roe",
+    }
+    missing_set = set(missing_fields)
+    key_missing_count = len(key_missing_fields & missing_set)
+    total_missing_count = len(missing_set)
+    has_any_value = any(
+        getattr(summary, field_name) is not None
+        for field_name in (
+            "revenue",
+            "revenue_yoy",
+            "net_profit",
+            "net_profit_yoy",
+            "roe",
+            "gross_margin",
+            "debt_ratio",
+            "eps",
+            "bps",
+        )
+    )
+    has_warning = bool(warning_messages)
+
+    inferred_status = "ok"
+    if not has_any_value:
+        inferred_status = "degraded"
+        if summary.report_period is None and summary.report_type in {None, "unknown"}:
+            inferred_status = "failed"
+    elif key_missing_count >= 5 or total_missing_count >= 6:
+        inferred_status = "degraded"
+    elif key_missing_count > 0 or total_missing_count > 0 or has_warning:
+        inferred_status = "warning"
+
+    if existing_status is None:
+        return inferred_status
+    if existing_status == "failed":
+        return existing_status
+    if inferred_status == "failed":
+        return "degraded"
+    if existing_status == "degraded" or inferred_status == "degraded":
+        return "degraded"
+    if existing_status == "warning" or inferred_status == "warning":
+        return "warning"
+    return "ok"
 
 
 def _parse_optional_date(value: Optional[str], field_name: str) -> Optional[date]:

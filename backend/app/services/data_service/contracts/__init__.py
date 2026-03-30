@@ -1,5 +1,10 @@
 """数据清洗内部契约定义。"""
 
+from app.services.data_service.contracts.announcements import (
+    AnnouncementCleaningSummary,
+    CleanAnnouncementItem,
+    CleanAnnouncementListResult,
+)
 from app.services.data_service.contracts.bars import (
     CleanDailyBar,
     CleanDailyBarsResult,
@@ -12,6 +17,9 @@ from app.services.data_service.contracts.financials import (
 )
 
 __all__ = [
+    "AnnouncementCleaningSummary",
+    "CleanAnnouncementItem",
+    "CleanAnnouncementListResult",
     "CleanDailyBar",
     "CleanDailyBarsResult",
     "DailyBarsCleaningSummary",

@@ -89,6 +89,31 @@ _FINANCIAL_FIELD_ALIASES = {
     "source": "source",
 }
 
+_ANNOUNCEMENT_FIELD_ALIASES = {
+    "symbol": "symbol",
+    "code": "symbol",
+    "ts_code": "symbol",
+    "title": "title",
+    "公告标题": "title",
+    "公告名称": "title",
+    "headline": "title",
+    "date": "publish_date",
+    "publish_date": "publish_date",
+    "publish_time": "publish_date",
+    "datetime": "publish_date",
+    "公告日期": "publish_date",
+    "发布时间": "publish_date",
+    "url": "url",
+    "公告链接": "url",
+    "链接": "url",
+    "source": "source",
+    "来源": "source",
+    "announcement_type": "announcement_type",
+    "公告类型": "announcement_type",
+    "announcement_subtype": "announcement_subtype",
+    "公告子类型": "announcement_subtype",
+}
+
 
 def map_daily_bar_row(
     row: Mapping[str, Any],
@@ -109,6 +134,18 @@ def map_financial_summary_row(
 ) -> dict[str, Any]:
     """把原始 row 映射为统一财务摘要键名。"""
     mapped = _map_row_with_aliases(row, _FINANCIAL_FIELD_ALIASES)
+    if default_source is not None and "source" not in mapped:
+        mapped["source"] = default_source
+    return mapped
+
+
+def map_announcement_row(
+    row: Mapping[str, Any],
+    *,
+    default_source: str | None = None,
+) -> dict[str, Any]:
+    """把原始 row 映射为统一公告键名。"""
+    mapped = _map_row_with_aliases(row, _ANNOUNCEMENT_FIELD_ALIASES)
     if default_source is not None and "source" not in mapped:
         mapped["source"] = default_source
     return mapped

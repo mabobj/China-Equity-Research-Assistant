@@ -6,7 +6,7 @@ from typing import Optional
 
 from app.db.market_data_store import DATASET_DAILY_BARS, LocalMarketDataStore
 from app.schemas.market_data import DailyBar, IntradayBar, StockProfile, UniverseItem
-from app.schemas.research_inputs import FinancialSummary
+from app.schemas.research_inputs import AnnouncementItem, FinancialSummary
 from app.services.data_service.market_data_service import MarketDataService
 from app.services.data_products.freshness import resolve_last_closed_trading_day
 
@@ -349,6 +349,50 @@ class FinancialSummaryProvider(FakeProvider):
             bps=210.3,
             source="akshare",
         )
+
+
+class AnnouncementProvider(FakeProvider):
+    """用于验证公告清洗链路。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.name = "cninfo"
+        self.announcement_call_count = 0
+
+    def get_stock_announcements(
+        self,
+        symbol: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        limit: int = 20,
+    ) -> list[AnnouncementItem]:
+        self.announcement_call_count += 1
+        return [
+            AnnouncementItem(
+                symbol=symbol,
+                title="  回购股份进展公告 \n",
+                publish_date=date(2026, 3, 27),
+                announcement_type="other",
+                source="CNINFO",
+                url="",
+            ),
+            AnnouncementItem(
+                symbol=symbol,
+                title="回购股份进展公告",
+                publish_date=date(2026, 3, 27),
+                announcement_type="other",
+                source="cninfo",
+                url="https://example.com/notice?id=1",
+            ),
+            AnnouncementItem(
+                symbol=symbol,
+                title="2025年年度报告",
+                publish_date=date(2026, 3, 26),
+                announcement_type="other",
+                source="cninfo",
+                url=None,
+            ),
+        ]
 
 
 def test_service_normalizes_symbol_before_calling_provider() -> None:
@@ -818,7 +862,7 @@ def test_service_financial_summary_runs_cleaning_and_sets_runtime_fields() -> No
 
 
 def test_service_financial_summary_cache_hit_backfills_quality_fields(tmp_path: Path) -> None:
-    """旧缓存缺少质量字段时，返回层应自动补齐默认值。"""
+    """旧缓存缺少质量字段时，返回层应自动补齐真实判定并回补 report_type。"""
     provider = FinancialSummaryProvider()
     local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
     local_store.upsert_stock_financial_summary(
@@ -838,9 +882,102 @@ def test_service_financial_summary_cache_hit_backfills_quality_fields(tmp_path: 
     summary = service.get_stock_financial_summary("600519.SH")
 
     assert provider.financial_call_count == 0
-    assert summary.quality_status == "ok"
+    assert summary.report_type == "q3"
+    assert summary.quality_status == "degraded"
     assert summary.cleaning_warnings == []
+    assert "revenue_yoy" in summary.missing_fields
+    assert "net_profit" in summary.missing_fields
+    assert "net_profit_yoy" in summary.missing_fields
+    assert "roe" in summary.missing_fields
     assert summary.provider_used == "legacy_cache"
     assert summary.source_mode == "local"
     assert summary.freshness_mode == "cache_preferred"
     assert summary.as_of_date == resolve_last_closed_trading_day()
+
+
+def test_service_financial_summary_cache_hit_with_key_fields_missing_is_degraded(
+    tmp_path: Path,
+) -> None:
+    """关键财务字段大量缺失时，不应误判为 ok。"""
+    provider = FinancialSummaryProvider()
+    local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
+    local_store.upsert_stock_financial_summary(
+        FinancialSummary(
+            symbol="000001.SZ",
+            name="平安银行",
+            report_period=date(2025, 9, 30),
+            source="legacy_cache",
+        )
+    )
+    service = MarketDataService(
+        providers=[provider],
+        local_store=local_store,
+    )
+
+    summary = service.get_stock_financial_summary("000001.SZ")
+
+    assert provider.financial_call_count == 0
+    assert summary.report_type == "q3"
+    assert summary.quality_status == "degraded"
+    assert "revenue" in summary.missing_fields
+    assert "revenue_yoy" in summary.missing_fields
+    assert "net_profit" in summary.missing_fields
+    assert "net_profit_yoy" in summary.missing_fields
+    assert "roe" in summary.missing_fields
+
+
+def test_service_announcements_runs_cleaning_and_deduplicates() -> None:
+    """公告接口应统一走清洗链路并输出去重后的结构化结果。"""
+    provider = AnnouncementProvider()
+    service = MarketDataService(providers=[provider])
+
+    response = service.get_stock_announcements(
+        symbol="600519.SH",
+        start_date="2026-03-20",
+        end_date="2026-03-30",
+        limit=20,
+    )
+
+    assert provider.announcement_call_count == 1
+    assert response.symbol == "600519.SH"
+    assert response.count == 2
+    assert response.dropped_duplicate_rows == 1
+    assert response.quality_status in {"ok", "warning"}
+    assert response.provider_used == "cninfo"
+    assert response.source_mode == "provider_only"
+    assert response.items[0].title == "回购股份进展公告"
+    assert response.items[0].announcement_type == "buyback"
+    assert response.items[0].url == "https://example.com/notice?id=1"
+    assert response.items[1].announcement_type == "earnings"
+
+
+def test_service_announcements_cache_hit_keeps_cleaning_metadata(tmp_path: Path) -> None:
+    """缓存命中路径应继续保留公告清洗摘要字段。"""
+    provider = AnnouncementProvider()
+    local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
+    service = MarketDataService(
+        providers=[provider],
+        local_store=local_store,
+    )
+
+    first_response = service.get_stock_announcements(
+        symbol="600519.SH",
+        start_date="2026-03-20",
+        end_date="2026-03-30",
+        limit=20,
+    )
+    second_response = service.get_stock_announcements(
+        symbol="600519.SH",
+        start_date="2026-03-20",
+        end_date="2026-03-30",
+        limit=20,
+    )
+
+    assert provider.announcement_call_count == 1
+    assert first_response.count == 2
+    assert second_response.count == 2
+    assert second_response.source_mode == "local_cache"
+    assert second_response.quality_status in {"ok", "warning"}
+    assert second_response.as_of_date is not None
+    assert second_response.dropped_duplicate_rows == 0
+    assert second_response.items[0].announcement_type in {"buyback", "earnings", "other"}

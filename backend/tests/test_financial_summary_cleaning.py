@@ -66,6 +66,24 @@ def test_clean_financial_summary_parses_q3_and_ttm_report_type() -> None:
     assert q3_result.summary.report_type == "q3"
     assert q3_result.summary.report_period == date(2024, 9, 30)
 
+    q3_date_result = clean_financial_summary(
+        symbol="000001.SZ",
+        rows=[
+            {
+                "symbol": "000001.SZ",
+                "report_period": "2025-09-30",
+                "revenue": 101.0,
+                "net_profit": 81.0,
+                "roe": 11.0,
+                "debt_ratio": 41.0,
+                "source": "akshare",
+            }
+        ],
+    )
+    assert q3_date_result.summary is not None
+    assert q3_date_result.summary.report_type == "q3"
+    assert q3_date_result.summary.report_period == date(2025, 9, 30)
+
     ttm_result = clean_financial_summary(
         symbol="000001.SZ",
         rows=[

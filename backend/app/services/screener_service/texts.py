@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from app.services.common.text_normalization import normalize_display_text as _shared_normalize_display_text
+
 _ENGLISH_MARKERS: Final[tuple[str, ...]] = (
     "is actionable now, but still needs execution discipline.",
     "is worth tracking, but the better setup is a pullback.",
@@ -80,13 +82,7 @@ def build_short_reason(list_type: str) -> str:
 
 def normalize_display_text(text: str | None) -> str:
     """标准化展示文本并尝试修复常见乱码。"""
-    if not text:
-        return ""
-    normalized = text.strip()
-    if not normalized:
-        return ""
-    repaired = _repair_mojibake(normalized)
-    return repaired.strip()
+    return _shared_normalize_display_text(text)
 
 
 def normalize_display_text_list(values: list[str] | None) -> list[str]:

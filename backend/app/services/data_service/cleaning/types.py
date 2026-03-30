@@ -7,6 +7,8 @@ import math
 import re
 from typing import Any, Optional, Tuple
 
+from app.services.common.text_normalization import normalize_display_text
+
 _MISSING_STRINGS = {"", "--", "—", "none", "null", "nan", "na", "n/a"}
 
 _VOLUME_UNIT_BY_SOURCE = {
@@ -24,6 +26,11 @@ _AMOUNT_UNIT_BY_SOURCE = {
 _SOURCE_ALIASES = {
     "akshare_api": "akshare",
     "aksharepro": "akshare",
+    "巨潮资讯": "cninfo",
+    "juchao": "cninfo",
+    "cninfo.com.cn": "cninfo",
+    "eastmoney_api": "eastmoney",
+    "东方财富": "eastmoney",
 }
 
 
@@ -216,6 +223,12 @@ def _normalize_source(source: str) -> str:
     normalized = source.strip().lower()
     if normalized in _SOURCE_ALIASES:
         return _SOURCE_ALIASES[normalized]
+    if source.strip() in _SOURCE_ALIASES:
+        return _SOURCE_ALIASES[source.strip()]
+    if normalized.startswith("cninfo"):
+        return "cninfo"
+    if normalized.startswith("eastmoney"):
+        return "eastmoney"
     if normalized.startswith("akshare"):
         return "akshare"
     return normalized
@@ -324,3 +337,65 @@ def _quarter_to_type(quarter: str) -> str:
     if quarter == "3":
         return "q3"
     return "annual"
+
+
+def parse_announcement_publish_date(value: Any) -> tuple[Optional[date], bool]:
+    """解析公告发布日期，返回 (日期, 是否发生强制转换)。"""
+    if is_missing_value(value):
+        return None, False
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value, False
+    if isinstance(value, datetime):
+        return value.date(), True
+
+    text = str(value).strip()
+    if text == "":
+        return None, False
+
+    normalized = (
+        text.replace("年", "-")
+        .replace("月", "-")
+        .replace("日", "")
+        .replace("/", "-")
+        .strip()
+    )
+    for pattern in (
+        "%Y-%m-%d",
+        "%Y%m%d",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+    ):
+        try:
+            return datetime.strptime(normalized, pattern).date(), True
+        except ValueError:
+            continue
+    return None, False
+
+
+def normalize_announcement_source(value: Any) -> tuple[str, bool]:
+    """归一公告来源标识。"""
+    if is_missing_value(value):
+        return "unknown", True
+    text = str(value).strip()
+    normalized = _normalize_source(text)
+    return normalized, normalized != text
+
+
+def normalize_announcement_title(value: Any) -> tuple[str, bool]:
+    """规范化公告标题文本。"""
+    if is_missing_value(value):
+        return "", False
+    text = str(value)
+    normalized_whitespace = " ".join(text.replace("\r", " ").replace("\n", " ").split())
+    normalized = normalize_display_text(normalized_whitespace)
+    return normalized, normalized != text.strip()
+
+
+def normalize_announcement_url(value: Any) -> tuple[Optional[str], bool]:
+    """规范化公告链接。"""
+    if is_missing_value(value):
+        return None, False
+    text = str(value).strip()
+    if text == "":
+        return None, True
+    return text, text != str(value)
