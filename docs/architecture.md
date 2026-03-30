@@ -178,7 +178,7 @@ backend/app/services/screener_service/batch_service.py
 - `GET /screener/batches/{batch_id}/results`
 - `GET /screener/batches/{batch_id}/results/{symbol}`
 - `POST /screener/cursor/reset`
-## Data 清洗层（v0.1，bars 先行）
+## Data 清洗层（v0.1）
 
 当前正式链路：
 
@@ -192,15 +192,41 @@ backend/app/services/screener_service/batch_service.py
   - `rules.py`：行级业务校验
   - `quality.py`：质量摘要聚合
   - `bars.py`：bars 清洗总入口
-- `backend/app/services/data_service/contracts/bars.py`
-  - `CleanDailyBar`
-  - `CleanDailyBarsResult`
-  - `DailyBarsCleaningSummary`
+  - `financials.py`：财务摘要清洗总入口
+  - `announcements.py`：公告索引清洗总入口
+- `backend/app/services/data_service/contracts/`
+  - `bars.py`
+    - `CleanDailyBar`
+    - `CleanDailyBarsResult`
+    - `DailyBarsCleaningSummary`
+  - `financials.py`
+    - `CleanFinancialSummary`
+    - `CleanFinancialSummaryResult`
+    - `FinancialSummaryCleaningSummary`
+  - `announcements.py`
+    - `CleanAnnouncementItem`
+    - `CleanAnnouncementListResult`
+    - `AnnouncementCleaningSummary`
 
 设计约束：
 - provider 层只负责“取数 + 基础解析”
 - 清洗与质量评估在 cleaning 层集中处理
 - service 层统一消费清洗结果，避免字段映射逻辑散落
+
+## 财务摘要清洗接入现状
+
+`market_data_service.get_stock_financial_summary()` 已统一走财务清洗与归一化：
+- 实时抓取路径与缓存命中路径都补齐 `report_type`、`quality_status`、`missing_fields`。
+- 对历史旧缓存会做响应层二次归一，避免“关键字段缺失但 quality=ok”的误判。
+- `financial_summary_daily` 复用同一服务入口与清洗结果。
+
+## 公告索引清洗接入现状
+
+`market_data_service.get_stock_announcements()` 已统一接入公告清洗：
+- 本地缓存命中路径与远端 provider 路径都经过同一清洗入口。
+- 清洗后统一输出 `publish_date`、`announcement_type`、`dedupe_key`、质量摘要字段。
+- 去重规则：`symbol + publish_date + normalized_title`，冲突时优先保留有 URL 的记录。
+- 排序规则：`publish_date desc`，同日按标题稳定排序。
 
 ## mootdx 优先策略
 
@@ -214,3 +240,7 @@ backend/app/services/screener_service/batch_service.py
 - `timeline`
 
 批量选股（screener pipeline）同样使用该优先级，保证“本地优先，缺失再回退”。
+
+补充说明：
+- 财务摘要链路当前仍是 `local -> akshare`。
+- 公告索引链路当前按已注册公告 provider 顺序执行，并通过清洗层统一 source/type/quality 口径。

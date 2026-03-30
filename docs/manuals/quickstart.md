@@ -124,6 +124,13 @@ powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
 powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 ```
 
+如果你在本机遇到 `pytest` 启动卡住（插件自动加载导致），可先用：
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py -q
+```
+
 ### 前端校验
 
 ```powershell
@@ -165,6 +172,7 @@ Set-Location ..
 - Debate Review
 - Strategy Plan
 - Trigger Snapshot
+- Decision Brief
 
 ### C. 运行单票 workflow
 
@@ -184,12 +192,27 @@ Set-Location ..
 
 - [http://127.0.0.1:3000/screener](http://127.0.0.1:3000/screener)
 
-依次操作：
+依次操作（最新主链路）：
 
-1. 可选：执行一次数据补全
-2. 运行规则初筛
-3. 运行深筛
-4. 运行 `deep_candidate_review` workflow
+1. 在“运行初筛工作流”里输入 `batch_size`（本批次计算股票数量）
+2. 提交 `POST /workflows/screener/run`
+3. 查看 `run_id`、步骤状态与完成摘要
+4. 查看“最新批次摘要 + 批次结果表 + 单股详情”
+5. 如需深筛，再运行 `deep_candidate_review`
+
+### E. 快速验证公告/财务清洗可见性（可选）
+
+在浏览器或 Swagger 调用：
+
+- `GET /stocks/600519.SH/financial-summary`
+- `GET /stocks/600519.SH/announcements`
+
+重点看这些字段是否存在：
+- `quality_status`
+- `cleaning_warnings`
+- `provider_used`
+- `source_mode`
+- `freshness_mode`
 
 ## 9. 如果最小验证失败
 

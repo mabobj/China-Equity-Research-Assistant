@@ -228,3 +228,33 @@ LLM_DEBATE_TIMEOUT_SECONDS=60
 3. [数据源与边界说明](data-and-limitations.md)
 4. [系统架构](../architecture.md)
 5. [稳定性审计 v1](../audits/stability-review-v1.md)
+
+## 12. pytest 启动卡住（插件自动加载）
+
+在部分本机环境里，`pytest` 可能在启动阶段卡住（常见于外部插件自动加载）。
+
+建议先用最小命令验证：
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+python -m pytest backend/tests/test_workspace_bundle_service.py -q
+```
+
+如果这样能正常跑，再继续运行完整测试命令。
+
+## 13. 如何判断公告/财务是“无数据”还是“降级”
+
+优先看以下字段，而不是只看 `count`：
+- `quality_status`
+- `cleaning_warnings`
+- `provider_used`
+- `fallback_applied`
+- `fallback_reason`
+- `source_mode`
+- `freshness_mode`
+
+经验判断：
+- `quality_status=ok` 且 warning 为空：通常可正常使用
+- `quality_status=warning/degraded`：需要结合 warning/缺失字段判断可信度
+- `count=0` 且有 fallback/warning：更可能是 provider 不可用或降级路径
+- `count=0` 且无异常字段：更可能是窗口内确实无数据

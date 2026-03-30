@@ -1,318 +1,128 @@
 # 日常使用说明
 
-这份文档面向已经能跑通项目、准备开始日常使用的人。
+这份文档面向已经跑通系统的日常使用场景，目标是“先看结论、再看证据、最后看细节”。
 
-## 1. 如何做单票分析
+## 1. 单票分析怎么用
 
 推荐入口：
-
 - 首页输入股票代码
-- 或直接打开 `/stocks/[symbol]`
+- 或直接访问 `/stocks/[symbol]`
 
-### 单票页的推荐阅读顺序
+推荐阅读顺序：
+1. `DecisionBrief`（一句话结论 + 当前动作）
+2. 证据层（看多证据 / 风险证据 / 来源提示）
+3. 行动层（观察位、止损、复盘窗口）
+4. 详细模块（factor / review / debate / strategy / trigger）
 
-1. 股票基础信息
-   - 看名称、交易所、行业、上市日期、数据源
-2. Factor Snapshot 摘要
-   - 先看 `alpha / trigger / risk`
-   - 再看偏强因子组和偏弱因子组
-3. Review Report v2
-   - 看 `final_judgement`
-   - 看技术、基本面、事件、情绪四个视角的摘要
-4. Debate Review
-   - 看当前是 `rule_based` 还是 `llm`
-   - 看首席裁决、四类分析员观点和执行提醒
-5. Strategy Plan
-   - 看动作、入场区间、止损、止盈和持有规则
-6. Trigger Snapshot
-   - 用来判断当前触发位置是否接近预期
-
-### 页面上的常用操作
-
-- `切换股票`
-- `刷新当前股票分析`
+页面常用操作：
+- 切换股票
+- 刷新当前股票分析
 - `debate-review 使用 LLM`
 
-其中：
-
-- 如果只是看稳定结果，优先用 `rule_based`
-- 如果你需要更强的解释性综合判断，再打开 LLM
-
-## 2. 如何跑选股
-
-推荐入口：
-
-- `/screener`
-
-### 推荐顺序
-
-1. 先看是否需要 `数据补全`
-2. 运行 `规则初筛`
-3. 按 v2 分桶看候选
-4. 再运行 `深筛`
-
-### 当前主展示分桶
-
-- `READY_TO_BUY`
-- `WATCH_PULLBACK`
-- `WATCH_BREAKOUT`
-- `RESEARCH_ONLY`
-- `AVOID`
-
-说明：
-
-- 页面主展示字段是 `v2_list_type`
-- 旧字段 `list_type` 只保留兼容说明
-
-### 看到候选后怎么做
-
-每个候选项都支持点击进入单票页。
-
-推荐做法：
-
-1. 先在选股页缩小范围
-2. 对重点候选点击进入单票页
-3. 在单票页继续看 review / debate / strategy
-
-## 3. 如何看 debate-review
-
-`debate-review` 不是自由聊天结果，而是受控的角色化裁决输出。
-
-建议重点关注：
-
-1. `runtime_mode`
-   - `rule_based`
-   - `llm`
-2. `final_action`
-3. `chief_judgement.summary`
-4. 四类分析员的谨慎点
-5. `risk_review.execution_reminders`
-
-### 什么时候看 rule-based 版
-
-适合：
-
-- 要稳定结果
-- 要排查 schema 和 provider 问题
-- 当前 LLM 不可用
-
-### 什么时候看 LLM 版
-
-适合：
-
-- 想看多角色综合表达是否更顺手
-- 想辅助阅读 review-service 的结构化结果
-
-不适合：
-
-- 把 LLM 输出当成唯一决策来源
-- 用自由文本替代规则与分数
-
-## 4. 如何跑 workflow
-
-当前有两个 workflow。
-
-### 单票 workflow
-
-入口：
-
-- 单票页里的 `单票 Workflow`
-
-名称：
-
-- `single_stock_full_review`
-
-支持参数：
-
-- `symbol`
-- `start_from`
-- `stop_after`
-- `use_llm`
-
-### 深筛 workflow
-
-入口：
-
-- 选股页里的 `Deep Review Workflow`
-
-名称：
-
-- `deep_candidate_review`
-
-支持参数：
-
-- `max_symbols`
-- `top_n`
-- `deep_top_k`
-- `start_from`
-- `stop_after`
-- `use_llm`
-
-## 5. 如何理解 `start_from` / `stop_after`
-
-### `start_from`
-
-表示从哪个节点开始正式执行。
-
-例如：
-
-- 在单票 workflow 里选择 `DebateReviewBuild`
-- 这表示前面的节点不会被记为“本次已执行完成”
-- 但内部 service 仍可能自动补齐必要输入
-
-### `stop_after`
-
-表示执行到哪个节点后停止。
-
-例如：
-
-- 在 deep review workflow 里选择 `CandidateReviewBuild`
-- 这表示后面的 debate / strategy 节点不会继续执行
-
-## 6. 如何查看 workflow 运行记录
-
-你有三种方式。
-
-### A. 页面内直接查看
-
-workflow 执行完成后，页面会直接展示：
-
-- `run_id`
-- 步骤摘要
-- 最终输出摘要
-
-### B. 按 `run_id` 回查
-
-单票页和选股页都支持输入 `run_id` 回查记录。
-
-### C. 直接看本地 artifacts
-
-运行记录文件在：
-
-```text
-data/workflow_runs/{run_id}.json
-```
-
-如果你需要排查某次 workflow 是否中途失败，优先看这个文件和后端日志。
-
-## 7. 当前规则版与 LLM 版的区别
-
-### 规则版
-
-特点：
-
-- 更稳定
-- 更容易复现
-- 没有外部 LLM 依赖
-- 适合作为兜底基线
-
-### LLM 版
-
-特点：
-
-- 解释性通常更自然
-- 更适合多视角摘要整合
-- 依赖 provider、网络、超时和 schema 校验
-- 失败时会自动回退到规则版
-
-### 实际建议
-
-日常建议：
-
-1. 先确保规则版链路可用
-2. 再把 LLM 当作增强层，而不是基础依赖
-
-## 8. 什么时候应该看日志
-
-如果出现下面这些情况，直接看日志比盯着页面更快：
-
-- 页面只显示“加载失败”
-- debate-review 明明设置了 `use_llm=true` 却返回规则版
-- workflow 某个节点失败
-- provider 结果为空或明显异常
-
-日志默认位置：
-
-```text
-logs/backend-debug.log
-```
-
-## 10. workspace-bundle 怎么看
-
-单票页现在优先走统一 bundle，而不是把各个模块分别打一遍。
-
-推荐理解方式：
-
-1. 页面先请求 `GET /stocks/{symbol}/workspace-bundle`
-2. 先看 `decision_brief`
-3. 再看 `evidence_manifest` 和 `freshness_summary`
-4. 最后再下沉到详细模块
-
-这样做的目的：
-
-- 减少重复抓取
-- 避免多个模块并发请求把页面拖慢
-- 让你先看到结论层，再决定是否继续深挖
-
-## 11. /screener 为什么改成 workflow 模式
-
-`/screener` 现在不再把长时间筛选直接挂在一个同步请求上。
-
-新的推荐流程是：
-
-1. 提交 workflow
-2. 立即拿到 `run_id`
-3. 页面轮询 `GET /workflows/runs/{run_id}`
-4. 查看步骤摘要和最终结果
-
-当前主路径：
-
-- `POST /workflows/screener/run`
-- `POST /workflows/deep-review/run`
-
-这样可以避免“前端先超时、后端还在继续跑”的问题。
-
-## 12. freshness 怎么判断
-
-当前日级产物尽量遵守：
-
-- 默认使用最后一个已收盘交易日
-- 不默认追当天日线
-- 本地已有同日结果优先复用
-- 只有 `force_refresh=true` 时才主动刷新远端
-
-优先关注这些字段：
-
+## 2. 如何看 workspace-bundle
+
+单票页主链路已经切到：
+- `GET /stocks/{symbol}/workspace-bundle`
+
+它一次返回：
+- `profile`
+- `factor_snapshot`
+- `review_report`
+- `debate_review`
+- `strategy_plan`
+- `trigger_snapshot`
+- `decision_brief`
+- `module_status_summary`
+- `evidence_manifest`
+- `freshness_summary`
+
+解释规则：
+- 某个子模块失败时，bundle 仍可 `200` 返回。
+- 看 `module_status_summary` 判断失败模块和原因摘要。
+
+## 3. debate-review 怎么看
+
+重点看：
+1. `runtime_mode_requested` / `runtime_mode_effective`
+2. `fallback_applied` / `fallback_reason`
+3. `final_action`
+4. `chief_judgement.summary`
+
+建议：
+- 日常先看规则版（稳定、可复现）。
+- LLM 作为增强层，不作为唯一决策源。
+
+## 4. 选股工作台（/screener）怎么跑
+
+当前主链路是 workflow，不再用同步长请求当主路径。
+
+推荐顺序：
+1. 输入 `batch_size`（本批次计算股票数量）
+2. 提交 `POST /workflows/screener/run`
+3. 页面拿到 `run_id` 后轮询 `GET /workflows/runs/{run_id}`
+4. 查看“运行状态 + 最新批次摘要 + 批次结果表”
+5. 点击股票代码查看单股详情
+6. 如需深筛，再运行 `deep_candidate_review`
+
+关键行为：
+- 同时只允许一个 `screener_run` 运行（互斥）。
+- 每次只处理游标窗口内的 `batch_size` 支股票。
+- 17:00 后首次触发会自动重置游标。
+- 结果按展示窗口聚合，默认每只股票显示最新一条。
+
+## 5. 如何查看批次与运行记录
+
+workflow 记录：
+- 页面里看 `run_id`、步骤摘要、最终摘要
+- 后端查 `GET /workflows/runs/{run_id}`
+- 本地看 `data/workflow_runs/{run_id}.json`
+
+初筛批次结果：
+- `GET /screener/latest-batch`
+- `GET /screener/batches/{batch_id}`
+- `GET /screener/batches/{batch_id}/results`
+- `GET /screener/batches/{batch_id}/results/{symbol}`
+
+## 6. 如何判断数据质量与可用性
+
+财务摘要与公告列表已经接入清洗层，优先看这些字段：
+- `quality_status`
+- `cleaning_warnings`
+- `provider_used`
+- `source_mode`
+- `freshness_mode`
+
+财务额外关注：
+- `report_type`
+- `missing_fields`
+
+公告额外关注：
+- `dropped_rows`
+- `dropped_duplicate_rows`
+- `dedupe_key`
+- `announcement_type`
+
+## 7. freshness 怎么理解
+
+默认策略：
+- 使用最后一个已收盘交易日
+- 本地同日快照优先复用
+- 仅在缺失/过期或 `force_refresh=true` 时重算
+
+重点字段：
 - `as_of_date`
 - `freshness_mode`
 - `source_mode`
 
-## 13. DecisionBrief 的推荐用法
+## 8. 规则版与 LLM 版的边界
 
-`DecisionBrief` 是当前系统新的主输出层，适合当作单票分析和候选跟踪的第一阅读入口。
+规则版负责：
+- 指标计算
+- 规则筛选
+- 风险边界和价格条件
 
-推荐顺序：
+LLM 版负责：
+- 解释和归纳
+- 多视角文字整合
 
-1. 先看 `DecisionBrief`
-   - 看一句话结论 `headline_verdict`
-   - 看当前动作 `action_now`
-   - 看 `what_to_do_next`
-   - 看 `next_review_window`
-2. 再看证据层
-   - `why_it_made_the_list`
-   - `why_not_all_in`
-   - `key_evidence`
-   - `key_risks`
-   - `price_levels_to_watch`
-3. 最后再看详细模块
-   - `factor snapshot`
-   - `review-report v2`
-   - `debate-review`
-   - `strategy plan`
-   - `trigger snapshot`
-
-这意味着：
-
-- 单票页先给出结论和动作，再下沉详细模块
-- 选股页先给出候选的一句话判断和动作建议，再进入单票页深看
-- `review / debate / strategy / factor` 仍然保留，但它们现在主要承担“依据层”角色
+不要把确定性计算交给 LLM。

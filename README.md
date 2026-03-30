@@ -170,7 +170,7 @@ npm.cmd run test:smoke
 
 ```powershell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
-python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py -q
+python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py backend/tests/test_announcements_cleaning.py backend/tests/test_financial_summary_cleaning.py -q
 ```
 
 ## 架构原则
@@ -203,20 +203,27 @@ python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/te
 - 当前时间 `<17:00`：展示“前一日 `17:00`（含）~ 当日 `17:00`（不含）”计算完成股票。
 - 当前时间 `>=17:00`：展示“当日 `17:00`（含）~ 当前时刻”计算完成股票。
 - 同一展示窗口内，默认按每只股票“最新一条结果”展示；历史记录仍保留可查。
-## Data 清洗层 v0.1（bars）
+## Data 清洗层 v0.1（bars + financial_summary + announcements）
 
-当前数据链路已补齐为：`provider raw -> bars cleaning contract -> data products/service`。  
-本轮仅对 `bars` 正式落地清洗，目标是“可追踪、可回退、可测试”。
+当前数据链路已补齐为：`provider/local raw -> cleaning contract -> service/data_products`，并在对外响应层提供清洗可见性。
 
-关键点：
-- 清洗入口位于 `backend/app/services/data_service/cleaning/bars.py`
-- 内部契约位于 `backend/app/services/data_service/contracts/bars.py`
-- `market_data_service.get_daily_bars()` 在 provider 返回后统一清洗，再入库与返回
-- 清洗摘要通过 `DailyBarResponse` 的可选字段暴露：
-  - `quality_status`
-  - `cleaning_warnings`
-  - `dropped_rows`
-  - `dropped_duplicate_rows`
+当前已落地对象：
+- `daily_bars` 清洗
+  - 入口：`backend/app/services/data_service/cleaning/bars.py`
+  - 契约：`backend/app/services/data_service/contracts/bars.py`
+  - 可见字段：`quality_status` / `cleaning_warnings` / `dropped_rows` / `dropped_duplicate_rows`
+- `financial_summary` 清洗
+  - 入口：`backend/app/services/data_service/cleaning/financials.py`
+  - 契约：`backend/app/services/data_service/contracts/financials.py`
+  - 可见字段：`report_type` / `quality_status` / `missing_fields` / `coerced_fields` / `provider_used` / `source_mode` / `freshness_mode`
+- `announcements` 清洗（公告索引层）
+  - 入口：`backend/app/services/data_service/cleaning/announcements.py`
+  - 契约：`backend/app/services/data_service/contracts/announcements.py`
+  - 可见字段：`quality_status` / `cleaning_warnings` / `dropped_rows` / `dropped_duplicate_rows` / `dedupe_key` / `announcement_subtype`
+
+说明：
+- `GET /stocks/{symbol}/announcements` 已统一走清洗链路（缓存命中与远端抓取路径一致）。
+- 本轮仍不包含公告正文解析、PDF/OCR、LLM 公告摘要。
 
 ## 日线/分钟线/分时 provider 优先级
 

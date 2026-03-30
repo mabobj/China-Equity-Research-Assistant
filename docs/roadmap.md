@@ -11,6 +11,20 @@
 - 先 MVP，再扩展
 - 先研究系统，再考虑更强 agent 化
 
+## 当前状态（2026-03-31）
+
+已实质落地：
+- 单票主链路：`review-report v2`、`debate-review`、`strategy plan`、`decision brief`
+- 单票主入口：`workspace-bundle`（含模块状态、证据清单、freshness 摘要）
+- 选股主链路：workflow 模式（含 run 记录、轮询查询、局部失败可见）
+- 初筛第一阶段产品化：互斥运行、游标分批、17:00 窗口口径、批次台账与结果查询
+- 日级数据产品复用：`review_report_daily`、`debate_review_daily`、`strategy_plan_daily` 等
+- Data 清洗层 v0.1：`bars`、`financial_summary`、`announcements` 已接入主链路
+
+当前主要技术债：
+- Python 3.9 兼容约束下的测试/运行环境差异
+- 少量体验型优化（非主链路稳定性风险）
+
 ## 阶段划分
 
 - Phase 0：项目初始化
