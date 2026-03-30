@@ -138,3 +138,28 @@ def test_clean_daily_bars_converts_mootdx_volume_to_share() -> None:
     assert result.summary.quality_status == "ok"
     assert len(result.bars) == 1
     assert result.bars[0].volume == 3008700.0
+
+
+def test_clean_daily_bars_converts_akshare_volume_to_share() -> None:
+    """akshare 成交量应按接口返回“手”转换为“股”。"""
+    result = clean_daily_bars(
+        symbol="600519.SH",
+        rows=[
+            {
+                "symbol": "600519.SH",
+                "trade_date": "2024-01-03",
+                "open": 1600.0,
+                "high": 1610.0,
+                "low": 1595.0,
+                "close": 1608.0,
+                "volume": 12345.0,
+                "amount": 1234567890.0,
+                "source": "AKShare_API",
+            }
+        ],
+        as_of_date=date(2024, 1, 3),
+    )
+
+    assert result.summary.quality_status == "ok"
+    assert len(result.bars) == 1
+    assert result.bars[0].volume == 1234500.0

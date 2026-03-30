@@ -19,6 +19,11 @@ _AMOUNT_UNIT_BY_SOURCE = {
     "mootdx": "yuan",
 }
 
+_SOURCE_ALIASES = {
+    "akshare_api": "akshare",
+    "aksharepro": "akshare",
+}
+
 
 def is_missing_value(value: Any) -> bool:
     """判断是否缺失值。"""
@@ -51,7 +56,8 @@ def normalize_volume(value: float | None, *, source: str) -> float | None:
     """统一 volume 到“股”。"""
     if value is None:
         return None
-    unit = _VOLUME_UNIT_BY_SOURCE.get(source, "share")
+    normalized_source = _normalize_source(source)
+    unit = _VOLUME_UNIT_BY_SOURCE.get(normalized_source, "share")
     if unit == "hand":
         return value * 100.0
     return value
@@ -61,7 +67,8 @@ def normalize_amount(value: float | None, *, source: str) -> float | None:
     """统一 amount 到“元”。"""
     if value is None:
         return None
-    unit = _AMOUNT_UNIT_BY_SOURCE.get(source, "yuan")
+    normalized_source = _normalize_source(source)
+    unit = _AMOUNT_UNIT_BY_SOURCE.get(normalized_source, "yuan")
     if unit == "wan_yuan":
         return value * 10000.0
     return value
@@ -74,3 +81,12 @@ def normalize_percent_value(value: float | None) -> float | None:
     if value != 0 and -1.0 < value < 1.0:
         return value * 100.0
     return value
+
+
+def _normalize_source(source: str) -> str:
+    normalized = source.strip().lower()
+    if normalized in _SOURCE_ALIASES:
+        return _SOURCE_ALIASES[normalized]
+    if normalized.startswith("akshare"):
+        return "akshare"
+    return normalized
