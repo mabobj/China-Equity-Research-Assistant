@@ -39,8 +39,9 @@ runCheck("选股工作台使用 workflow + 批次台账", () => {
   assertContains(source, "runScreenerWorkflow", "应发起初筛 workflow");
   assertContains(source, "getWorkflowRunDetail", "应轮询 workflow 运行详情");
   assertContains(source, "getLatestScreenerBatch", "应加载最新批次摘要");
-  assertContains(source, "getScreenerBatchResults", "应加载批次结果列表");
-  assertContains(source, "最新初筛批次", "应展示批次台账卡片");
+  assertContains(source, "batch_size", "应使用 batch_size 发起初筛");
+  assertContains(source, "当前展示窗口", "应展示时间窗口卡片");
+  assertContains(source, "重置游标", "应提供游标重置入口");
   assertContains(source, "已有运行中的初筛任务", "应展示互斥运行提示");
 });
 

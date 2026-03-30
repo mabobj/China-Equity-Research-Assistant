@@ -6,7 +6,7 @@ from datetime import date
 
 from app.schemas.debate import DebateReviewReport
 from app.schemas.review import StockReviewReport
-from app.schemas.screener import ScreenerRunResponse
+from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.schemas.strategy import StrategyPlan
 from app.services.data_products.freshness import resolve_last_closed_trading_day
 from app.services.data_products.datasets.debate_review_daily import DebateReviewDailyDataset
@@ -81,6 +81,59 @@ def test_screener_snapshot_daily_reuses_same_day_same_params(tmp_path) -> None:
     assert loaded.payload.total_symbols == 100
     assert loaded.freshness_mode == "cache_hit"
     assert loaded.source_mode == "snapshot"
+
+
+def test_screener_snapshot_daily_normalizes_legacy_english_headline(tmp_path) -> None:
+    repository = DataProductRepository(root_dir=tmp_path)
+    dataset = ScreenerSnapshotDailyDataset(repository=repository)
+    params = ScreenerSnapshotParams(workflow_name="screener_run", max_symbols=20, top_n=5)
+    payload = ScreenerRunResponse(
+        as_of_date=date(2024, 1, 2),
+        freshness_mode="computed",
+        source_mode="pipeline",
+        total_symbols=100,
+        scanned_symbols=20,
+        buy_candidates=[],
+        watch_candidates=[],
+        avoid_candidates=[],
+        ready_to_buy_candidates=[],
+        watch_pullback_candidates=[],
+        watch_breakout_candidates=[
+            ScreenerCandidate(
+                symbol="000045.SZ",
+                name="深纺织Ａ",
+                list_type="WATCHLIST",
+                v2_list_type="WATCH_BREAKOUT",
+                rank=1,
+                screener_score=72,
+                alpha_score=67,
+                trigger_score=69,
+                risk_score=43,
+                trend_state="up",
+                trend_score=83,
+                latest_close=12.3,
+                support_level=11.5,
+                resistance_level=12.8,
+                top_positive_factors=["趋势改善"],
+                top_negative_factors=["财务字段缺失较多"],
+                risk_notes=["财务字段缺失较多"],
+                short_reason="优势: 趋势改善 | 风险: 财务字段缺失较多",
+                headline_verdict=(
+                    "深纺织Ａ is worth tracking, but breakout confirmation is still needed. "
+                    "优势: 趋势改善 | 风险: 财务字段缺失较多"
+                ),
+            )
+        ],
+        research_only_candidates=[],
+    )
+
+    dataset.save(run_date=date(2024, 1, 2), params=params, payload=payload)
+    loaded = dataset.load(run_date=date(2024, 1, 2), params=params)
+
+    assert loaded is not None
+    verdict = loaded.payload.watch_breakout_candidates[0].headline_verdict or ""
+    assert "is worth tracking" not in verdict
+    assert "值得跟踪，仍需突破确认后再执行。" in verdict
 
 
 def test_review_report_daily_save_and_load(tmp_path) -> None:

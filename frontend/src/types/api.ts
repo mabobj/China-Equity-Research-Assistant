@@ -313,6 +313,7 @@ export type ScreenerBatchRecord = {
   universe_size: number;
   scanned_size: number;
   rule_version: string;
+  batch_size: number | null;
   max_symbols: number | null;
   top_n: number | null;
   workflow_name: string;
@@ -338,10 +339,15 @@ export type ScreenerSymbolResult = {
   action_now: DecisionBriefActionNow | null;
   headline_verdict: string | null;
   evidence_hints: string[];
+  fail_reason: string | null;
 };
 
 export type ScreenerLatestBatchResponse = {
+  window_start: string;
+  window_end: string;
   batch: ScreenerBatchRecord | null;
+  results: ScreenerSymbolResult[];
+  total_results: number;
 };
 
 export type ScreenerBatchDetailResponse = {
@@ -356,6 +362,11 @@ export type ScreenerBatchResultsResponse = {
 export type ScreenerSymbolResultResponse = {
   batch: ScreenerBatchRecord;
   result: ScreenerSymbolResult;
+};
+
+export type ScreenerCursorResetResponse = {
+  reset_at: string;
+  message: string;
 };
 
 export type DeepScreenerCandidate = {
@@ -615,6 +626,9 @@ export type WorkflowRunResponse = {
   steps: WorkflowStepSummary[];
   final_output_summary: Record<string, unknown>;
   error_message: string | null;
+  accepted: boolean;
+  existing_run_id: string | null;
+  message: string | null;
   provider_used: string | null;
   provider_candidates: string[];
   fallback_applied: boolean;
@@ -647,6 +661,7 @@ export type DeepReviewWorkflowRunRequest = {
 };
 
 export type ScreenerWorkflowRunRequest = {
+  batch_size?: number;
   max_symbols?: number;
   top_n?: number;
   force_refresh?: boolean;

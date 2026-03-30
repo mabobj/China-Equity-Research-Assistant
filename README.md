@@ -185,16 +185,21 @@ python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/te
 
 当前 `/screener` 主链路已支持：
 - 初筛互斥运行：同一时刻仅允许一个 `screener_run` 处于 `running`。
-- 批次台账落盘：每次初筛会生成批次记录与股票明细结果。
-- 结果可回看：支持按批次查询摘要、结果列表和单股票详情。
+- 游标分批执行：每次运行仅处理当前游标窗口内的 `batch_size` 支股票。
+- 批次台账落盘：每次初筛会生成新的批次记录与股票明细结果，可追溯历史。
+- 结果可回看：支持按批次查询摘要、结果列表和单股票详情，并支持列过滤。
 
 新增接口：
+- `POST /workflows/screener/run`（主输入：`batch_size`，兼容 `max_symbols/top_n`）
 - `GET /screener/latest-batch`
 - `GET /screener/batches/{batch_id}`
 - `GET /screener/batches/{batch_id}/results`
 - `GET /screener/batches/{batch_id}/results/{symbol}`
+- `POST /screener/cursor/reset`
 
-批次规则：
-- 手动触发初筛后写入批次记录。
-- 本地时间 17:00 后触发时，默认归属当日收盘后批次。
-- 前端默认展示最新可查看批次（优先已完成批次）。
+展示窗口与游标规则（Asia/Shanghai）：
+- `17:00` 后首次触发初筛会自动重置游标，从首支股票开始。
+- `17:00` 前默认不重置游标；若当前窗口已跑完，会提示等待下一个 `17:00` 窗口。
+- 当前时间 `<17:00`：展示“前一日 `17:00`（含）~ 当日 `17:00`（不含）”计算完成股票。
+- 当前时间 `>=17:00`：展示“当日 `17:00`（含）~ 当前时刻”计算完成股票。
+- 同一展示窗口内，默认按每只股票“最新一条结果”展示；历史记录仍保留可查。

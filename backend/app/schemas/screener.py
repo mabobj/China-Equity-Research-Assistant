@@ -130,6 +130,7 @@ class ScreenerBatchRecord(BaseModel):
     universe_size: int = Field(default=0, ge=0)
     scanned_size: int = Field(default=0, ge=0)
     rule_version: str
+    batch_size: Optional[int] = Field(default=None, ge=1)
     max_symbols: Optional[int] = Field(default=None, ge=1)
     top_n: Optional[int] = Field(default=None, ge=1)
     workflow_name: str = "screener_run"
@@ -165,6 +166,7 @@ class ScreenerSymbolResult(BaseModel):
     ]] = None
     headline_verdict: Optional[str] = None
     evidence_hints: list[str] = Field(default_factory=list)
+    fail_reason: Optional[str] = None
 
 
 class ScreenerLatestBatchResponse(BaseModel):
@@ -172,7 +174,20 @@ class ScreenerLatestBatchResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    window_start: datetime
+    window_end: datetime
     batch: Optional[ScreenerBatchRecord] = None
+    results: list[ScreenerSymbolResult] = Field(default_factory=list)
+    total_results: int = Field(default=0, ge=0)
+
+
+class ScreenerCursorResetResponse(BaseModel):
+    """初筛游标重置结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reset_at: datetime
+    message: str
 
 
 class ScreenerBatchDetailResponse(BaseModel):

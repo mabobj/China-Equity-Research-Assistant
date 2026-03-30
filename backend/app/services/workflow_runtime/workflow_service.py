@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 import logging
+from threading import Lock
 from typing import Any, Callable
 from uuid import uuid4
 
-from app.schemas.screener import ScreenerRunResponse
 from app.schemas.workflow import (
     DeepReviewWorkflowRunRequest,
     ScreenerWorkflowRunRequest,
@@ -40,6 +40,7 @@ class WorkflowRuntimeService:
         artifact_store: FileWorkflowArtifactStore,
         background_executor: ThreadPoolExecutor | None = None,
         screener_batch_service: Any | None = None,
+        stale_running_timeout_seconds: int = 60,
     ) -> None:
         self._registry = registry
         self._executor = executor
@@ -49,6 +50,11 @@ class WorkflowRuntimeService:
             thread_name_prefix="workflow-runtime",
         )
         self._screener_batch_service = screener_batch_service
+        self._stale_running_timeout = timedelta(
+            seconds=max(stale_running_timeout_seconds, 30)
+        )
+        self._active_futures: dict[str, Future] = {}
+        self._future_lock = Lock()
 
     def run_single_stock_workflow(
         self,
@@ -70,9 +76,8 @@ class WorkflowRuntimeService:
         request: ScreenerWorkflowRunRequest,
     ) -> WorkflowRunResponse:
         definition = self._registry.get_definition("screener_run")
-        running_artifact = self._artifact_store.find_latest_run(
-            workflow_name=definition.name,
-            status="running",
+        running_artifact = self._find_valid_running_artifact(
+            workflow_name=definition.name
         )
         if running_artifact is not None:
             return self._build_existing_running_response(running_artifact)
@@ -80,8 +85,10 @@ class WorkflowRuntimeService:
         def _on_started(artifact: WorkflowArtifact) -> None:
             if self._screener_batch_service is None:
                 return
+            batch_size = self._resolve_screener_batch_size(request)
             self._screener_batch_service.create_running_batch(
                 run_id=artifact.run_id,
+                batch_size=batch_size,
                 max_symbols=request.max_symbols,
                 top_n=request.top_n,
                 started_at=artifact.started_at,
@@ -131,6 +138,9 @@ class WorkflowRuntimeService:
                 "final_output_summary": artifact.final_output_summary,
                 "final_output": artifact.final_output,
                 "error_message": artifact.error_message,
+                "accepted": True,
+                "existing_run_id": None,
+                "message": None,
                 **visibility,
             }
         )
@@ -168,7 +178,7 @@ class WorkflowRuntimeService:
                     definition.name,
                     run_id,
                 )
-        self._background_executor.submit(
+        future = self._background_executor.submit(
             self._run_background_workflow,
             definition,
             validated_request,
@@ -176,6 +186,8 @@ class WorkflowRuntimeService:
             started_at,
             on_completed,
         )
+        with self._future_lock:
+            self._active_futures[run_id] = future
         visibility = self._build_runtime_visibility(
             workflow_name=definition.name,
             input_summary=initial_artifact.input_summary,
@@ -193,6 +205,9 @@ class WorkflowRuntimeService:
                 "steps": [],
                 "final_output_summary": {},
                 "error_message": None,
+                "accepted": True,
+                "existing_run_id": None,
+                "message": None,
                 **visibility,
             }
         )
@@ -220,6 +235,9 @@ class WorkflowRuntimeService:
                 run_id,
             )
             return
+        finally:
+            with self._future_lock:
+                self._active_futures.pop(run_id, None)
         if on_completed is None:
             return
         try:
@@ -254,6 +272,9 @@ class WorkflowRuntimeService:
                 "steps": self._to_step_summaries(result.steps),
                 "final_output_summary": result.final_output_summary,
                 "error_message": result.error_message,
+                "accepted": True,
+                "existing_run_id": None,
+                "message": None,
                 **visibility,
             }
         )
@@ -291,10 +312,19 @@ class WorkflowRuntimeService:
             or debate_payload.get("runtime_mode")
             or requested_mode
         )
-        failed_symbols = self._extract_failed_symbols(final_output_summary=final_output_summary)
-        fallback_applied = bool(debate_payload.get("fallback_applied")) or bool(failed_symbols)
+        failed_symbols = self._extract_failed_symbols(
+            final_output_summary=final_output_summary
+        )
+        fallback_applied = bool(debate_payload.get("fallback_applied")) or bool(
+            failed_symbols
+        )
         fallback_reason = debate_payload.get("fallback_reason")
         warning_messages = list(debate_payload.get("warning_messages") or [])
+        summary_warnings = final_output_summary.get("warning_messages")
+        if isinstance(summary_warnings, list):
+            warning_messages.extend(
+                str(item) for item in summary_warnings if isinstance(item, str)
+            )
 
         if failed_symbols:
             if fallback_reason is None:
@@ -341,6 +371,9 @@ class WorkflowRuntimeService:
                 "steps": self._to_step_summaries(artifact.steps),
                 "final_output_summary": artifact.final_output_summary,
                 "error_message": artifact.error_message,
+                "accepted": False,
+                "existing_run_id": artifact.run_id,
+                "message": "已有运行中的初筛任务，请等待当前任务完成。",
                 **visibility,
             }
         )
@@ -368,3 +401,63 @@ class WorkflowRuntimeService:
             if isinstance(item, str) and item:
                 symbols.append(item)
         return symbols
+
+    def _find_valid_running_artifact(self, *, workflow_name: str) -> WorkflowArtifact | None:
+        running = self._artifact_store.find_latest_run(
+            workflow_name=workflow_name,
+            status="running",
+        )
+        if running is None:
+            return None
+
+        with self._future_lock:
+            future = self._active_futures.get(running.run_id)
+            if future is not None and not future.done():
+                return running
+            if future is not None and future.done():
+                self._active_futures.pop(running.run_id, None)
+
+        now = datetime.now(timezone.utc)
+        if now - running.started_at < self._stale_running_timeout:
+            return running
+
+        self._mark_stale_running_artifact_failed(running, finished_at=now)
+        return None
+
+    def _mark_stale_running_artifact_failed(
+        self,
+        artifact: WorkflowArtifact,
+        *,
+        finished_at: datetime,
+    ) -> None:
+        reason = "检测到陈旧的运行中记录，系统已自动标记为失败并允许重新发起任务。"
+        failed_artifact = WorkflowArtifact(
+            run_id=artifact.run_id,
+            workflow_name=artifact.workflow_name,
+            status="failed",
+            started_at=artifact.started_at,
+            finished_at=finished_at,
+            input_summary=artifact.input_summary,
+            steps=artifact.steps,
+            final_output_summary=artifact.final_output_summary,
+            final_output=artifact.final_output,
+            error_message=artifact.error_message or reason,
+        )
+        self._artifact_store.save_artifact(failed_artifact)
+        if self._screener_batch_service is None:
+            return
+        self._screener_batch_service.finalize_batch(
+            run_id=artifact.run_id,
+            status="failed",
+            finished_at=finished_at,
+            final_output=artifact.final_output,
+            final_output_summary=artifact.final_output_summary,
+            error_message=reason,
+        )
+
+    def _resolve_screener_batch_size(self, request: ScreenerWorkflowRunRequest) -> int:
+        if request.batch_size is not None:
+            return request.batch_size
+        if request.max_symbols is not None:
+            return request.max_symbols
+        return 50

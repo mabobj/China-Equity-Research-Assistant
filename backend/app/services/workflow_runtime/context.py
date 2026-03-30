@@ -21,6 +21,7 @@ class WorkflowContext:
     stop_after: str | None = None
     use_llm: bool | None = None
     node_outputs: dict[str, BaseModel] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
 
     def set_output(self, node_name: str, output: BaseModel) -> None:
         self.node_outputs[node_name] = output
@@ -50,3 +51,9 @@ class WorkflowContext:
         if isinstance(self.request, request_type):
             return self.request
         return request_type.model_validate(self.request)
+
+    def set_meta(self, key: str, value: object) -> None:
+        self.metadata[key] = value
+
+    def get_meta(self, key: str) -> object | None:
+        return self.metadata.get(key)

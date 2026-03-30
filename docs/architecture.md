@@ -162,14 +162,19 @@ backend/app/services/screener_service/batch_service.py
 
 设计要点：
 - `screener_run` 增加业务级互斥，运行中再次触发会复用 existing run。
-- workflow 完成后将 `final_output` 落盘为批次摘要 + 股票结果明细。
-- 默认交易日归属规则：
-- 17:00 后触发：归属当日批次
-- 17:00 前触发：归属最近已收盘交易日
-- 前端 `/screener` 以“运行状态 + 最新批次 + 结果详情”方式展示。
+- `screener_run` 主输入收敛为 `batch_size`，一次仅处理当前游标窗口内的固定数量股票（兼容 `max_symbols/top_n`）。
+- workflow 完成后将 `final_output` 落盘为批次摘要 + 股票结果明细；每次运行生成新 `batch_id`，不覆盖历史。
+- `17:00` 后首次触发会自动重置游标；`17:00` 前不自动重置，跑到尾部时返回受控提示。
+- `/screener/latest-batch` 按时间窗口聚合展示：
+  - `<17:00`：前一日 `17:00`（含）~ 当日 `17:00`（不含）
+  - `>=17:00`：当日 `17:00`（含）~ 当前时刻
+- 聚合结果默认按每只股票“最新一条”展示，历史明细保留在批次结果文件中。
+- 前端 `/screener` 以“运行状态 + 当前窗口批次摘要 + 可筛选结果表 + 单股详情”方式展示。
 
 查询接口：
+- `POST /workflows/screener/run`
 - `GET /screener/latest-batch`
 - `GET /screener/batches/{batch_id}`
 - `GET /screener/batches/{batch_id}/results`
 - `GET /screener/batches/{batch_id}/results/{symbol}`
+- `POST /screener/cursor/reset`

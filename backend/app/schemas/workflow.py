@@ -88,6 +88,7 @@ class DeepReviewWorkflowRunRequest(WorkflowRunRequest):
 class ScreenerWorkflowRunRequest(WorkflowRunRequest):
     """初筛 workflow 请求。"""
 
+    batch_size: Optional[int] = Field(default=None, ge=1)
     max_symbols: Optional[int] = Field(default=None, ge=1)
     top_n: Optional[int] = Field(default=None, ge=1)
     force_refresh: Optional[bool] = None
@@ -187,6 +188,9 @@ class WorkflowRunResponse(BaseModel):
     steps: list[WorkflowStepSummary] = Field(default_factory=list)
     final_output_summary: dict[str, Any] = Field(default_factory=dict)
     error_message: Optional[str] = None
+    accepted: bool = True
+    existing_run_id: Optional[str] = None
+    message: Optional[str] = None
     provider_used: Optional[str] = None
     provider_candidates: list[str] = Field(default_factory=list)
     fallback_applied: bool = False

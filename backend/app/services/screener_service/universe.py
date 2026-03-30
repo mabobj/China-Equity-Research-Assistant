@@ -23,6 +23,9 @@ def load_scan_universe(
             continue
         filtered_items.append(item)
 
+    # 固定排序，避免同参数多次运行时扫描集合漂移。
+    filtered_items.sort(key=lambda item: item.symbol)
+
     if max_symbols is not None:
         filtered_items = filtered_items[: max(max_symbols, 0)]
 

@@ -511,6 +511,7 @@ def get_workflow_runtime_service(
             build_screener_workflow_definition(
                 screener_pipeline=screener_pipeline,
                 screener_snapshot_daily=screener_snapshot_daily,
+                market_data_service=get_market_data_service(),
             ),
         )
     )

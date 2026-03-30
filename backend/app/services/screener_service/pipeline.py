@@ -22,6 +22,7 @@ from app.services.screener_service.scoring import (
     score_factor_snapshot,
     score_technical_snapshot,
 )
+from app.services.screener_service.texts import build_headline_verdict
 from app.services.screener_service.universe import load_scan_universe
 
 if TYPE_CHECKING:
@@ -63,14 +64,23 @@ class ScreenerPipeline:
         max_symbols: Optional[int] = None,
         top_n: Optional[int] = None,
         force_refresh: bool = False,
+        scan_items: Optional[list[UniverseItem]] = None,
+        total_symbols_override: Optional[int] = None,
     ) -> ScreenerRunResponse:
         started_at = perf_counter()
 
         with self._market_data_service.session_scope():
-            total_symbols, scan_items = load_scan_universe(
-                market_data_service=self._market_data_service,
-                max_symbols=max_symbols,
-            )
+            if scan_items is None:
+                total_symbols, scan_items = load_scan_universe(
+                    market_data_service=self._market_data_service,
+                    max_symbols=max_symbols,
+                )
+            else:
+                total_symbols = (
+                    total_symbols_override
+                    if total_symbols_override is not None
+                    else len(scan_items)
+                )
             scanned_symbols = len(scan_items)
             candidates: list[ScreenerCandidate] = []
             latest_as_of_date: Optional[date] = None
@@ -357,7 +367,11 @@ def _build_candidate(
         calculated_at=datetime.now(timezone.utc),
         rule_version=_RULE_VERSION,
         rule_summary=_RULE_SUMMARY,
-        headline_verdict=_build_headline_verdict(item.name, v2_list_type, score_result.short_reason),
+        headline_verdict=build_headline_verdict(
+            item.name,
+            v2_list_type,
+            score_result.short_reason,
+        ),
         action_now=_build_action_now(v2_list_type),
         evidence_hints=evidence_hints[:3],
     )
@@ -372,19 +386,6 @@ def _build_action_now(v2_list_type: str) -> str:
         "AVOID": "AVOID",
     }
     return mapping.get(v2_list_type, "RESEARCH_ONLY")
-
-
-def _build_headline_verdict(name: str, v2_list_type: str, short_reason: str) -> str:
-    prefix_map = {
-        "READY_TO_BUY": f"{name} is actionable now, but still needs execution discipline.",
-        "WATCH_PULLBACK": f"{name} is worth tracking, but the better setup is a pullback.",
-        "WATCH_BREAKOUT": f"{name} is worth tracking, but breakout confirmation is still needed.",
-        "RESEARCH_ONLY": f"{name} made the research list, but not the trading list yet.",
-        "AVOID": f"{name} stays on the avoid side for now.",
-    }
-    prefix = prefix_map.get(v2_list_type, f"{name} needs more confirmation.")
-    return f"{prefix} {short_reason}".strip()
-
 
 def _safe_get_financial_summary(
     market_data_service: MarketDataService,

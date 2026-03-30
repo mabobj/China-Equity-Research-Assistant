@@ -6,7 +6,11 @@ from datetime import date, datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_screener_batch_service, get_screener_pipeline
+from app.api.dependencies import (
+    get_market_data_service,
+    get_screener_batch_service,
+    get_screener_pipeline,
+)
 from app.main import app
 from app.schemas.screener import (
     ScreenerBatchRecord,
@@ -74,6 +78,7 @@ class StubScreenerBatchService:
             universe_size=120,
             scanned_size=118,
             rule_version="screener_workflow_v1",
+            batch_size=120,
             max_symbols=120,
             top_n=30,
             warning_messages=[],
@@ -98,11 +103,19 @@ class StubScreenerBatchService:
                 action_now="BUY_NOW",
                 headline_verdict="当前可执行，但需要纪律。",
                 evidence_hints=["趋势评分占优"],
+                fail_reason=None,
             )
         ]
 
     def get_latest_batch(self):
         return self.batch
+
+    def load_window_results(self):
+        return (
+            datetime(2026, 3, 29, 17, 0, tzinfo=timezone.utc),
+            datetime(2026, 3, 29, 18, 0, tzinfo=timezone.utc),
+            self.results,
+        )
 
     def load_batch(self, batch_id: str):
         if batch_id == self.batch.batch_id:
@@ -124,6 +137,14 @@ class StubScreenerBatchService:
 
 
 client = TestClient(app)
+
+
+class StubMarketDataService:
+    def __init__(self) -> None:
+        self.storage: dict[str, str | None] = {}
+
+    def set_refresh_cursor(self, cursor_key: str, cursor_value: str | None) -> None:
+        self.storage[cursor_key] = cursor_value
 
 
 def test_run_screener_route_returns_structured_payload() -> None:
@@ -149,6 +170,10 @@ def test_screener_latest_batch_route_returns_latest_batch() -> None:
     payload = response.json()
     assert payload["batch"]["batch_id"] == "batch-20260329-01"
     assert payload["batch"]["run_id"] == "run-screener-001"
+    assert payload["total_results"] == 1
+    assert payload["results"][0]["symbol"] == "600519.SH"
+    assert "window_start" in payload
+    assert "window_end" in payload
 
     app.dependency_overrides.clear()
 
@@ -176,5 +201,18 @@ def test_screener_batch_symbol_route_returns_single_symbol_result() -> None:
     payload = response.json()
     assert payload["result"]["symbol"] == "600519.SH"
     assert payload["result"]["list_type"] == "READY_TO_BUY"
+
+    app.dependency_overrides.clear()
+
+
+def test_reset_screener_cursor_route_returns_ok() -> None:
+    app.dependency_overrides[get_market_data_service] = lambda: StubMarketDataService()
+
+    response = client.post("/screener/cursor/reset")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "reset_at" in payload
+    assert "初筛游标已重置" in payload["message"]
 
     app.dependency_overrides.clear()

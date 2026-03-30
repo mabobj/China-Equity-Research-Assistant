@@ -17,6 +17,7 @@ def test_batch_service_persists_batch_and_symbol_results(tmp_path) -> None:
     started_at = datetime(2026, 3, 29, 17, 5, tzinfo=ZoneInfo("Asia/Shanghai"))
     batch = service.create_running_batch(
         run_id="run-001",
+        batch_size=60,
         max_symbols=120,
         top_n=30,
         started_at=started_at,
@@ -103,3 +104,260 @@ def test_resolve_screener_trade_date_before_1700_uses_last_closed_day() -> None:
         now=datetime(2026, 3, 30, 16, 55, tzinfo=ZoneInfo("Asia/Shanghai"))
     )
     assert resolved == date(2026, 3, 27)
+
+
+def test_batch_service_returns_latest_completed_batch_by_time(tmp_path) -> None:
+    service = ScreenerBatchService(root_dir=tmp_path)
+    started_a = datetime(2026, 3, 29, 17, 1, tzinfo=ZoneInfo("Asia/Shanghai"))
+    started_b = datetime(2026, 3, 29, 17, 3, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    batch_a = service.create_running_batch(
+        run_id="run-a",
+        batch_size=50,
+        max_symbols=50,
+        top_n=20,
+        started_at=started_a,
+    )
+    batch_b = service.create_running_batch(
+        run_id="run-b",
+        batch_size=50,
+        max_symbols=50,
+        top_n=20,
+        started_at=started_b,
+    )
+
+    service.finalize_batch(
+        run_id="run-a",
+        status="completed",
+        finished_at=started_a,
+        final_output=None,
+        final_output_summary={},
+        error_message=None,
+    )
+    service.finalize_batch(
+        run_id="run-b",
+        status="completed",
+        finished_at=started_b,
+        final_output=None,
+        final_output_summary={},
+        error_message=None,
+    )
+
+    latest = service.get_latest_batch()
+    assert latest is not None
+    assert latest.batch_id == batch_b.batch_id
+    assert latest.batch_id != batch_a.batch_id
+
+
+def test_batch_service_localizes_legacy_english_headline(tmp_path) -> None:
+    service = ScreenerBatchService(root_dir=tmp_path)
+    started_at = datetime(2026, 3, 29, 17, 5, tzinfo=ZoneInfo("Asia/Shanghai"))
+    service.create_running_batch(
+        run_id="run-legacy",
+        batch_size=50,
+        max_symbols=50,
+        top_n=20,
+        started_at=started_at,
+    )
+
+    output = ScreenerRunResponse(
+        as_of_date=date(2026, 3, 28),
+        freshness_mode="computed",
+        source_mode="pipeline",
+        total_symbols=50,
+        scanned_symbols=50,
+        buy_candidates=[],
+        watch_candidates=[],
+        avoid_candidates=[],
+        ready_to_buy_candidates=[],
+        watch_pullback_candidates=[],
+        watch_breakout_candidates=[
+            ScreenerCandidate(
+                symbol="000045.SZ",
+                name="深纺织Ａ",
+                list_type="WATCHLIST",
+                v2_list_type="WATCH_BREAKOUT",
+                rank=1,
+                screener_score=70,
+                alpha_score=65,
+                trigger_score=66,
+                risk_score=45,
+                trend_state="up",
+                trend_score=82,
+                latest_close=12.3,
+                support_level=11.5,
+                resistance_level=12.8,
+                top_positive_factors=["短期趋势改善"],
+                top_negative_factors=["财务字段缺失较多"],
+                risk_notes=["财务字段缺失较多"],
+                short_reason="优势: 短期趋势改善 | 风险: 财务字段缺失较多",
+                headline_verdict=(
+                    "深纺织Ａ is worth tracking, but breakout confirmation is still needed. "
+                    "优势: 短期趋势改善 | 风险: 财务字段缺失较多"
+                ),
+            )
+        ],
+        research_only_candidates=[],
+    )
+
+    service.finalize_batch(
+        run_id="run-legacy",
+        status="completed",
+        finished_at=started_at,
+        final_output=output.model_dump(mode="json"),
+        final_output_summary={},
+        error_message=None,
+    )
+
+    latest = service.get_latest_batch()
+    assert latest is not None
+    rows = service.load_batch_results(latest.batch_id)
+    assert rows
+    assert "is worth tracking" not in (rows[0].headline_verdict or "")
+    assert "值得跟踪，仍需突破确认后再执行。" in (rows[0].headline_verdict or "")
+
+
+def test_finalize_failed_will_not_override_completed_batch(tmp_path) -> None:
+    service = ScreenerBatchService(root_dir=tmp_path)
+    started_at = datetime(2026, 3, 29, 18, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    created = service.create_running_batch(
+        run_id="run-keep-completed",
+        batch_size=30,
+        max_symbols=30,
+        top_n=10,
+        started_at=started_at,
+    )
+
+    service.finalize_batch(
+        run_id="run-keep-completed",
+        status="completed",
+        finished_at=started_at,
+        final_output=None,
+        final_output_summary={},
+        error_message=None,
+    )
+    preserved = service.finalize_batch(
+        run_id="run-keep-completed",
+        status="failed",
+        finished_at=started_at,
+        final_output=None,
+        final_output_summary={},
+        error_message="stale",
+    )
+
+    assert preserved is not None
+    assert preserved.status == "completed"
+    stored = service.load_batch(created.batch_id)
+    assert stored is not None
+    assert stored.status == "completed"
+
+
+def test_get_display_window_before_1700_uses_previous_1700_to_today_1700(tmp_path) -> None:
+    service = ScreenerBatchService(root_dir=tmp_path)
+    window_start, window_end = service.get_display_window(
+        now=datetime(2026, 3, 30, 16, 59, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+    assert window_start == datetime(2026, 3, 29, 17, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    assert window_end == datetime(2026, 3, 30, 17, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+
+def test_get_display_window_after_1700_uses_today_1700_to_now(tmp_path) -> None:
+    service = ScreenerBatchService(root_dir=tmp_path)
+    now = datetime(2026, 3, 30, 17, 1, tzinfo=ZoneInfo("Asia/Shanghai"))
+    window_start, window_end = service.get_display_window(now=now)
+    assert window_start == datetime(2026, 3, 30, 17, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    assert window_end == now
+
+
+def test_load_window_results_keeps_latest_record_per_symbol(tmp_path) -> None:
+    service = ScreenerBatchService(root_dir=tmp_path)
+    started_a = datetime(2026, 3, 30, 17, 1, tzinfo=ZoneInfo("Asia/Shanghai"))
+    started_b = datetime(2026, 3, 30, 17, 3, tzinfo=ZoneInfo("Asia/Shanghai"))
+    batch_a = service.create_running_batch(
+        run_id="run-window-a",
+        batch_size=20,
+        max_symbols=20,
+        top_n=None,
+        started_at=started_a,
+    )
+    batch_b = service.create_running_batch(
+        run_id="run-window-b",
+        batch_size=20,
+        max_symbols=20,
+        top_n=None,
+        started_at=started_b,
+    )
+
+    candidate_a = ScreenerCandidate(
+        symbol="600519.SH",
+        name="贵州茅台",
+        list_type="WATCHLIST",
+        v2_list_type="WATCH_BREAKOUT",
+        rank=1,
+        screener_score=70,
+        alpha_score=66,
+        trigger_score=65,
+        risk_score=43,
+        trend_state="up",
+        trend_score=72,
+        latest_close=1670.0,
+        support_level=1620.0,
+        resistance_level=1680.0,
+        top_positive_factors=[],
+        top_negative_factors=[],
+        risk_notes=[],
+        short_reason="趋势尚可，等待突破确认。",
+        calculated_at=started_a,
+    )
+    candidate_b = candidate_a.model_copy(
+        update={
+            "screener_score": 76,
+            "short_reason": "趋势继续改善，等待突破确认。",
+            "calculated_at": started_b,
+        }
+    )
+    output_a = ScreenerRunResponse(
+        as_of_date=date(2026, 3, 30),
+        freshness_mode="computed",
+        source_mode="pipeline",
+        total_symbols=20,
+        scanned_symbols=20,
+        buy_candidates=[],
+        watch_candidates=[],
+        avoid_candidates=[],
+        ready_to_buy_candidates=[],
+        watch_pullback_candidates=[],
+        watch_breakout_candidates=[candidate_a],
+        research_only_candidates=[],
+    )
+    output_b = output_a.model_copy(
+        update={
+            "watch_breakout_candidates": [candidate_b],
+        }
+    )
+    service.finalize_batch(
+        run_id="run-window-a",
+        status="completed",
+        finished_at=started_a,
+        final_output=output_a.model_dump(mode="json"),
+        final_output_summary={},
+        error_message=None,
+    )
+    service.finalize_batch(
+        run_id="run-window-b",
+        status="completed",
+        finished_at=started_b,
+        final_output=output_b.model_dump(mode="json"),
+        final_output_summary={},
+        error_message=None,
+    )
+
+    window_start, window_end, rows = service.load_window_results(
+        now=datetime(2026, 3, 30, 17, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+    assert window_start == datetime(2026, 3, 30, 17, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    assert window_end == datetime(2026, 3, 30, 17, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    assert len(rows) == 1
+    assert rows[0].batch_id == batch_b.batch_id
+    assert rows[0].screener_score == 76
+    assert rows[0].batch_id != batch_a.batch_id

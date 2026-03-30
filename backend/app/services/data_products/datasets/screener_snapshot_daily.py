@@ -5,10 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from app.schemas.screener import ScreenerRunResponse
+from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.services.data_products.base import DataProductResult
 from app.services.data_products.catalog import SCREENER_SNAPSHOT_DAILY
 from app.services.data_products.repository import DataProductRepository
+from app.services.screener_service.texts import (
+    ensure_chinese_headline_verdict,
+    ensure_chinese_short_reason,
+)
+
+_SCREENER_SNAPSHOT_VERSION = "20260329_cn_v2"
 
 
 @dataclass(frozen=True)
@@ -16,7 +22,12 @@ class ScreenerSnapshotParams:
     workflow_name: str
     max_symbols: int | None
     top_n: int | None
+    batch_size: int | None = None
+    cursor_start_symbol: str | None = None
+    cursor_start_index: int | None = None
+    reset_trade_date: str | None = None
     deep_top_k: int | None = None
+    snapshot_version: str = _SCREENER_SNAPSHOT_VERSION
 
 
 class ScreenerSnapshotDailyDataset:
@@ -40,7 +51,9 @@ class ScreenerSnapshotDailyDataset:
         )
         if cached is None:
             return None
-        payload = ScreenerRunResponse.model_validate(cached.payload)
+        payload = _normalize_screener_payload(
+            ScreenerRunResponse.model_validate(cached.payload)
+        )
         return DataProductResult(
             dataset=SCREENER_SNAPSHOT_DAILY,
             symbol=params.workflow_name,
@@ -59,6 +72,7 @@ class ScreenerSnapshotDailyDataset:
         payload: ScreenerRunResponse,
     ) -> DataProductResult[ScreenerRunResponse]:
         params_hash = self._params_hash(params)
+        normalized_payload = _normalize_screener_payload(payload)
         entry = self._repository.create_entry(
             dataset=SCREENER_SNAPSHOT_DAILY,
             symbol=params.workflow_name,
@@ -66,14 +80,14 @@ class ScreenerSnapshotDailyDataset:
             params_hash=params_hash,
             freshness_mode="computed",
             source_mode="snapshot",
-            payload=payload.model_dump(mode="json"),
+            payload=normalized_payload.model_dump(mode="json"),
         )
         self._repository.save(entry)
         return DataProductResult(
             dataset=SCREENER_SNAPSHOT_DAILY,
             symbol=params.workflow_name,
             as_of_date=run_date,
-            payload=payload,
+            payload=normalized_payload,
             freshness_mode="computed",
             source_mode="snapshot",
             updated_at=entry.updated_at,
@@ -85,6 +99,65 @@ class ScreenerSnapshotDailyDataset:
                 "workflow_name": params.workflow_name,
                 "max_symbols": params.max_symbols,
                 "top_n": params.top_n,
+                "batch_size": params.batch_size,
+                "cursor_start_symbol": params.cursor_start_symbol,
+                "cursor_start_index": params.cursor_start_index,
+                "reset_trade_date": params.reset_trade_date,
                 "deep_top_k": params.deep_top_k,
+                "snapshot_version": params.snapshot_version,
             }
         )
+
+
+def _normalize_screener_payload(payload: ScreenerRunResponse) -> ScreenerRunResponse:
+    return payload.model_copy(
+        update={
+            "buy_candidates": _normalize_candidates(payload.buy_candidates),
+            "watch_candidates": _normalize_candidates(payload.watch_candidates),
+            "avoid_candidates": _normalize_candidates(payload.avoid_candidates),
+            "ready_to_buy_candidates": _normalize_candidates(
+                payload.ready_to_buy_candidates
+            ),
+            "watch_pullback_candidates": _normalize_candidates(
+                payload.watch_pullback_candidates
+            ),
+            "watch_breakout_candidates": _normalize_candidates(
+                payload.watch_breakout_candidates
+            ),
+            "research_only_candidates": _normalize_candidates(
+                payload.research_only_candidates
+            ),
+        }
+    )
+
+
+def _normalize_candidates(
+    candidates: list[ScreenerCandidate],
+) -> list[ScreenerCandidate]:
+    normalized: list[ScreenerCandidate] = []
+    for candidate in candidates:
+        short_reason = ensure_chinese_short_reason(
+            list_type=candidate.v2_list_type,
+            short_reason=candidate.short_reason,
+        )
+        headline_verdict = ensure_chinese_headline_verdict(
+            name=candidate.name,
+            list_type=candidate.v2_list_type,
+            short_reason=short_reason,
+            headline_verdict=candidate.headline_verdict,
+        )
+        if (
+            headline_verdict == candidate.headline_verdict
+            and short_reason == candidate.short_reason
+        ):
+            normalized.append(candidate)
+            continue
+        normalized.append(
+            candidate.model_copy(
+                update={
+                    "short_reason": short_reason,
+                    "headline_verdict": headline_verdict,
+                }
+            )
+        )
+    return normalized

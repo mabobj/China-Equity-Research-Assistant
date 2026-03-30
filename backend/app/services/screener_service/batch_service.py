@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 import json
 from pathlib import Path
 from threading import Lock
@@ -16,6 +16,10 @@ from app.schemas.screener import (
     ScreenerSymbolResult,
 )
 from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.screener_service.texts import (
+    ensure_chinese_headline_verdict,
+    ensure_chinese_short_reason,
+)
 
 _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 _DEFAULT_RULE_VERSION = "screener_workflow_v1"
@@ -39,6 +43,7 @@ class ScreenerBatchService:
         self,
         *,
         run_id: str,
+        batch_size: int | None,
         max_symbols: int | None,
         top_n: int | None,
         started_at: datetime,
@@ -57,6 +62,7 @@ class ScreenerBatchService:
             universe_size=0,
             scanned_size=0,
             rule_version=rule_version,
+            batch_size=batch_size,
             max_symbols=max_symbols,
             top_n=top_n,
         )
@@ -83,6 +89,8 @@ class ScreenerBatchService:
             current = self.load_batch(batch_id)
             if current is None:
                 return None
+            if current.status == "completed" and status == "failed":
+                return current
 
             screener_output = self._parse_screener_output(final_output)
             warnings = self._extract_warnings(final_output_summary)
@@ -118,28 +126,109 @@ class ScreenerBatchService:
             self._save_batch_results(batch_id=batch_id, results=results)
             return record
 
-    def get_latest_batch(self) -> ScreenerBatchRecord | None:
-        records = self._load_all_batches()
+    def get_display_window(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[datetime, datetime]:
+        current = _to_shanghai_datetime(now)
+        reset_point = datetime.combine(current.date(), time(17, 0), tzinfo=_SHANGHAI_TZ)
+        if current >= reset_point:
+            return reset_point, current
+        return reset_point - timedelta(days=1), reset_point
+
+    def get_latest_batch(self, *, now: datetime | None = None) -> ScreenerBatchRecord | None:
+        window_start, window_end = self.get_display_window(now=now)
+        records = self.list_batches_in_window(window_start=window_start, window_end=window_end)
         if not records:
             return None
 
         completed = [item for item in records if item.status == "completed"]
-        if completed:
-            return sorted(
+        running = [item for item in records if item.status == "running"]
+
+        latest_completed = (
+            sorted(
                 completed,
                 key=lambda item: (
-                    item.trade_date,
-                    item.finished_at or item.started_at,
+                    self._batch_reference_time(item),
                     item.started_at,
+                    item.batch_id,
                 ),
                 reverse=True,
             )[0]
+            if completed
+            else None
+        )
+        latest_running = (
+            sorted(running, key=lambda item: (item.started_at, item.batch_id), reverse=True)[0]
+            if running
+            else None
+        )
 
+        if latest_running is not None and (
+            latest_completed is None
+            or latest_running.started_at >= latest_completed.started_at
+        ):
+            return latest_running
+        if latest_completed is not None:
+            return latest_completed
+        return records[0]
+
+    def list_batches(self) -> list[ScreenerBatchRecord]:
+        records = self._load_all_batches()
         return sorted(
             records,
-            key=lambda item: (item.started_at, item.trade_date),
+            key=lambda item: (self._batch_reference_time(item), item.started_at, item.batch_id),
             reverse=True,
-        )[0]
+        )
+
+    def list_batches_in_window(
+        self,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> list[ScreenerBatchRecord]:
+        records = self._load_all_batches()
+        filtered = [
+            item
+            for item in records
+            if window_start <= self._batch_reference_time(item) < window_end
+        ]
+        return sorted(
+            filtered,
+            key=lambda item: (self._batch_reference_time(item), item.started_at, item.batch_id),
+            reverse=True,
+        )
+
+    def load_window_results(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[datetime, datetime, list[ScreenerSymbolResult]]:
+        window_start, window_end = self.get_display_window(now=now)
+        records = self.list_batches_in_window(window_start=window_start, window_end=window_end)
+
+        latest_by_symbol: dict[str, ScreenerSymbolResult] = {}
+        for batch in records:
+            if batch.status not in {"completed", "failed"}:
+                continue
+            for result in self.load_batch_results(batch.batch_id):
+                key = result.symbol.upper()
+                current = latest_by_symbol.get(key)
+                if current is None:
+                    latest_by_symbol[key] = result
+                    continue
+                if _to_shanghai_datetime(result.calculated_at) >= _to_shanghai_datetime(
+                    current.calculated_at
+                ):
+                    latest_by_symbol[key] = result
+
+        merged = sorted(
+            latest_by_symbol.values(),
+            key=lambda item: (_to_shanghai_datetime(item.calculated_at), item.symbol),
+            reverse=True,
+        )
+        return window_start, window_end, merged
 
     def load_batch(self, batch_id: str) -> ScreenerBatchRecord | None:
         file_path = self._batch_file(batch_id)
@@ -152,7 +241,10 @@ class ScreenerBatchService:
         if not file_path.exists():
             return []
         payload = json.loads(file_path.read_text(encoding="utf-8"))
-        return [ScreenerSymbolResult.model_validate(item) for item in payload]
+        return [
+            _normalize_symbol_result(ScreenerSymbolResult.model_validate(item))
+            for item in payload
+        ]
 
     def load_symbol_result(self, batch_id: str, symbol: str) -> ScreenerSymbolResult | None:
         normalized = symbol.strip().upper()
@@ -166,7 +258,7 @@ class ScreenerBatchService:
         running = [item for item in records if item.status == "running"]
         if not running:
             return None
-        return sorted(running, key=lambda item: item.started_at, reverse=True)[0]
+        return sorted(running, key=lambda item: (item.started_at, item.batch_id), reverse=True)[0]
 
     def _load_all_batches(self) -> list[ScreenerBatchRecord]:
         records: list[ScreenerBatchRecord] = []
@@ -208,6 +300,10 @@ class ScreenerBatchService:
         candidates = _iter_unique_candidates(output)
         results: list[ScreenerSymbolResult] = []
         for candidate in candidates:
+            short_reason = ensure_chinese_short_reason(
+                list_type=candidate.v2_list_type,
+                short_reason=candidate.short_reason,
+            )
             results.append(
                 ScreenerSymbolResult(
                     batch_id=batch_id,
@@ -220,12 +316,17 @@ class ScreenerBatchService:
                     latest_close=candidate.latest_close,
                     support_level=candidate.support_level,
                     resistance_level=candidate.resistance_level,
-                    short_reason=candidate.short_reason,
+                    short_reason=short_reason,
                     calculated_at=candidate.calculated_at or calculated_at,
                     rule_version=candidate.rule_version or rule_version,
                     rule_summary=candidate.rule_summary or _DEFAULT_RULE_SUMMARY,
                     action_now=candidate.action_now,
-                    headline_verdict=candidate.headline_verdict,
+                    headline_verdict=ensure_chinese_headline_verdict(
+                        name=candidate.name,
+                        list_type=candidate.v2_list_type,
+                        short_reason=short_reason,
+                        headline_verdict=candidate.headline_verdict,
+                    ),
                     evidence_hints=candidate.evidence_hints,
                 )
             )
@@ -272,14 +373,25 @@ class ScreenerBatchService:
     def _run_index_file(self, run_id: str) -> Path:
         return self._run_index_dir / f"{run_id}.json"
 
+    def _batch_reference_time(self, record: ScreenerBatchRecord) -> datetime:
+        return _to_shanghai_datetime(record.finished_at or record.started_at)
+
 
 def resolve_screener_trade_date(now: datetime | None = None) -> date:
     """解析本次手动初筛应归属的交易日。"""
 
-    current = now.astimezone(_SHANGHAI_TZ) if now else datetime.now(_SHANGHAI_TZ)
+    current = _to_shanghai_datetime(now)
     if current.weekday() < 5 and current.hour >= 17:
         return current.date()
     return resolve_last_closed_trading_day(today=current.date())
+
+
+def _to_shanghai_datetime(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.now(_SHANGHAI_TZ)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=_SHANGHAI_TZ)
+    return value.astimezone(_SHANGHAI_TZ)
 
 
 def _iter_unique_candidates(output: ScreenerRunResponse) -> Iterable:
@@ -305,3 +417,24 @@ def _iter_unique_candidates(output: ScreenerRunResponse) -> Iterable:
             continue
         seen.add(key)
         yield item
+
+
+def _normalize_symbol_result(result: ScreenerSymbolResult) -> ScreenerSymbolResult:
+    short_reason = ensure_chinese_short_reason(
+        list_type=result.list_type,
+        short_reason=result.short_reason,
+    )
+    headline = ensure_chinese_headline_verdict(
+        name=result.name,
+        list_type=result.list_type,
+        short_reason=short_reason,
+        headline_verdict=result.headline_verdict,
+    )
+    if short_reason == result.short_reason and headline == result.headline_verdict:
+        return result
+    return result.model_copy(
+        update={
+            "short_reason": short_reason,
+            "headline_verdict": headline,
+        }
+    )

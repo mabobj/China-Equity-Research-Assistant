@@ -12,6 +12,7 @@ import type {
   ScreenerRunResponse,
   ScreenerBatchDetailResponse,
   ScreenerBatchResultsResponse,
+  ScreenerCursorResetResponse,
   ScreenerLatestBatchResponse,
   ScreenerSymbolResultResponse,
   ScreenerWorkflowRunRequest,
@@ -113,6 +114,14 @@ export async function getDeepScreenerRun(
 export async function getLatestScreenerBatch(): Promise<ScreenerLatestBatchResponse> {
   return fetchBackend<ScreenerLatestBatchResponse>("/screener/latest-batch", {
     timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+  });
+}
+
+export async function resetScreenerCursor(): Promise<ScreenerCursorResetResponse> {
+  return fetchBackend<ScreenerCursorResetResponse>("/screener/cursor/reset", {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    method: "POST",
+    body: {},
   });
 }
 
