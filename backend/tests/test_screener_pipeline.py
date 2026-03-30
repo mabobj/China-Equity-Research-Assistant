@@ -139,6 +139,30 @@ class FakeMarketDataService:
         )
 
 
+class FakeMarketDataServiceWithProviderNames(FakeMarketDataService):
+    """支持 provider_names 参数，用于验证批量优先级透传。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.provider_names_seen: list[tuple[str, ...]] = []
+
+    def get_daily_bars(
+        self,
+        symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        force_refresh: bool = False,
+        provider_names: Optional[tuple[str, ...]] = None,
+    ) -> DailyBarResponse:
+        if provider_names is not None:
+            self.provider_names_seen.append(provider_names)
+        return super().get_daily_bars(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+
 class FakeTechnicalAnalysisService:
     """用于选股器测试的假技术分析服务。"""
 
@@ -254,6 +278,25 @@ def test_run_screener_returns_compatible_and_v2_candidates() -> None:
     assert len(response.avoid_candidates) == 0
     assert market_data_service.session_scope_entered == 1
     assert len(market_data_service.requested_start_dates) == 3
+
+
+def test_run_screener_uses_mootdx_first_provider_priority() -> None:
+    """批量日线查询应优先 mootdx。"""
+    market_data_service = FakeMarketDataServiceWithProviderNames()
+    pipeline = ScreenerPipeline(
+        market_data_service=market_data_service,
+        technical_analysis_service=FakeTechnicalAnalysisService(),
+        factor_snapshot_service=FakeFactorSnapshotService(),
+    )
+
+    _ = pipeline.run_screener(max_symbols=2)
+
+    assert market_data_service.provider_names_seen
+    assert market_data_service.provider_names_seen[0] == (
+        "mootdx",
+        "baostock",
+        "akshare",
+    )
 
 
 def _build_bars(

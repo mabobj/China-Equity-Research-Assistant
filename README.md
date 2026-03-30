@@ -203,3 +203,28 @@ python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/te
 - 当前时间 `<17:00`：展示“前一日 `17:00`（含）~ 当日 `17:00`（不含）”计算完成股票。
 - 当前时间 `>=17:00`：展示“当日 `17:00`（含）~ 当前时刻”计算完成股票。
 - 同一展示窗口内，默认按每只股票“最新一条结果”展示；历史记录仍保留可查。
+## Data 清洗层 v0.1（bars）
+
+当前数据链路已补齐为：`provider raw -> bars cleaning contract -> data products/service`。  
+本轮仅对 `bars` 正式落地清洗，目标是“可追踪、可回退、可测试”。
+
+关键点：
+- 清洗入口位于 `backend/app/services/data_service/cleaning/bars.py`
+- 内部契约位于 `backend/app/services/data_service/contracts/bars.py`
+- `market_data_service.get_daily_bars()` 在 provider 返回后统一清洗，再入库与返回
+- 清洗摘要通过 `DailyBarResponse` 的可选字段暴露：
+  - `quality_status`
+  - `cleaning_warnings`
+  - `dropped_rows`
+  - `dropped_duplicate_rows`
+
+## 日线/分钟线/分时 provider 优先级
+
+对 `daily_bars / intraday_bars / timeline`，默认优先级已统一为：
+
+`mootdx -> baostock -> akshare`
+
+说明：
+- mootdx 为本地数据源，默认优先，命中后不再继续尝试后续 provider
+- 当上游 provider 返回异常或空结果时，系统会按顺序回退
+- 批量选股（screener）场景也已切换到相同优先级

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timedelta
 import logging
@@ -29,6 +30,8 @@ from app.schemas.research_inputs import (
     AnnouncementListResponse,
     FinancialSummary,
 )
+from app.services.data_service.cleaning.bars import clean_daily_bars
+from app.services.data_service.contracts.bars import DailyBarsCleaningSummary
 from app.services.data_service.exceptions import (
     DataNotFoundError,
     InvalidDateError,
@@ -49,6 +52,7 @@ from app.services.data_service.providers.base import (
 from app.services.data_products.freshness import resolve_last_closed_trading_day
 
 logger = logging.getLogger(__name__)
+_BAR_PROVIDER_PRIORITY = ("mootdx", "baostock", "akshare")
 
 
 class MarketDataService:
@@ -154,7 +158,7 @@ class MarketDataService:
             raise InvalidDateError("start_date cannot be later than end_date.")
 
         if self._local_store is None:
-            bars = self._load_daily_bars_from_providers(
+            remote_result = self._load_daily_bars_from_providers(
                 canonical_symbol,
                 normalized_start_date,
                 normalized_end_date,
@@ -163,13 +167,14 @@ class MarketDataService:
             logger.debug(
                 "market_data.daily_bars.done symbol=%s count=%s source_mode=provider_only",
                 canonical_symbol,
-                len(bars),
+                len(remote_result.bars),
             )
             return _build_daily_bar_response(
                 canonical_symbol,
                 normalized_start_date,
                 normalized_end_date,
-                bars,
+                remote_result.bars,
+                cleaning_summary=remote_result.cleaning_summary,
             )
 
         cached_bars = self._local_store.get_daily_bars(
@@ -256,7 +261,7 @@ class MarketDataService:
                 )
 
         try:
-            remote_bars = self._load_daily_bars_from_providers(
+            remote_result = self._load_daily_bars_from_providers(
                 canonical_symbol,
                 sync_start_date,
                 sync_end_date,
@@ -276,7 +281,7 @@ class MarketDataService:
                     cached_bars,
                 )
             raise
-        self._local_store.upsert_daily_bars(remote_bars)
+        self._local_store.upsert_daily_bars(remote_result.bars)
 
         if sync_start_date is not None and sync_end_date is not None:
             self._local_store.mark_range_covered(
@@ -302,6 +307,7 @@ class MarketDataService:
                 normalized_start_date,
                 normalized_end_date,
                 merged_bars,
+                cleaning_summary=remote_result.cleaning_summary,
             )
         if cached_bars:
             logger.debug(
@@ -599,15 +605,15 @@ class MarketDataService:
         if sync_start_date > sync_end_date:
             return 0
 
-        remote_bars = self._load_daily_bars_from_providers(
+        remote_result = self._load_daily_bars_from_providers(
             canonical_symbol,
             sync_start_date,
             sync_end_date,
         )
 
-        if self._local_store is not None and remote_bars:
-            self._local_store.upsert_daily_bars(remote_bars)
-            latest_synced_trade_date = max(bar.trade_date for bar in remote_bars)
+        if self._local_store is not None and remote_result.bars:
+            self._local_store.upsert_daily_bars(remote_result.bars)
+            latest_synced_trade_date = max(bar.trade_date for bar in remote_result.bars)
             if latest_synced_trade_date >= sync_start_date:
                 self._local_store.mark_range_covered(
                     DATASET_DAILY_BARS,
@@ -616,7 +622,7 @@ class MarketDataService:
                     latest_synced_trade_date,
                 )
 
-        return len(remote_bars)
+        return len(remote_result.bars)
 
     def get_refresh_cursor(self, cursor_key: str) -> Optional[str]:
         if self._local_store is None:
@@ -742,7 +748,7 @@ class MarketDataService:
         end_date: Optional[date],
         *,
         provider_names: Optional[Sequence[str]] = None,
-    ) -> list[DailyBar]:
+    ) -> "_DailyBarsFetchResult":
         providers = self._iter_available_providers(
             DAILY_BAR_CAPABILITY,
             provider_names=provider_names,
@@ -794,13 +800,41 @@ class MarketDataService:
                 )
                 continue
             if bars:
+                cleaned = clean_daily_bars(
+                    symbol=symbol,
+                    rows=bars,
+                    as_of_date=end_date,
+                    default_source=provider.name,
+                )
+                if cleaned.summary.warning_messages:
+                    logger.debug(
+                        "market_data.daily_bars.cleaning_warning symbol=%s provider=%s warnings=%s",
+                        symbol,
+                        provider.name,
+                        cleaned.summary.warning_messages,
+                    )
+                if not cleaned.bars:
+                    logger.debug(
+                        "market_data.daily_bars.provider_fail symbol=%s provider=%s reason=cleaned_empty",
+                        symbol,
+                        provider.name,
+                    )
+                    provider_errors.append(
+                        "{provider}: cleaned empty result".format(
+                            provider=provider.name,
+                        ),
+                    )
+                    continue
                 logger.debug(
                     "market_data.daily_bars.fallback_use symbol=%s provider=%s count=%s",
                     symbol,
                     provider.name,
-                    len(bars),
+                    len(cleaned.bars),
                 )
-                return bars
+                return _DailyBarsFetchResult(
+                    bars=cleaned.to_daily_bars(),
+                    cleaning_summary=cleaned.summary,
+                )
             logger.debug(
                 "market_data.daily_bars.provider_fail symbol=%s provider=%s reason=empty_result",
                 symbol,
@@ -817,7 +851,7 @@ class MarketDataService:
                     details=" | ".join(provider_errors) if provider_errors else str(last_error),
                 ),
             ) from last_error
-        return []
+        return _DailyBarsFetchResult(bars=[], cleaning_summary=None)
 
     def _load_intraday_bars_from_providers(
         self,
@@ -1044,11 +1078,23 @@ class MarketDataService:
                     capability=capability,
                 ),
             )
-        if provider_names:
-            preferred = {name: index for index, name in enumerate(provider_names)}
+        effective_provider_names: Sequence[str] | None = provider_names
+        if effective_provider_names is None and capability in {
+            DAILY_BAR_CAPABILITY,
+            INTRADAY_BAR_CAPABILITY,
+            TIMELINE_CAPABILITY,
+        }:
+            effective_provider_names = _BAR_PROVIDER_PRIORITY
+        if effective_provider_names:
+            preferred = {
+                name: index for index, name in enumerate(effective_provider_names)
+            }
             providers = sorted(
                 providers,
-                key=lambda provider: preferred.get(provider.name, len(preferred) + 100),
+                key=lambda provider: preferred.get(
+                    provider.name,
+                    len(preferred) + 100,
+                ),
             )
         logger.debug(
             "market_data.providers.selected capability=%s providers=%s",
@@ -1063,14 +1109,35 @@ def _build_daily_bar_response(
     start_date: Optional[date],
     end_date: Optional[date],
     bars: list[DailyBar],
+    *,
+    cleaning_summary: DailyBarsCleaningSummary | None = None,
 ) -> DailyBarResponse:
+    warning_messages: list[str] = []
+    quality_status: str | None = None
+    dropped_rows = 0
+    dropped_duplicate_rows = 0
+    if cleaning_summary is not None:
+        warning_messages = list(cleaning_summary.warning_messages)
+        quality_status = cleaning_summary.quality_status
+        dropped_rows = cleaning_summary.dropped_rows
+        dropped_duplicate_rows = cleaning_summary.dropped_duplicate_rows
     return DailyBarResponse(
         symbol=symbol,
         start_date=start_date,
         end_date=end_date,
         count=len(bars),
         bars=bars,
+        quality_status=quality_status,
+        cleaning_warnings=warning_messages,
+        dropped_rows=dropped_rows,
+        dropped_duplicate_rows=dropped_duplicate_rows,
     )
+
+
+@dataclass(frozen=True)
+class _DailyBarsFetchResult:
+    bars: list[DailyBar]
+    cleaning_summary: DailyBarsCleaningSummary | None
 
 
 def _parse_optional_date(value: Optional[str], field_name: str) -> Optional[date]:

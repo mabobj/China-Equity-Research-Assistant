@@ -178,3 +178,39 @@ backend/app/services/screener_service/batch_service.py
 - `GET /screener/batches/{batch_id}/results`
 - `GET /screener/batches/{batch_id}/results/{symbol}`
 - `POST /screener/cursor/reset`
+## Data 清洗层（v0.1，bars 先行）
+
+当前正式链路：
+
+`provider raw -> data_service.cleaning -> contracts -> market_data_service -> data_products`
+
+本轮已落地：
+- `backend/app/services/data_service/cleaning/`
+  - `symbol.py`：symbol/date 规范化
+  - `field_maps.py`：字段映射统一入口
+  - `types.py`：类型与单位归一化
+  - `rules.py`：行级业务校验
+  - `quality.py`：质量摘要聚合
+  - `bars.py`：bars 清洗总入口
+- `backend/app/services/data_service/contracts/bars.py`
+  - `CleanDailyBar`
+  - `CleanDailyBarsResult`
+  - `DailyBarsCleaningSummary`
+
+设计约束：
+- provider 层只负责“取数 + 基础解析”
+- 清洗与质量评估在 cleaning 层集中处理
+- service 层统一消费清洗结果，避免字段映射逻辑散落
+
+## mootdx 优先策略
+
+对以下 capability，默认 provider 优先级统一为：
+
+`mootdx -> baostock -> akshare`
+
+适用范围：
+- `daily_bars`
+- `intraday_bars`
+- `timeline`
+
+批量选股（screener pipeline）同样使用该优先级，保证“本地优先，缺失再回退”。

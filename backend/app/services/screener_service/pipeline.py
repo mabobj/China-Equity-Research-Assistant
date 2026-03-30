@@ -47,8 +47,8 @@ class ScreenerPipeline:
         lookback_days: int = 400,
         progress_log_interval: int = 100,
         batch_daily_bar_provider_priority: tuple[str, ...] = (
-            "baostock",
             "mootdx",
+            "baostock",
             "akshare",
         ),
     ) -> None:

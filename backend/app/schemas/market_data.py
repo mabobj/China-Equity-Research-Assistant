@@ -49,6 +49,10 @@ class DailyBarResponse(BaseModel):
     end_date: Optional[date] = None
     count: int = Field(ge=0)
     bars: list[DailyBar]
+    quality_status: Optional[str] = None
+    cleaning_warnings: list[str] = Field(default_factory=list)
+    dropped_rows: int = Field(default=0, ge=0)
+    dropped_duplicate_rows: int = Field(default=0, ge=0)
 
 
 class IntradayBar(BaseModel):

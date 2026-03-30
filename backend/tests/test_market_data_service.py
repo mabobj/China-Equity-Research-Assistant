@@ -248,6 +248,81 @@ class IntradayOnlyProvider:
         ]
 
 
+class NamedDailyProvider:
+    """用于验证默认 provider 优先级。"""
+
+    capabilities = ("daily_bars",)
+
+    def __init__(self, name: str, close: float) -> None:
+        self.name = name
+        self.close = close
+        self.call_count = 0
+
+    def is_available(self) -> bool:
+        return True
+
+    def get_daily_bars(
+        self,
+        symbol: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> list[DailyBar]:
+        self.call_count += 1
+        return [
+            DailyBar(
+                symbol=symbol,
+                trade_date=date(2024, 1, 2),
+                open=100.0,
+                high=102.0,
+                low=99.0,
+                close=self.close,
+                volume=10.0,
+                amount=1000.0,
+                source=self.name,
+            )
+        ]
+
+
+class DirtyDailyBarProvider(FakeProvider):
+    """用于验证清洗摘要可见性。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.name = "dirty"
+
+    def get_daily_bars(
+        self,
+        symbol: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> list[DailyBar]:
+        self.daily_bar_call_count += 1
+        return [
+            DailyBar(
+                symbol=symbol,
+                trade_date=date(2024, 1, 2),
+                open=100.0,
+                high=102.0,
+                low=99.0,
+                close=101.0,
+                volume=1000.0,
+                amount=100000.0,
+                source=self.name,
+            ),
+            DailyBar(
+                symbol=symbol,
+                trade_date=date(2024, 1, 3),
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=-1.0,
+                volume=1000.0,
+                amount=100000.0,
+                source=self.name,
+            ),
+        ]
+
+
 def test_service_normalizes_symbol_before_calling_provider() -> None:
     """The service should always use canonical symbols internally."""
     provider = FakeProvider()
@@ -601,3 +676,38 @@ def test_service_supports_split_intraday_provider() -> None:
     assert intraday_provider.called_start_datetime == datetime(2024, 1, 2, 9, 30, 0)
     assert intraday_provider.called_end_datetime == datetime(2024, 1, 2, 9, 40, 0)
     assert response.count == 1
+
+
+def test_service_daily_bars_prefers_mootdx_by_default() -> None:
+    """未显式指定时，日线默认优先 mootdx。"""
+    akshare_provider = NamedDailyProvider(name="akshare", close=100.5)
+    baostock_provider = NamedDailyProvider(name="baostock", close=100.6)
+    mootdx_provider = NamedDailyProvider(name="mootdx", close=100.7)
+    service = MarketDataService(
+        providers=[akshare_provider, baostock_provider, mootdx_provider],
+    )
+
+    response = service.get_daily_bars("600519.SH", start_date="2024-01-01")
+
+    assert response.count == 1
+    assert response.bars[0].source == "mootdx"
+    assert response.bars[0].close == 100.7
+    assert mootdx_provider.call_count == 1
+    assert baostock_provider.call_count == 0
+    assert akshare_provider.call_count == 0
+
+
+def test_service_daily_bars_exposes_cleaning_summary() -> None:
+    """清洗剔除异常行时，应在响应中暴露摘要字段。"""
+    service = MarketDataService(providers=[DirtyDailyBarProvider()])
+
+    response = service.get_daily_bars(
+        "600519.SH",
+        start_date="2024-01-01",
+        end_date="2024-01-31",
+    )
+
+    assert response.count == 1
+    assert response.quality_status == "failed"
+    assert response.dropped_rows == 1
+    assert any("invalid_close_price" in item for item in response.cleaning_warnings)
