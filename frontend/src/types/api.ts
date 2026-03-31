@@ -747,6 +747,7 @@ export type TradeRecord = {
   note: string | null;
   decision_snapshot_id: string | null;
   strategy_alignment: StrategyAlignment;
+  alignment_override_reason?: string | null;
   created_at: string;
   updated_at: string;
   decision_snapshot: DecisionSnapshot | null;
@@ -861,6 +862,7 @@ export type CreateTradeRequest = {
   note?: string;
   decision_snapshot_id?: string;
   strategy_alignment?: StrategyAlignment;
+  alignment_override_reason?: string;
   auto_create_snapshot?: boolean;
   use_llm?: boolean;
 };
@@ -880,6 +882,7 @@ export type CreateTradeFromCurrentDecisionRequest = {
   reason_type: TradeReasonType;
   note?: string;
   strategy_alignment?: StrategyAlignment;
+  alignment_override_reason?: string;
 };
 
 export type CreateReviewRequest = {

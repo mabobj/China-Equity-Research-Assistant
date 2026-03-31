@@ -6,7 +6,13 @@ import { PageShell } from "@/components/page-shell";
 import { SectionCard } from "@/components/section-card";
 import { StatusBlock } from "@/components/status-block";
 import { createTradeFromCurrentDecision, listTrades, normalizeSymbolInput } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import {
+  formatAction,
+  formatDateTime,
+  formatStrategyAlignment,
+  formatTradeReasonType,
+  formatTradeSide,
+} from "@/lib/format";
 import type {
   StrategyAlignment,
   TradeReasonType,
@@ -19,10 +25,16 @@ type TradeFormState = {
   side: TradeSide;
   reasonType: TradeReasonType;
   strategyAlignment: StrategyAlignment;
+  alignmentOverrideReason: string;
   price: string;
   quantity: string;
   note: string;
   useLlm: boolean;
+};
+
+type OptionItem = {
+  value: string;
+  label: string;
 };
 
 const INITIAL_FORM: TradeFormState = {
@@ -30,11 +42,40 @@ const INITIAL_FORM: TradeFormState = {
   side: "SKIP",
   reasonType: "watch_only",
   strategyAlignment: "unknown",
+  alignmentOverrideReason: "",
   price: "",
   quantity: "",
   note: "",
   useLlm: false,
 };
+
+const SIDE_OPTIONS: OptionItem[] = [
+  { value: "SKIP", label: formatTradeSide("SKIP") },
+  { value: "BUY", label: formatTradeSide("BUY") },
+  { value: "SELL", label: formatTradeSide("SELL") },
+  { value: "ADD", label: formatTradeSide("ADD") },
+  { value: "REDUCE", label: formatTradeSide("REDUCE") },
+];
+
+const REASON_OPTIONS: OptionItem[] = [
+  { value: "watch_only", label: formatTradeReasonType("watch_only") },
+  { value: "signal_entry", label: formatTradeReasonType("signal_entry") },
+  { value: "pullback_entry", label: formatTradeReasonType("pullback_entry") },
+  { value: "breakout_entry", label: formatTradeReasonType("breakout_entry") },
+  { value: "stop_loss", label: formatTradeReasonType("stop_loss") },
+  { value: "take_profit", label: formatTradeReasonType("take_profit") },
+  { value: "time_exit", label: formatTradeReasonType("time_exit") },
+  { value: "manual_override", label: formatTradeReasonType("manual_override") },
+  { value: "skip_due_to_quality", label: formatTradeReasonType("skip_due_to_quality") },
+  { value: "skip_due_to_risk", label: formatTradeReasonType("skip_due_to_risk") },
+];
+
+const ALIGNMENT_OPTIONS: OptionItem[] = [
+  { value: "unknown", label: formatStrategyAlignment("unknown") },
+  { value: "aligned", label: formatStrategyAlignment("aligned") },
+  { value: "partially_aligned", label: formatStrategyAlignment("partially_aligned") },
+  { value: "not_aligned", label: formatStrategyAlignment("not_aligned") },
+];
 
 export default function TradesPage() {
   const [form, setForm] = useState<TradeFormState>(INITIAL_FORM);
@@ -91,6 +132,7 @@ export default function TradesPage() {
         side: form.side,
         reason_type: form.reasonType,
         strategy_alignment: form.strategyAlignment,
+        alignment_override_reason: form.alignmentOverrideReason.trim() || undefined,
         note: form.note.trim() || undefined,
       } as const;
 
@@ -144,7 +186,7 @@ export default function TradesPage() {
             onChange={(value) =>
               setForm((previous) => ({ ...previous, side: value as TradeSide }))
             }
-            options={["SKIP", "BUY", "SELL", "ADD", "REDUCE"]}
+            options={SIDE_OPTIONS}
           />
           <SelectField
             label="原因类型"
@@ -152,18 +194,7 @@ export default function TradesPage() {
             onChange={(value) =>
               setForm((previous) => ({ ...previous, reasonType: value as TradeReasonType }))
             }
-            options={[
-              "watch_only",
-              "signal_entry",
-              "pullback_entry",
-              "breakout_entry",
-              "stop_loss",
-              "take_profit",
-              "time_exit",
-              "manual_override",
-              "skip_due_to_quality",
-              "skip_due_to_risk",
-            ]}
+            options={REASON_OPTIONS}
           />
           <SelectField
             label="策略对齐"
@@ -174,7 +205,14 @@ export default function TradesPage() {
                 strategyAlignment: value as StrategyAlignment,
               }))
             }
-            options={["unknown", "aligned", "partially_aligned", "not_aligned"]}
+            options={ALIGNMENT_OPTIONS}
+          />
+          <Field
+            label="人工覆盖原因（可选）"
+            value={form.alignmentOverrideReason}
+            onChange={(value) =>
+              setForm((previous) => ({ ...previous, alignmentOverrideReason: value }))
+            }
           />
           <Field
             label="价格（非 SKIP 必填）"
@@ -214,8 +252,16 @@ export default function TradesPage() {
             </button>
           </div>
         </form>
-        {submitMessage ? <div className="mt-4"><StatusBlock title="操作成功" description={submitMessage} /></div> : null}
-        {error ? <div className="mt-4"><StatusBlock title="操作失败" description={error} tone="error" /></div> : null}
+        {submitMessage ? (
+          <div className="mt-4">
+            <StatusBlock title="操作成功" description={submitMessage} />
+          </div>
+        ) : null}
+        {error ? (
+          <div className="mt-4">
+            <StatusBlock title="操作失败" description={error} tone="error" />
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard title="交易记录列表" description="可按股票代码过滤，并查看关联决策快照摘要。">
@@ -231,10 +277,20 @@ export default function TradesPage() {
           </div>
         </form>
 
-        {status === "loading" ? <div className="mt-4"><StatusBlock title="加载中" description="正在读取交易记录..." /></div> : null}
-        {status === "error" && error ? <div className="mt-4"><StatusBlock title="加载失败" description={error} tone="error" /></div> : null}
+        {status === "loading" ? (
+          <div className="mt-4">
+            <StatusBlock title="加载中" description="正在读取交易记录..." />
+          </div>
+        ) : null}
+        {status === "error" && error ? (
+          <div className="mt-4">
+            <StatusBlock title="加载失败" description={error} tone="error" />
+          </div>
+        ) : null}
         {status === "success" && records.length === 0 ? (
-          <div className="mt-4"><StatusBlock title="暂无记录" description="当前没有交易记录，可先在上方创建一条。" /></div>
+          <div className="mt-4">
+            <StatusBlock title="暂无记录" description="当前没有交易记录，可先在上方创建一条。" />
+          </div>
         ) : null}
 
         {records.length > 0 ? (
@@ -266,17 +322,21 @@ export default function TradesPage() {
                   >
                     <td className="px-4 py-3">{formatDateTime(item.trade_date)}</td>
                     <td className="px-4 py-3">{item.symbol}</td>
-                    <td className="px-4 py-3">{item.side}</td>
+                    <td className="px-4 py-3">{formatTradeSide(item.side)}</td>
                     <td className="px-4 py-3">{item.price ?? "-"}</td>
                     <td className="px-4 py-3">{item.quantity ?? "-"}</td>
-                    <td className="px-4 py-3">{item.decision_snapshot?.action ?? "-"}</td>
+                    <td className="px-4 py-3">
+                      {item.decision_snapshot?.action
+                        ? formatAction(item.decision_snapshot.action as "BUY" | "WATCH" | "AVOID")
+                        : "-"}
+                    </td>
                     <td className="px-4 py-3">{item.decision_snapshot?.confidence ?? "-"}</td>
                     <td className="px-4 py-3">
                       {item.decision_snapshot?.data_quality_summary
                         ? `${item.decision_snapshot.data_quality_summary.bars_quality}/${item.decision_snapshot.data_quality_summary.financial_quality}/${item.decision_snapshot.data_quality_summary.announcement_quality}`
                         : "-"}
                     </td>
-                    <td className="px-4 py-3">{item.strategy_alignment}</td>
+                    <td className="px-4 py-3">{formatStrategyAlignment(item.strategy_alignment)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -291,7 +351,8 @@ export default function TradesPage() {
               thesis：{selectedRecord.decision_snapshot?.thesis ?? "暂无"}
             </p>
             <p className="mt-2 text-sm text-slate-700">
-              triggers：{(selectedRecord.decision_snapshot?.triggers ?? []).join(" | ") || "暂无"}
+              triggers：
+              {(selectedRecord.decision_snapshot?.triggers ?? []).join(" | ") || "暂无"}
             </p>
             <p className="mt-2 text-sm text-slate-700">
               invalidations：
@@ -334,7 +395,7 @@ function SelectField({
   label: string;
   value: string;
   onChange: (value: string) => void;
-  options: string[];
+  options: OptionItem[];
 }) {
   return (
     <label className="space-y-2">
@@ -345,8 +406,8 @@ function SelectField({
         className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
       >
         {options.map((item) => (
-          <option key={item} value={item}>
-            {item}
+          <option key={item.value} value={item.value}>
+            {item.label}
           </option>
         ))}
       </select>

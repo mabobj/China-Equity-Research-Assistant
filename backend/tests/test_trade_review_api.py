@@ -280,3 +280,84 @@ def test_review_metrics_handles_missing_bars_with_controlled_warning(tmp_path) -
     assert "daily_bars_unavailable_for_review_window" in payload["warning_messages"]
 
     app.dependency_overrides.clear()
+
+
+def test_trade_alignment_and_review_follow_plan_constraints(tmp_path) -> None:
+    snapshot_service, trade_service, review_service = _build_services(tmp_path)
+    app.dependency_overrides[get_decision_snapshot_service] = lambda: snapshot_service
+    app.dependency_overrides[get_trade_service] = lambda: trade_service
+    app.dependency_overrides[get_review_record_service] = lambda: review_service
+
+    manual_snapshot = client.post(
+        "/decision-snapshots",
+        json={
+            "payload": {
+                "symbol": "600519.SH",
+                "as_of_date": "2026-03-31",
+                "action": "AVOID",
+                "confidence": 20,
+                "technical_score": 30,
+                "fundamental_score": 25,
+                "event_score": 35,
+                "overall_score": 28,
+                "thesis": "避免参与",
+            }
+        },
+    )
+    assert manual_snapshot.status_code == 200
+    snapshot_id = manual_snapshot.json()["snapshot_id"]
+
+    invalid_trade = client.post(
+        "/trades",
+        json={
+            "symbol": "600519.SH",
+            "side": "BUY",
+            "trade_date": "2026-03-31T09:30:00+00:00",
+            "price": 1600.0,
+            "quantity": 100,
+            "reason_type": "signal_entry",
+            "decision_snapshot_id": snapshot_id,
+            "strategy_alignment": "aligned",
+        },
+    )
+    assert invalid_trade.status_code == 400
+    assert "alignment_override_reason" in invalid_trade.json()["detail"]
+
+    valid_trade = client.post(
+        "/trades",
+        json={
+            "symbol": "600519.SH",
+            "side": "BUY",
+            "trade_date": "2026-03-31T09:35:00+00:00",
+            "price": 1601.0,
+            "quantity": 100,
+            "reason_type": "signal_entry",
+            "decision_snapshot_id": snapshot_id,
+            "strategy_alignment": "unknown",
+        },
+    )
+    assert valid_trade.status_code == 200
+    trade_payload = valid_trade.json()
+    assert trade_payload["strategy_alignment"] == "not_aligned"
+
+    review_response = client.post(
+        "/reviews",
+        json={
+            "symbol": "600519.SH",
+            "review_date": "2026-04-01",
+            "linked_trade_id": trade_payload["trade_id"],
+            "linked_decision_snapshot_id": snapshot_id,
+            "outcome_label": "failure",
+            "did_follow_plan": "yes",
+            "review_summary": "测试复盘",
+        },
+    )
+    assert review_response.status_code == 200
+    review_payload = review_response.json()
+    assert review_payload["did_follow_plan"] == "no"
+    assert (
+        "did_follow_plan_auto_adjusted_from_yes_to_no_due_to_trade_alignment"
+        in review_payload["warning_messages"]
+    )
+
+    app.dependency_overrides.clear()

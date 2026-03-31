@@ -65,6 +65,7 @@ class TradeReviewStore:
                     note TEXT,
                     decision_snapshot_id TEXT,
                     strategy_alignment TEXT NOT NULL,
+                    alignment_override_reason TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -107,7 +108,31 @@ class TradeReviewStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_review_records_trade_id ON review_records(linked_trade_id)"
             )
+            self._ensure_column(
+                connection,
+                table_name="trade_records",
+                column_name="alignment_override_reason",
+                definition="TEXT",
+            )
             connection.commit()
+
+    def _ensure_column(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        table_name: str,
+        column_name: str,
+        definition: str,
+    ) -> None:
+        existing_columns = {
+            str(item["name"])
+            for item in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name in existing_columns:
+            return
+        connection.execute(
+            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}",
+        )
 
     def create_decision_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock, self._connect() as connection:
@@ -181,9 +206,9 @@ class TradeReviewStore:
                 """
                 INSERT INTO trade_records (
                     trade_id, symbol, side, trade_date, price, quantity, amount,
-                    reason_type, note, decision_snapshot_id, strategy_alignment,
+                    reason_type, note, decision_snapshot_id, strategy_alignment, alignment_override_reason,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["trade_id"],
@@ -197,6 +222,7 @@ class TradeReviewStore:
                     payload.get("note"),
                     payload.get("decision_snapshot_id"),
                     payload["strategy_alignment"],
+                    payload.get("alignment_override_reason"),
                     payload["created_at"],
                     payload["updated_at"],
                 ),
@@ -383,6 +409,7 @@ class TradeReviewStore:
             "note": row["note"],
             "decision_snapshot_id": row["decision_snapshot_id"],
             "strategy_alignment": row["strategy_alignment"],
+            "alignment_override_reason": row["alignment_override_reason"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }

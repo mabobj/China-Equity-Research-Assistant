@@ -84,6 +84,7 @@ def test_trade_review_store_crud_and_filters(tmp_path) -> None:
     trades = store.list_trade_records(symbol="600519.SH", limit=20)
     assert len(trades) == 1
     assert trades[0]["trade_id"] == "tr-001"
+    assert "alignment_override_reason" in trades[0]
 
     updated_trade = store.update_trade_record("tr-001", {"note": "测试买入-更新"})
     assert updated_trade is not None

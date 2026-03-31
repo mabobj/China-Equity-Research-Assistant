@@ -16,11 +16,14 @@ import {
   formatConvictionLevel,
   formatDate,
   formatDecisionBriefAction,
+  formatStrategyAlignment,
   formatLabel,
   formatPercent,
   formatPrice,
   formatRange,
   formatScore,
+  formatTradeReasonType,
+  formatTradeSide,
 } from "@/lib/format";
 import type {
   CreateTradeFromCurrentDecisionRequest,
@@ -176,8 +179,18 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
         symbol,
         use_llm: useLlm,
         side: tradeForm.side,
-        reason_type: tradeForm.reasonType,
-        strategy_alignment: tradeForm.strategyAlignment,
+        reason_type:
+          tradeConflictState.isConflict && tradeForm.reasonType !== "manual_override"
+            ? "manual_override"
+            : tradeForm.reasonType,
+        strategy_alignment:
+          tradeForm.strategyAlignment === "unknown"
+            ? tradeConflictState.inferredAlignment
+            : tradeForm.strategyAlignment,
+        alignment_override_reason:
+          tradeConflictState.isConflict && tradeForm.strategyAlignment !== "not_aligned"
+            ? "前端检测到与原判断冲突，自动要求人工覆盖。"
+            : undefined,
         note: tradeForm.note.trim() || undefined,
       };
       if (tradeForm.side !== "SKIP") {
@@ -205,6 +218,17 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
     () => bundle?.module_status_summary.filter((item) => item.status === "error") ?? [],
     [bundle],
   );
+  const tradeConflictState = useMemo(() => {
+    const inferredAlignment = inferAlignmentFromAction(
+      bundle?.review_report?.final_judgement.action,
+      tradeForm.side,
+    );
+    return {
+      inferredAlignment,
+      isConflict: inferredAlignment === "not_aligned",
+      snapshotAction: bundle?.review_report?.final_judgement.action ?? null,
+    };
+  }, [bundle?.review_report?.final_judgement.action, tradeForm.side]);
 
   return (
     <div className="space-y-6">
@@ -323,18 +347,28 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
               <select
                 value={tradeForm.side}
                 onChange={(event) =>
-                  setTradeForm((previous) => ({
-                    ...previous,
-                    side: event.target.value as TradeSide,
-                  }))
+                  setTradeForm((previous) => {
+                    const nextSide = event.target.value as TradeSide;
+                    return {
+                      ...previous,
+                      side: nextSide,
+                      strategyAlignment:
+                        previous.strategyAlignment === "unknown"
+                          ? inferAlignmentFromAction(
+                              bundle?.review_report?.final_judgement.action,
+                              nextSide,
+                            )
+                          : previous.strategyAlignment,
+                    };
+                  })
                 }
                 className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
               >
-                <option value="SKIP">SKIP</option>
-                <option value="BUY">BUY</option>
-                <option value="SELL">SELL</option>
-                <option value="ADD">ADD</option>
-                <option value="REDUCE">REDUCE</option>
+                <option value="SKIP">{formatTradeSide("SKIP")}</option>
+                <option value="BUY">{formatTradeSide("BUY")}</option>
+                <option value="SELL">{formatTradeSide("SELL")}</option>
+                <option value="ADD">{formatTradeSide("ADD")}</option>
+                <option value="REDUCE">{formatTradeSide("REDUCE")}</option>
               </select>
             </label>
             <label className="space-y-2">
@@ -349,16 +383,16 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
                 }
                 className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
               >
-                <option value="watch_only">watch_only</option>
-                <option value="signal_entry">signal_entry</option>
-                <option value="pullback_entry">pullback_entry</option>
-                <option value="breakout_entry">breakout_entry</option>
-                <option value="stop_loss">stop_loss</option>
-                <option value="take_profit">take_profit</option>
-                <option value="time_exit">time_exit</option>
-                <option value="manual_override">manual_override</option>
-                <option value="skip_due_to_quality">skip_due_to_quality</option>
-                <option value="skip_due_to_risk">skip_due_to_risk</option>
+                <option value="watch_only">{formatTradeReasonType("watch_only")}</option>
+                <option value="signal_entry">{formatTradeReasonType("signal_entry")}</option>
+                <option value="pullback_entry">{formatTradeReasonType("pullback_entry")}</option>
+                <option value="breakout_entry">{formatTradeReasonType("breakout_entry")}</option>
+                <option value="stop_loss">{formatTradeReasonType("stop_loss")}</option>
+                <option value="take_profit">{formatTradeReasonType("take_profit")}</option>
+                <option value="time_exit">{formatTradeReasonType("time_exit")}</option>
+                <option value="manual_override">{formatTradeReasonType("manual_override")}</option>
+                <option value="skip_due_to_quality">{formatTradeReasonType("skip_due_to_quality")}</option>
+                <option value="skip_due_to_risk">{formatTradeReasonType("skip_due_to_risk")}</option>
               </select>
             </label>
             <label className="space-y-2">
@@ -373,10 +407,10 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
                 }
                 className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
               >
-                <option value="unknown">unknown</option>
-                <option value="aligned">aligned</option>
-                <option value="partially_aligned">partially_aligned</option>
-                <option value="not_aligned">not_aligned</option>
+                <option value="unknown">{formatStrategyAlignment("unknown")}</option>
+                <option value="aligned">{formatStrategyAlignment("aligned")}</option>
+                <option value="partially_aligned">{formatStrategyAlignment("partially_aligned")}</option>
+                <option value="not_aligned">{formatStrategyAlignment("not_aligned")}</option>
               </select>
             </label>
             <label className="space-y-2">
@@ -419,6 +453,15 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
               </button>
             </div>
           </form>
+          {tradeConflictState.isConflict ? (
+            <div className="mt-3">
+              <StatusBlock
+                title="与原判断不一致"
+                description={`当前决策为 ${formatAction(tradeConflictState.snapshotAction ?? "WATCH")}，但你选择了 ${formatTradeSide(tradeForm.side)}。系统将按人工覆盖处理。`}
+                tone="error"
+              />
+            </div>
+          ) : null}
           {snapshotResult ? (
             <div className="mt-3">
               <StatusBlock title="保存成功" description={`snapshot_id: ${snapshotResult}`} />
@@ -759,4 +802,28 @@ function buildRequestId(symbol: string): string {
       ? crypto.randomUUID()
       : `${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
   return `${normalizeSymbolInput(symbol)}-${randomPart}`;
+}
+
+function inferAlignmentFromAction(
+  action: string | null | undefined,
+  side: TradeSide,
+): StrategyAlignment {
+  const normalizedAction = (action ?? "").toUpperCase();
+
+  if (normalizedAction === "AVOID") {
+    return side === "BUY" || side === "ADD" ? "not_aligned" : "aligned";
+  }
+  if (normalizedAction === "BUY" || normalizedAction === "BUY_NOW") {
+    return side === "BUY" || side === "ADD" ? "aligned" : "not_aligned";
+  }
+  if (
+    normalizedAction === "WATCH" ||
+    normalizedAction === "WAIT_PULLBACK" ||
+    normalizedAction === "WAIT_BREAKOUT" ||
+    normalizedAction === "RESEARCH_ONLY"
+  ) {
+    return side === "SKIP" ? "aligned" : "partially_aligned";
+  }
+
+  return "unknown";
 }

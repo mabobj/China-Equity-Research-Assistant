@@ -1,9 +1,14 @@
 import type {
   DecisionBriefActionNow,
   DecisionConvictionLevel,
+  DidFollowPlan,
   PriceRange,
   ResearchAction,
+  ReviewOutcomeLabel,
   ScreenerListType,
+  StrategyAlignment,
+  TradeReasonType,
+  TradeSide,
   WorkflowStepStatus,
 } from "@/types/api";
 
@@ -53,6 +58,48 @@ const STEP_STATUS_LABELS: Record<WorkflowStepStatus, string> = {
   skipped: "已跳过",
 };
 
+const TRADE_SIDE_LABELS: Record<TradeSide, string> = {
+  BUY: "买入",
+  SELL: "卖出",
+  ADD: "加仓",
+  REDUCE: "减仓",
+  SKIP: "跳过",
+};
+
+const TRADE_REASON_TYPE_LABELS: Record<TradeReasonType, string> = {
+  signal_entry: "信号入场",
+  pullback_entry: "回踩入场",
+  breakout_entry: "突破入场",
+  stop_loss: "止损退出",
+  take_profit: "止盈退出",
+  time_exit: "时间退出",
+  manual_override: "人工覆盖",
+  watch_only: "仅观察",
+  skip_due_to_quality: "因数据质量跳过",
+  skip_due_to_risk: "因风险跳过",
+};
+
+const STRATEGY_ALIGNMENT_LABELS: Record<StrategyAlignment, string> = {
+  aligned: "一致",
+  partially_aligned: "部分一致",
+  not_aligned: "不一致",
+  unknown: "未知",
+};
+
+const REVIEW_OUTCOME_LABELS: Record<ReviewOutcomeLabel, string> = {
+  success: "成功",
+  partial_success: "部分成功",
+  failure: "失败",
+  invalidated: "失效",
+  no_trade: "未交易",
+};
+
+const DID_FOLLOW_PLAN_LABELS: Record<DidFollowPlan, string> = {
+  yes: "是",
+  partial: "部分",
+  no: "否",
+};
+
 const GENERIC_LABELS: Record<string, string> = {
   idle: "空闲",
   loading: "加载中",
@@ -66,6 +113,9 @@ const GENERIC_LABELS: Record<string, string> = {
   rule_based: "规则版",
   fallback_rule_based: "规则回退",
   cache_hit: "命中本地缓存",
+  ok: "正常",
+  warning: "告警",
+  degraded: "降级",
 };
 
 export function formatDate(value: string | null | undefined): string {
@@ -156,6 +206,26 @@ export function formatListType(value: ScreenerListType): string {
 
 export function formatWorkflowStepStatus(value: WorkflowStepStatus): string {
   return STEP_STATUS_LABELS[value];
+}
+
+export function formatTradeSide(value: TradeSide): string {
+  return TRADE_SIDE_LABELS[value];
+}
+
+export function formatTradeReasonType(value: TradeReasonType): string {
+  return TRADE_REASON_TYPE_LABELS[value];
+}
+
+export function formatStrategyAlignment(value: StrategyAlignment): string {
+  return STRATEGY_ALIGNMENT_LABELS[value];
+}
+
+export function formatReviewOutcome(value: ReviewOutcomeLabel): string {
+  return REVIEW_OUTCOME_LABELS[value];
+}
+
+export function formatDidFollowPlan(value: DidFollowPlan): string {
+  return DID_FOLLOW_PLAN_LABELS[value];
 }
 
 export function formatUnknownValue(value: unknown): string {

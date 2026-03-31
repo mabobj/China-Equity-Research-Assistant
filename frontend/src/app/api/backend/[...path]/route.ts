@@ -31,14 +31,21 @@ export async function POST(
   return proxyRequest(request, context, "POST");
 }
 
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return proxyRequest(request, context, "PATCH");
+}
+
 async function proxyRequest(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
 ) {
   const { path } = await context.params;
   const targetUrl = buildTargetUrl(request, path);
-  const requestBodyText = method === "POST" ? await request.text() : undefined;
+  const requestBodyText = method === "GET" ? undefined : await request.text();
   const timeoutMs = getProxyTimeout(request, path, requestBodyText);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -47,7 +54,7 @@ async function proxyRequest(
     const upstreamResponse = await fetch(targetUrl, {
       method,
       headers: buildUpstreamHeaders(request, method),
-      body: method === "POST" ? requestBodyText : undefined,
+      body: method === "GET" ? undefined : requestBodyText,
       cache: "no-store",
       signal: controller.signal,
     });
@@ -85,13 +92,13 @@ function buildTargetUrl(request: NextRequest, path: string[]): string {
 
 function buildUpstreamHeaders(
   request: NextRequest,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
 ): HeadersInit {
   const headers: HeadersInit = {
     Accept: request.headers.get("accept") ?? "application/json",
   };
 
-  if (method === "POST") {
+  if (method === "POST" || method === "PATCH") {
     headers["Content-Type"] =
       request.headers.get("content-type") ?? "application/json";
   }

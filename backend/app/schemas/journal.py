@@ -1,4 +1,4 @@
-"""交易与复盘闭环的结构化 schema。"""
+"""交易与复盘闭环的结构化 Schema。"""
 
 from __future__ import annotations
 
@@ -26,9 +26,23 @@ StrategyAlignment = Literal["aligned", "partially_aligned", "not_aligned", "unkn
 ReviewOutcomeLabel = Literal["success", "partial_success", "failure", "invalidated", "no_trade"]
 DidFollowPlan = Literal["yes", "partial", "no"]
 
+ENTRY_REASON_TYPES = {"signal_entry", "pullback_entry", "breakout_entry"}
+EXIT_REASON_TYPES = {"stop_loss", "take_profit", "time_exit"}
+SKIP_REASON_TYPES = {"watch_only", "skip_due_to_quality", "skip_due_to_risk"}
+
+
+def validate_trade_reason_type_for_side(reason_type: TradeReasonType, side: TradeSide) -> None:
+    """校验交易动作与原因类型是否匹配。"""
+    if reason_type in ENTRY_REASON_TYPES and side not in {"BUY", "ADD"}:
+        raise ValueError("入场类 reason_type 仅适用于 BUY/ADD。")
+    if reason_type in EXIT_REASON_TYPES and side not in {"SELL", "REDUCE"}:
+        raise ValueError("止盈止损类 reason_type 仅适用于 SELL/REDUCE。")
+    if reason_type in SKIP_REASON_TYPES and side != "SKIP":
+        raise ValueError("watch_only/skip_due_to_* 仅适用于 SKIP。")
+
 
 class DecisionSourceRef(BaseModel):
-    """决策快照的来源引用。"""
+    """决策快照的数据来源引用。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -129,6 +143,7 @@ class TradeRecordBase(BaseModel):
     note: Optional[str] = None
     decision_snapshot_id: Optional[str] = None
     strategy_alignment: StrategyAlignment = "unknown"
+    alignment_override_reason: Optional[str] = None
 
 
 class CreateTradeRequest(TradeRecordBase):
@@ -139,9 +154,9 @@ class CreateTradeRequest(TradeRecordBase):
 
     @model_validator(mode="after")
     def validate_trade_fields(self) -> "CreateTradeRequest":
-        if self.side != "SKIP":
-            if self.price is None or self.quantity is None:
-                raise ValueError("非 SKIP 记录必须提供 `price` 和 `quantity`。")
+        if self.side != "SKIP" and (self.price is None or self.quantity is None):
+            raise ValueError("非 SKIP 记录必须提供 `price` 和 `quantity`。")
+        validate_trade_reason_type_for_side(self.reason_type, self.side)
         return self
 
 
@@ -159,6 +174,13 @@ class UpdateTradeRequest(BaseModel):
     note: Optional[str] = None
     decision_snapshot_id: Optional[str] = None
     strategy_alignment: Optional[StrategyAlignment] = None
+    alignment_override_reason: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_pair_when_both_present(self) -> "UpdateTradeRequest":
+        if self.side is not None and self.reason_type is not None:
+            validate_trade_reason_type_for_side(self.reason_type, self.side)
+        return self
 
 
 class CreateTradeFromCurrentDecisionRequest(BaseModel):
@@ -176,12 +198,13 @@ class CreateTradeFromCurrentDecisionRequest(BaseModel):
     reason_type: TradeReasonType
     note: Optional[str] = None
     strategy_alignment: StrategyAlignment = "unknown"
+    alignment_override_reason: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_trade_fields(self) -> "CreateTradeFromCurrentDecisionRequest":
-        if self.side != "SKIP":
-            if self.price is None or self.quantity is None:
-                raise ValueError("非 SKIP 记录必须提供 `price` 和 `quantity`。")
+        if self.side != "SKIP" and (self.price is None or self.quantity is None):
+            raise ValueError("非 SKIP 记录必须提供 `price` 和 `quantity`。")
+        validate_trade_reason_type_for_side(self.reason_type, self.side)
         return self
 
 
@@ -297,4 +320,3 @@ class PositionCase(BaseModel):
     closed_at: Optional[datetime] = None
     net_quantity: float = 0.0
     notes: dict[str, Any] = Field(default_factory=dict)
-

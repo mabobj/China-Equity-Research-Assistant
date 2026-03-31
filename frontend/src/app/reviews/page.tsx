@@ -12,13 +12,38 @@ import {
   normalizeSymbolInput,
   updateReview,
 } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import {
+  formatDateTime,
+  formatDidFollowPlan,
+  formatReviewOutcome,
+  formatStrategyAlignment,
+  formatTradeSide,
+} from "@/lib/format";
 import type {
   DidFollowPlan,
   ReviewOutcomeLabel,
   ReviewRecord,
   TradeRecord,
 } from "@/types/api";
+
+type OptionItem = {
+  value: string;
+  label: string;
+};
+
+const OUTCOME_OPTIONS: OptionItem[] = [
+  { value: "success", label: formatReviewOutcome("success") },
+  { value: "partial_success", label: formatReviewOutcome("partial_success") },
+  { value: "failure", label: formatReviewOutcome("failure") },
+  { value: "invalidated", label: formatReviewOutcome("invalidated") },
+  { value: "no_trade", label: formatReviewOutcome("no_trade") },
+];
+
+const FOLLOW_PLAN_OPTIONS: OptionItem[] = [
+  { value: "yes", label: formatDidFollowPlan("yes") },
+  { value: "partial", label: formatDidFollowPlan("partial") },
+  { value: "no", label: formatDidFollowPlan("no") },
+];
 
 export default function ReviewsPage() {
   const [trades, setTrades] = useState<TradeRecord[]>([]);
@@ -171,7 +196,7 @@ export default function ReviewsPage() {
               {trades.length === 0 ? <option value="">暂无交易记录</option> : null}
               {trades.map((item) => (
                 <option key={item.trade_id} value={item.trade_id}>
-                  {item.symbol} / {item.side} / {formatDateTime(item.trade_date)}
+                  {item.symbol} / {formatTradeSide(item.side)} / {formatDateTime(item.trade_date)}
                 </option>
               ))}
             </select>
@@ -186,8 +211,16 @@ export default function ReviewsPage() {
             </button>
           </div>
         </form>
-        {message ? <div className="mt-4"><StatusBlock title="操作成功" description={message} /></div> : null}
-        {error ? <div className="mt-4"><StatusBlock title="操作失败" description={error} tone="error" /></div> : null}
+        {message ? (
+          <div className="mt-4">
+            <StatusBlock title="操作成功" description={message} />
+          </div>
+        ) : null}
+        {error ? (
+          <div className="mt-4">
+            <StatusBlock title="操作失败" description={error} tone="error" />
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard title="复盘列表与详情" description="支持按股票筛选，并可编辑结果标签与总结。">
@@ -210,10 +243,20 @@ export default function ReviewsPage() {
           </div>
         </form>
 
-        {status === "loading" ? <div className="mt-4"><StatusBlock title="加载中" description="正在读取复盘记录..." /></div> : null}
-        {status === "error" && error ? <div className="mt-4"><StatusBlock title="加载失败" description={error} tone="error" /></div> : null}
+        {status === "loading" ? (
+          <div className="mt-4">
+            <StatusBlock title="加载中" description="正在读取复盘记录..." />
+          </div>
+        ) : null}
+        {status === "error" && error ? (
+          <div className="mt-4">
+            <StatusBlock title="加载失败" description={error} tone="error" />
+          </div>
+        ) : null}
         {status === "success" && reviews.length === 0 ? (
-          <div className="mt-4"><StatusBlock title="暂无复盘记录" description="可先从交易记录生成一条复盘草稿。" /></div>
+          <div className="mt-4">
+            <StatusBlock title="暂无复盘记录" description="可先从交易记录生成一条复盘草稿。" />
+          </div>
         ) : null}
 
         {reviews.length > 0 ? (
@@ -242,8 +285,8 @@ export default function ReviewsPage() {
                   >
                     <td className="px-4 py-3">{item.review_date}</td>
                     <td className="px-4 py-3">{item.symbol}</td>
-                    <td className="px-4 py-3">{item.outcome_label}</td>
-                    <td className="px-4 py-3">{item.did_follow_plan}</td>
+                    <td className="px-4 py-3">{formatReviewOutcome(item.outcome_label)}</td>
+                    <td className="px-4 py-3">{formatDidFollowPlan(item.did_follow_plan)}</td>
                     <td className="px-4 py-3">{item.holding_days ?? "-"}</td>
                     <td className="px-4 py-3">{item.review_summary}</td>
                   </tr>
@@ -267,11 +310,11 @@ export default function ReviewsPage() {
                 }
                 className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
               >
-                <option value="success">success</option>
-                <option value="partial_success">partial_success</option>
-                <option value="failure">failure</option>
-                <option value="invalidated">invalidated</option>
-                <option value="no_trade">no_trade</option>
+                {OUTCOME_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="space-y-2">
@@ -286,9 +329,11 @@ export default function ReviewsPage() {
                 }
                 className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
               >
-                <option value="yes">yes</option>
-                <option value="partial">partial</option>
-                <option value="no">no</option>
+                {FOLLOW_PLAN_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="space-y-2 lg:col-span-2">
@@ -322,6 +367,12 @@ export default function ReviewsPage() {
                 className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
               />
             </label>
+            {selectedReview.linked_trade ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 lg:col-span-2">
+                关联交易：{formatTradeSide(selectedReview.linked_trade.side)} /
+                对齐状态：{formatStrategyAlignment(selectedReview.linked_trade.strategy_alignment)}
+              </div>
+            ) : null}
             <div className="flex items-end lg:col-span-2">
               <button
                 type="submit"

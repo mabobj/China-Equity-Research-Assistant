@@ -41,6 +41,15 @@ class ReviewRecordService:
         self._market_data_service = market_data_service
 
     def create_review(self, request: CreateReviewRequest) -> ReviewRecord:
+        linked_trade = self._trade_service.get_trade(request.linked_trade_id) if request.linked_trade_id else None
+        did_follow_plan, consistency_warnings = _normalize_did_follow_plan(
+            did_follow_plan=request.did_follow_plan,
+            trade=linked_trade,
+        )
+        warning_messages = _merge_warning_messages(
+            base_messages=list(request.warning_messages),
+            extra_messages=consistency_warnings,
+        )
         now_iso = utc_now_iso()
         payload = {
             "review_id": "rv-" + uuid4().hex[:16],
@@ -53,10 +62,10 @@ class ReviewRecordService:
             "max_favorable_excursion": request.max_favorable_excursion,
             "max_adverse_excursion": request.max_adverse_excursion,
             "exit_reason": request.exit_reason,
-            "did_follow_plan": request.did_follow_plan,
+            "did_follow_plan": did_follow_plan,
             "review_summary": request.review_summary,
             "lesson_tags": list(request.lesson_tags),
-            "warning_messages": list(request.warning_messages),
+            "warning_messages": warning_messages,
             "created_at": now_iso,
             "updated_at": now_iso,
         }
@@ -127,7 +136,23 @@ class ReviewRecordService:
         return ReviewListResponse(count=len(items), items=items)
 
     def update_review(self, review_id: str, request: UpdateReviewRequest) -> Optional[ReviewRecord]:
+        current = self._store.get_review_record(review_id)
+        if current is None:
+            return None
+
         updates = request.model_dump(exclude_none=True)
+        linked_trade_id = str(current.get("linked_trade_id")) if current.get("linked_trade_id") else None
+        linked_trade = self._trade_service.get_trade(linked_trade_id) if linked_trade_id else None
+
+        raw_warning_messages = request.warning_messages
+        existing_warning_messages = list(current.get("warning_messages", []))
+
+        merged_did_follow_plan = request.did_follow_plan or str(current.get("did_follow_plan", "partial"))
+        normalized_follow_plan, consistency_warnings = _normalize_did_follow_plan(
+            did_follow_plan=merged_did_follow_plan,  # type: ignore[arg-type]
+            trade=linked_trade,
+        )
+
         normalized_updates: dict = {}
         for key, value in updates.items():
             if key == "lesson_tags":
@@ -138,6 +163,14 @@ class ReviewRecordService:
                 normalized_updates["review_date"] = value.isoformat()
             else:
                 normalized_updates[key] = value
+        if request.did_follow_plan is not None:
+            normalized_updates["did_follow_plan"] = normalized_follow_plan
+        if consistency_warnings:
+            merged_warnings = _merge_warning_messages(
+                base_messages=json_safe_list(raw_warning_messages) if raw_warning_messages is not None else existing_warning_messages,
+                extra_messages=consistency_warnings,
+            )
+            normalized_updates["warning_messages_json"] = merged_warnings
         normalized_updates["updated_at"] = utc_now_iso()
         row = self._store.update_review_record(review_id, normalized_updates)
         if row is None:
@@ -298,3 +331,30 @@ def json_safe_list(value: object) -> list:
     if isinstance(value, list):
         return value
     return []
+
+
+def _normalize_did_follow_plan(
+    *,
+    did_follow_plan: DidFollowPlan,
+    trade: Optional[TradeRecord],
+) -> tuple[DidFollowPlan, list[str]]:
+    if trade is None:
+        return did_follow_plan, []
+
+    alignment = trade.strategy_alignment
+    warnings: list[str] = []
+    if alignment == "not_aligned" and did_follow_plan == "yes":
+        warnings.append("did_follow_plan_auto_adjusted_from_yes_to_no_due_to_trade_alignment")
+        return "no", warnings
+    if alignment == "partially_aligned" and did_follow_plan == "yes":
+        warnings.append("did_follow_plan_auto_adjusted_from_yes_to_partial_due_to_trade_alignment")
+        return "partial", warnings
+    return did_follow_plan, warnings
+
+
+def _merge_warning_messages(*, base_messages: list[str], extra_messages: list[str]) -> list[str]:
+    merged: list[str] = []
+    for item in base_messages + extra_messages:
+        if item and item not in merged:
+            merged.append(item)
+    return merged

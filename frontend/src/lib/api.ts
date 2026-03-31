@@ -511,7 +511,7 @@ async function fetchBackend<T>(
       method,
       cache: "no-store",
       headers: buildHeaders(method),
-      body: method === "POST" ? JSON.stringify(options.body ?? {}) : undefined,
+      body: method === "GET" ? undefined : JSON.stringify(options.body ?? {}),
       signal: controller.signal,
     });
 

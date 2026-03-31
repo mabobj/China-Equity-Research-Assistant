@@ -11,10 +11,13 @@ from app.schemas.journal import (
     CreateTradeFromCurrentDecisionRequest,
     CreateTradeRequest,
     DecisionSnapshotRecord,
+    StrategyAlignment,
+    TradeSide,
     PositionCase,
     TradeListResponse,
     TradeRecord,
     UpdateTradeRequest,
+    validate_trade_reason_type_for_side,
 )
 from app.services.data_service.normalize import normalize_symbol
 from app.services.decision_snapshot_service.decision_snapshot_service import (
@@ -38,6 +41,12 @@ class TradeService:
         snapshot = self._resolve_snapshot_for_create(request)
         trade_date = request.trade_date.astimezone(timezone.utc)
         amount = _resolve_amount(request.price, request.quantity, request.amount)
+        strategy_alignment = _resolve_strategy_alignment(
+            requested_alignment=request.strategy_alignment,
+            snapshot_action=snapshot.action if snapshot else None,
+            side=request.side,
+            override_reason=request.alignment_override_reason,
+        )
         now_iso = utc_now_iso()
         payload = {
             "trade_id": "tr-" + uuid4().hex[:16],
@@ -50,7 +59,8 @@ class TradeService:
             "reason_type": request.reason_type,
             "note": request.note,
             "decision_snapshot_id": snapshot.snapshot_id if snapshot else request.decision_snapshot_id,
-            "strategy_alignment": request.strategy_alignment,
+            "strategy_alignment": strategy_alignment,
+            "alignment_override_reason": request.alignment_override_reason,
             "created_at": now_iso,
             "updated_at": now_iso,
         }
@@ -64,6 +74,12 @@ class TradeService:
         snapshot = self._decision_snapshot_service.create_from_symbol(
             symbol=request.symbol,
             use_llm=request.use_llm,
+        )
+        strategy_alignment = _resolve_strategy_alignment(
+            requested_alignment=request.strategy_alignment,
+            snapshot_action=snapshot.action,
+            side=request.side,
+            override_reason=request.alignment_override_reason,
         )
         trade_date = (request.trade_date or datetime.now(timezone.utc)).astimezone(timezone.utc)
         amount = _resolve_amount(request.price, request.quantity, request.amount)
@@ -79,7 +95,8 @@ class TradeService:
             "reason_type": request.reason_type,
             "note": request.note,
             "decision_snapshot_id": snapshot.snapshot_id,
-            "strategy_alignment": request.strategy_alignment,
+            "strategy_alignment": strategy_alignment,
+            "alignment_override_reason": request.alignment_override_reason,
             "created_at": now_iso,
             "updated_at": now_iso,
         }
@@ -121,6 +138,12 @@ class TradeService:
             return None
 
         updates = request.model_dump(exclude_none=True)
+        merged_side = str(updates.get("side", current.get("side")))
+        merged_reason_type = str(updates.get("reason_type", current.get("reason_type")))
+        validate_trade_reason_type_for_side(
+            merged_reason_type,  # type: ignore[arg-type]
+            merged_side,  # type: ignore[arg-type]
+        )
         if "trade_date" in updates:
             updates["trade_date"] = updates["trade_date"].astimezone(timezone.utc).isoformat()
         if "symbol" in updates:
@@ -130,6 +153,23 @@ class TradeService:
             merged_quantity = updates.get("quantity", current.get("quantity"))
             merged_amount = updates.get("amount", current.get("amount"))
             updates["amount"] = _resolve_amount(merged_price, merged_quantity, merged_amount)
+        merged_snapshot_id = str(
+            updates.get("decision_snapshot_id", current.get("decision_snapshot_id")),
+        ) if (updates.get("decision_snapshot_id", current.get("decision_snapshot_id"))) else None
+        snapshot = self._decision_snapshot_service.get_snapshot(merged_snapshot_id) if merged_snapshot_id else None
+        requested_alignment = str(
+            updates.get("strategy_alignment", current.get("strategy_alignment", "unknown")),
+        )
+        override_reason = str(
+            updates.get("alignment_override_reason", current.get("alignment_override_reason")),
+        ) if updates.get("alignment_override_reason", current.get("alignment_override_reason")) else None
+        updates["strategy_alignment"] = _resolve_strategy_alignment(
+            requested_alignment=requested_alignment,  # type: ignore[arg-type]
+            snapshot_action=snapshot.action if snapshot else None,
+            side=merged_side,  # type: ignore[arg-type]
+            override_reason=override_reason,
+        )
+        updates["alignment_override_reason"] = override_reason
         updates["updated_at"] = utc_now_iso()
 
         updated = self._store.update_trade_record(trade_id, updates)
@@ -208,6 +248,7 @@ class TradeService:
             note=payload.get("note"),
             decision_snapshot_id=payload.get("decision_snapshot_id"),
             strategy_alignment=str(payload.get("strategy_alignment", "unknown")),
+            alignment_override_reason=payload.get("alignment_override_reason"),
             created_at=parse_iso_datetime(str(payload["created_at"])).astimezone(timezone.utc),
             updated_at=parse_iso_datetime(str(payload["updated_at"])).astimezone(timezone.utc),
             decision_snapshot=resolved_snapshot,
@@ -225,3 +266,56 @@ def _resolve_amount(
         return None
     return round(price * quantity, 6)
 
+
+def _infer_strategy_alignment(
+    *,
+    snapshot_action: Optional[str],
+    side: TradeSide,
+) -> StrategyAlignment:
+    if not snapshot_action:
+        return "unknown"
+
+    normalized_action = str(snapshot_action).upper()
+
+    if normalized_action in {"AVOID"}:
+        if side in {"BUY", "ADD"}:
+            return "not_aligned"
+        return "aligned"
+
+    if normalized_action in {"BUY", "BUY_NOW"}:
+        if side in {"BUY", "ADD"}:
+            return "aligned"
+        return "not_aligned"
+
+    if normalized_action in {"WATCH", "WAIT_PULLBACK", "WAIT_BREAKOUT", "RESEARCH_ONLY"}:
+        if side == "SKIP":
+            return "aligned"
+        return "partially_aligned"
+
+    return "unknown"
+
+
+def _resolve_strategy_alignment(
+    *,
+    requested_alignment: StrategyAlignment,
+    snapshot_action: Optional[str],
+    side: TradeSide,
+    override_reason: Optional[str],
+) -> StrategyAlignment:
+    inferred_alignment = _infer_strategy_alignment(
+        snapshot_action=snapshot_action,
+        side=side,
+    )
+
+    if requested_alignment == "unknown":
+        return inferred_alignment
+
+    if inferred_alignment in {"unknown", requested_alignment}:
+        return requested_alignment
+
+    if override_reason and override_reason.strip():
+        return requested_alignment
+
+    raise ValueError(
+        "当前交易与原判断存在冲突，若要手动指定 strategy_alignment，请提供 alignment_override_reason。",
+    )

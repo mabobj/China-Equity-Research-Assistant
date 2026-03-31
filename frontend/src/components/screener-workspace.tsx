@@ -465,11 +465,11 @@ function BatchFilterPanel({
             className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
           >
             <option value="ALL">全部</option>
-            <option value="READY_TO_BUY">READY_TO_BUY</option>
-            <option value="WATCH_PULLBACK">WATCH_PULLBACK</option>
-            <option value="WATCH_BREAKOUT">WATCH_BREAKOUT</option>
-            <option value="RESEARCH_ONLY">RESEARCH_ONLY</option>
-            <option value="AVOID">AVOID</option>
+            <option value="READY_TO_BUY">{formatListType("READY_TO_BUY")}</option>
+            <option value="WATCH_PULLBACK">{formatListType("WATCH_PULLBACK")}</option>
+            <option value="WATCH_BREAKOUT">{formatListType("WATCH_BREAKOUT")}</option>
+            <option value="RESEARCH_ONLY">{formatListType("RESEARCH_ONLY")}</option>
+            <option value="AVOID">{formatListType("AVOID")}</option>
           </select>
         </label>
         <Field
