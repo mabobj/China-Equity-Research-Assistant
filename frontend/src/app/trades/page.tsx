@@ -125,12 +125,22 @@ export default function TradesPage() {
     setError(null);
     setSubmitting(true);
     try {
+      const effectiveReasonType = isReasonTypeCompatible(form.side, form.reasonType)
+        ? form.reasonType
+        : defaultReasonTypeForSide(form.side);
+      if (effectiveReasonType !== form.reasonType) {
+        setForm((previous) => ({
+          ...previous,
+          reasonType: effectiveReasonType,
+        }));
+      }
+
       const symbol = normalizeSymbolInput(form.symbol);
       const payload = {
         symbol,
         use_llm: form.useLlm,
         side: form.side,
-        reason_type: form.reasonType,
+        reason_type: effectiveReasonType,
         strategy_alignment: form.strategyAlignment,
         alignment_override_reason: form.alignmentOverrideReason.trim() || undefined,
         note: form.note.trim() || undefined,
@@ -184,7 +194,17 @@ export default function TradesPage() {
             label="动作"
             value={form.side}
             onChange={(value) =>
-              setForm((previous) => ({ ...previous, side: value as TradeSide }))
+              setForm((previous) => {
+                const nextSide = value as TradeSide;
+                const nextReasonType = isReasonTypeCompatible(nextSide, previous.reasonType)
+                  ? previous.reasonType
+                  : defaultReasonTypeForSide(nextSide);
+                return {
+                  ...previous,
+                  side: nextSide,
+                  reasonType: nextReasonType,
+                };
+              })
             }
             options={SIDE_OPTIONS}
           />
@@ -413,4 +433,31 @@ function SelectField({
       </select>
     </label>
   );
+}
+
+function defaultReasonTypeForSide(side: TradeSide): TradeReasonType {
+  if (side === "SKIP") return "watch_only";
+  if (side === "SELL" || side === "REDUCE") return "take_profit";
+  return "signal_entry";
+}
+
+function isReasonTypeCompatible(side: TradeSide, reasonType: TradeReasonType): boolean {
+  const entryReasonTypes: TradeReasonType[] = ["signal_entry", "pullback_entry", "breakout_entry"];
+  const exitReasonTypes: TradeReasonType[] = ["stop_loss", "take_profit", "time_exit"];
+  const skipReasonTypes: TradeReasonType[] = [
+    "watch_only",
+    "skip_due_to_quality",
+    "skip_due_to_risk",
+  ];
+
+  if (entryReasonTypes.includes(reasonType)) {
+    return side === "BUY" || side === "ADD";
+  }
+  if (exitReasonTypes.includes(reasonType)) {
+    return side === "SELL" || side === "REDUCE";
+  }
+  if (skipReasonTypes.includes(reasonType)) {
+    return side === "SKIP";
+  }
+  return true;
 }

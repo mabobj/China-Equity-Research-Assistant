@@ -42,6 +42,12 @@ class _WorkspaceBundle:
     freshness_summary: _FreshnessSummary
     runtime_mode_requested: str
     runtime_mode_effective: str
+    decision_brief: Optional[object] = None
+
+
+@dataclass
+class _DecisionBriefMini:
+    action_now: str
 
 
 class _StubWorkspaceBundleService:
@@ -59,6 +65,7 @@ class _StubWorkspaceBundleService:
             ),
             runtime_mode_requested="rule_based",
             runtime_mode_effective="rule_based",
+            decision_brief=_DecisionBriefMini(action_now="WAIT_PULLBACK"),
         )
 
 
@@ -73,7 +80,7 @@ class _StubResearchManager:
             event_score=61,
             risk_score=40,
             overall_score=62,
-            action="WATCH",
+            action="BUY",
             confidence=57,
             thesis="信号偏中性，建议观察。",
             key_reasons=["趋势未破坏"],
@@ -162,6 +169,7 @@ def test_decision_snapshot_trade_review_flow(tmp_path) -> None:
     assert snapshot_response.status_code == 200
     snapshot_payload = snapshot_response.json()
     assert snapshot_payload["symbol"] == "600519.SH"
+    assert snapshot_payload["action"] == "WATCH"
     assert snapshot_payload["data_quality_summary"]["financial_quality"] == "degraded"
 
     trade_response = client.post(

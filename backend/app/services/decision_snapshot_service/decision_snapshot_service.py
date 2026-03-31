@@ -104,11 +104,12 @@ class DecisionSnapshotService:
             ).model_dump(mode="json")
             for item in bundle.freshness_summary.items
         ]
+        snapshot_action = _resolve_snapshot_action(bundle=bundle, research_action=research.action)
         return {
             "snapshot_id": "ds-" + uuid4().hex[:16],
             "symbol": normalized_symbol,
             "as_of_date": research.as_of_date.isoformat(),
-            "action": research.action,
+            "action": snapshot_action,
             "confidence": research.confidence,
             "technical_score": research.technical_score,
             "fundamental_score": research.fundamental_score,
@@ -181,3 +182,33 @@ class DecisionSnapshotService:
             created_at=parse_iso_datetime(str(payload["created_at"])).astimezone(timezone.utc),
         )
 
+
+def _resolve_snapshot_action(*, bundle: Any, research_action: str) -> str:
+    """Resolve one alignment baseline action for decision snapshot."""
+    decision_brief = getattr(bundle, "decision_brief", None)
+    mapped = _map_decision_brief_action_to_research_action(
+        getattr(decision_brief, "action_now", None),
+    )
+    if mapped is not None:
+        return mapped
+
+    review_report = getattr(bundle, "review_report", None)
+    final_judgement = getattr(review_report, "final_judgement", None)
+    review_action = getattr(final_judgement, "action", None)
+    if isinstance(review_action, str) and review_action:
+        return review_action
+
+    return research_action
+
+
+def _map_decision_brief_action_to_research_action(action_now: Any) -> Optional[str]:
+    if not isinstance(action_now, str) or not action_now:
+        return None
+    normalized = action_now.upper()
+    if normalized == "BUY_NOW":
+        return "BUY"
+    if normalized == "AVOID":
+        return "AVOID"
+    if normalized in {"WAIT_PULLBACK", "WAIT_BREAKOUT", "RESEARCH_ONLY"}:
+        return "WATCH"
+    return None

@@ -27,6 +27,7 @@ import {
 } from "@/lib/format";
 import type {
   CreateTradeFromCurrentDecisionRequest,
+  DecisionBriefActionNow,
   DebateReviewProgress,
   DecisionBriefEvidence,
   StrategyAlignment,
@@ -59,6 +60,7 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
     side: TradeSide;
     reasonType: TradeReasonType;
     strategyAlignment: StrategyAlignment;
+    alignmentOverrideReason: string;
     note: string;
     price: string;
     quantity: string;
@@ -66,6 +68,7 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
     side: "SKIP",
     reasonType: "watch_only",
     strategyAlignment: "unknown",
+    alignmentOverrideReason: "",
     note: "",
     price: "",
     quantity: "",
@@ -175,24 +178,48 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
     setTradeResult(null);
     setTradeSubmitting(true);
     try {
+      const effectiveReasonType = isReasonTypeCompatible(
+        tradeForm.side,
+        tradeForm.reasonType,
+      )
+        ? tradeForm.reasonType
+        : defaultReasonTypeForSide(tradeForm.side);
+      if (effectiveReasonType !== tradeForm.reasonType) {
+        setTradeForm((previous) => ({
+          ...previous,
+          reasonType: effectiveReasonType,
+        }));
+      }
+      const effectiveStrategyAlignment =
+        tradeForm.strategyAlignment === "unknown"
+          ? tradeConflictState.inferredAlignment
+          : tradeForm.strategyAlignment;
+      const requiresOverrideReason =
+        tradeConflictState.isConflict && effectiveStrategyAlignment !== "not_aligned";
+      if (requiresOverrideReason && !tradeForm.alignmentOverrideReason.trim()) {
+        throw new Error(
+          "当前交易与原判断冲突，请填写“人工覆盖原因”，或将“策略对齐”改为“不一致”。",
+        );
+      }
+
       const payload: CreateTradeFromCurrentDecisionRequest = {
         symbol,
         use_llm: useLlm,
         side: tradeForm.side,
         reason_type:
-          tradeConflictState.isConflict && tradeForm.reasonType !== "manual_override"
+          tradeConflictState.isConflict && effectiveReasonType !== "manual_override"
             ? "manual_override"
-            : tradeForm.reasonType,
-        strategy_alignment:
-          tradeForm.strategyAlignment === "unknown"
-            ? tradeConflictState.inferredAlignment
-            : tradeForm.strategyAlignment,
+            : effectiveReasonType,
+        strategy_alignment: effectiveStrategyAlignment,
         alignment_override_reason:
           tradeConflictState.isConflict && tradeForm.strategyAlignment !== "not_aligned"
             ? "前端检测到与原判断冲突，自动要求人工覆盖。"
             : undefined,
         note: tradeForm.note.trim() || undefined,
       };
+      if (tradeForm.alignmentOverrideReason.trim()) {
+        payload.alignment_override_reason = tradeForm.alignmentOverrideReason.trim();
+      }
       if (tradeForm.side !== "SKIP") {
         const price = Number.parseFloat(tradeForm.price);
         const quantity = Number.parseInt(tradeForm.quantity, 10);
@@ -219,16 +246,35 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
     [bundle],
   );
   const tradeConflictState = useMemo(() => {
+    const baselineAction =
+      mapDecisionBriefActionToResearchAction(bundle?.decision_brief?.action_now) ??
+      bundle?.review_report?.final_judgement.action ??
+      null;
     const inferredAlignment = inferAlignmentFromAction(
-      bundle?.review_report?.final_judgement.action,
+      baselineAction,
       tradeForm.side,
     );
-    return {
-      inferredAlignment,
-      isConflict: inferredAlignment === "not_aligned",
-      snapshotAction: bundle?.review_report?.final_judgement.action ?? null,
-    };
-  }, [bundle?.review_report?.final_judgement.action, tradeForm.side]);
+      return {
+        inferredAlignment,
+        isConflict: inferredAlignment === "not_aligned",
+        snapshotAction: baselineAction,
+        baselineSource: mapDecisionBriefActionToResearchAction(
+          bundle?.decision_brief?.action_now,
+        )
+          ? "决策简报（action_now）"
+          : "研究报告（review-report v2.final_judgement.action）",
+      };
+  }, [bundle?.decision_brief?.action_now, bundle?.review_report?.final_judgement.action, tradeForm.side]);
+  const actionLayerMismatch = useMemo(() => {
+    const reviewAction = (bundle?.review_report?.final_judgement.action ?? "").toUpperCase();
+    const briefMappedAction = mapDecisionBriefActionToResearchAction(
+      bundle?.decision_brief?.action_now,
+    );
+    if (!reviewAction || !briefMappedAction) {
+      return false;
+    }
+    return reviewAction !== briefMappedAction;
+  }, [bundle?.decision_brief?.action_now, bundle?.review_report?.final_judgement.action]);
 
   return (
     <div className="space-y-6">
@@ -331,6 +377,27 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
           <p className="mt-2 text-sm leading-6 text-slate-600">
             可先保存本次判断，再记录交易动作，系统会自动关联当前决策快照。
           </p>
+          <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            原判断（方向基线，用于一致性校验）：
+            {formatAction(tradeConflictState.snapshotAction ?? "WATCH")}
+            {" "}（来源：{tradeConflictState.baselineSource}）
+          </div>
+          <div className="mt-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+            执行动作（时机层）：
+            {bundle?.decision_brief?.action_now
+              ? formatDecisionBriefAction(bundle.decision_brief.action_now)
+              : "-"}
+            {" "}（来源：decision-brief.action_now）
+          </div>
+          {actionLayerMismatch ? (
+            <div className="mt-3">
+              <StatusBlock
+                title="结论口径提示"
+                description="检测到“方向层结论（review-report）”与“时机层结论（decision-brief）”不一致。交易一致性校验当前优先采用“时机层结论（decision-brief.action_now 映射）”。"
+                tone="error"
+              />
+            </div>
+          ) : null}
           <div className="mt-4">
             <button
               type="button"
@@ -349,9 +416,16 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
                 onChange={(event) =>
                   setTradeForm((previous) => {
                     const nextSide = event.target.value as TradeSide;
+                    const nextReasonType = isReasonTypeCompatible(
+                      nextSide,
+                      previous.reasonType,
+                    )
+                      ? previous.reasonType
+                      : defaultReasonTypeForSide(nextSide);
                     return {
                       ...previous,
                       side: nextSide,
+                      reasonType: nextReasonType,
                       strategyAlignment:
                         previous.strategyAlignment === "unknown"
                           ? inferAlignmentFromAction(
@@ -413,6 +487,22 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
                 <option value="not_aligned">{formatStrategyAlignment("not_aligned")}</option>
               </select>
             </label>
+            <label className="space-y-2 md:col-span-3">
+              <span className="text-sm font-medium text-slate-700">
+                人工覆盖原因（仅在冲突且仍手动指定对齐时必填）
+              </span>
+              <input
+                value={tradeForm.alignmentOverrideReason}
+                onChange={(event) =>
+                  setTradeForm((previous) => ({
+                    ...previous,
+                    alignmentOverrideReason: event.target.value,
+                  }))
+                }
+                placeholder="例如：人工判断短期回撤到支撑位，小仓位试错"
+                className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              />
+            </label>
             <label className="space-y-2">
               <span className="text-sm font-medium text-slate-700">价格（非 SKIP 必填）</span>
               <input
@@ -460,6 +550,15 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
                 description={`当前决策为 ${formatAction(tradeConflictState.snapshotAction ?? "WATCH")}，但你选择了 ${formatTradeSide(tradeForm.side)}。系统将按人工覆盖处理。`}
                 tone="error"
               />
+              <StatusBlock
+                title="冲突说明"
+                description={`当前交易：${formatTradeSide(tradeForm.side)}；原判断：${formatAction(
+                  tradeConflictState.snapshotAction ?? "WATCH",
+                )}。两者方向不一致，默认记为“${formatStrategyAlignment(
+                  "not_aligned",
+                )}”。若你仍手动选择“对齐/部分对齐”，请填写“人工覆盖原因”。`}
+                tone="error"
+              />
             </div>
           ) : null}
           {snapshotResult ? (
@@ -486,7 +585,7 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
             {bundle.decision_brief ? (
               <div className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <Metric label="当前动作" value={formatDecisionBriefAction(bundle.decision_brief.action_now)} />
+                  <Metric label="执行动作（时机）" value={formatDecisionBriefAction(bundle.decision_brief.action_now)} />
                   <Metric label="置信度" value={formatConvictionLevel(bundle.decision_brief.conviction_level)} />
                   <Metric label="截至日期" value={formatDate(bundle.decision_brief.as_of_date)} />
                   <Metric label="下次复查窗口" value={formatLabel(bundle.decision_brief.next_review_window)} />
@@ -826,4 +925,40 @@ function inferAlignmentFromAction(
   }
 
   return "unknown";
+}
+
+function defaultReasonTypeForSide(side: TradeSide): TradeReasonType {
+  if (side === "SKIP") return "watch_only";
+  if (side === "SELL" || side === "REDUCE") return "take_profit";
+  return "signal_entry";
+}
+
+function isReasonTypeCompatible(side: TradeSide, reasonType: TradeReasonType): boolean {
+  const entryReasonTypes: TradeReasonType[] = ["signal_entry", "pullback_entry", "breakout_entry"];
+  const exitReasonTypes: TradeReasonType[] = ["stop_loss", "take_profit", "time_exit"];
+  const skipReasonTypes: TradeReasonType[] = [
+    "watch_only",
+    "skip_due_to_quality",
+    "skip_due_to_risk",
+  ];
+
+  if (entryReasonTypes.includes(reasonType)) {
+    return side === "BUY" || side === "ADD";
+  }
+  if (exitReasonTypes.includes(reasonType)) {
+    return side === "SELL" || side === "REDUCE";
+  }
+  if (skipReasonTypes.includes(reasonType)) {
+    return side === "SKIP";
+  }
+  return true;
+}
+
+function mapDecisionBriefActionToResearchAction(
+  action: DecisionBriefActionNow | null | undefined,
+): "BUY" | "WATCH" | "AVOID" | null {
+  if (!action) return null;
+  if (action === "BUY_NOW") return "BUY";
+  if (action === "AVOID") return "AVOID";
+  return "WATCH";
 }
