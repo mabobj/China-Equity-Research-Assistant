@@ -4,7 +4,13 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-import { getDebateReviewProgress, getWorkspaceBundle, normalizeSymbolInput } from "@/lib/api";
+import {
+  createDecisionSnapshot,
+  createTradeFromCurrentDecision,
+  getDebateReviewProgress,
+  getWorkspaceBundle,
+  normalizeSymbolInput,
+} from "@/lib/api";
 import {
   formatAction,
   formatConvictionLevel,
@@ -17,8 +23,12 @@ import {
   formatScore,
 } from "@/lib/format";
 import type {
+  CreateTradeFromCurrentDecisionRequest,
   DebateReviewProgress,
   DecisionBriefEvidence,
+  StrategyAlignment,
+  TradeReasonType,
+  TradeSide,
   WorkspaceBundleResponse,
 } from "@/types/api";
 
@@ -37,6 +47,26 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<DebateReviewProgress | null>(null);
+  const [snapshotSaving, setSnapshotSaving] = useState(false);
+  const [tradeSubmitting, setTradeSubmitting] = useState(false);
+  const [snapshotResult, setSnapshotResult] = useState<string | null>(null);
+  const [tradeResult, setTradeResult] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [tradeForm, setTradeForm] = useState<{
+    side: TradeSide;
+    reasonType: TradeReasonType;
+    strategyAlignment: StrategyAlignment;
+    note: string;
+    price: string;
+    quantity: string;
+  }>({
+    side: "SKIP",
+    reasonType: "watch_only",
+    strategyAlignment: "unknown",
+    note: "",
+    price: "",
+    quantity: "",
+  });
 
   useEffect(() => {
     setInputValue(symbol);
@@ -115,6 +145,60 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
     const normalized = normalizeSymbolInput(inputValue);
     if (!normalized) return;
     router.push(`/stocks/${encodeURIComponent(normalized)}`);
+  };
+
+  const handleSaveSnapshot = async () => {
+    setActionError(null);
+    setSnapshotResult(null);
+    setTradeResult(null);
+    setSnapshotSaving(true);
+    try {
+      const response = await createDecisionSnapshot({
+        symbol,
+        use_llm: useLlm,
+      });
+      setSnapshotResult(response.snapshot_id);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "保存判断失败，请稍后重试。");
+    } finally {
+      setSnapshotSaving(false);
+    }
+  };
+
+  const handleCreateTrade = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setActionError(null);
+    setSnapshotResult(null);
+    setTradeResult(null);
+    setTradeSubmitting(true);
+    try {
+      const payload: CreateTradeFromCurrentDecisionRequest = {
+        symbol,
+        use_llm: useLlm,
+        side: tradeForm.side,
+        reason_type: tradeForm.reasonType,
+        strategy_alignment: tradeForm.strategyAlignment,
+        note: tradeForm.note.trim() || undefined,
+      };
+      if (tradeForm.side !== "SKIP") {
+        const price = Number.parseFloat(tradeForm.price);
+        const quantity = Number.parseInt(tradeForm.quantity, 10);
+        if (!Number.isFinite(price) || price <= 0) {
+          throw new Error("非 SKIP 交易需要填写有效价格。");
+        }
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          throw new Error("非 SKIP 交易需要填写有效数量。");
+        }
+        payload.price = price;
+        payload.quantity = quantity;
+      }
+      const response = await createTradeFromCurrentDecision(payload);
+      setTradeResult(response.trade_id);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "记录交易失败，请稍后重试。");
+    } finally {
+      setTradeSubmitting(false);
+    }
   };
 
   const failedModules = useMemo(
@@ -218,6 +302,139 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
             />
           </div>
         ) : null}
+        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-semibold text-slate-950">决策固化与交易记录</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            可先保存本次判断，再记录交易动作，系统会自动关联当前决策快照。
+          </p>
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={handleSaveSnapshot}
+              disabled={snapshotSaving || tradeSubmitting}
+              className="min-h-11 rounded-2xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:bg-slate-400"
+            >
+              {snapshotSaving ? "保存中..." : "保存本次判断"}
+            </button>
+          </div>
+          <form className="mt-4 grid gap-3 md:grid-cols-3" onSubmit={handleCreateTrade}>
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-slate-700">动作</span>
+              <select
+                value={tradeForm.side}
+                onChange={(event) =>
+                  setTradeForm((previous) => ({
+                    ...previous,
+                    side: event.target.value as TradeSide,
+                  }))
+                }
+                className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              >
+                <option value="SKIP">SKIP</option>
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+                <option value="ADD">ADD</option>
+                <option value="REDUCE">REDUCE</option>
+              </select>
+            </label>
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-slate-700">原因类型</span>
+              <select
+                value={tradeForm.reasonType}
+                onChange={(event) =>
+                  setTradeForm((previous) => ({
+                    ...previous,
+                    reasonType: event.target.value as TradeReasonType,
+                  }))
+                }
+                className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              >
+                <option value="watch_only">watch_only</option>
+                <option value="signal_entry">signal_entry</option>
+                <option value="pullback_entry">pullback_entry</option>
+                <option value="breakout_entry">breakout_entry</option>
+                <option value="stop_loss">stop_loss</option>
+                <option value="take_profit">take_profit</option>
+                <option value="time_exit">time_exit</option>
+                <option value="manual_override">manual_override</option>
+                <option value="skip_due_to_quality">skip_due_to_quality</option>
+                <option value="skip_due_to_risk">skip_due_to_risk</option>
+              </select>
+            </label>
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-slate-700">策略对齐</span>
+              <select
+                value={tradeForm.strategyAlignment}
+                onChange={(event) =>
+                  setTradeForm((previous) => ({
+                    ...previous,
+                    strategyAlignment: event.target.value as StrategyAlignment,
+                  }))
+                }
+                className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              >
+                <option value="unknown">unknown</option>
+                <option value="aligned">aligned</option>
+                <option value="partially_aligned">partially_aligned</option>
+                <option value="not_aligned">not_aligned</option>
+              </select>
+            </label>
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-slate-700">价格（非 SKIP 必填）</span>
+              <input
+                value={tradeForm.price}
+                onChange={(event) =>
+                  setTradeForm((previous) => ({ ...previous, price: event.target.value }))
+                }
+                className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-slate-700">数量（非 SKIP 必填）</span>
+              <input
+                value={tradeForm.quantity}
+                onChange={(event) =>
+                  setTradeForm((previous) => ({ ...previous, quantity: event.target.value }))
+                }
+                className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              />
+            </label>
+            <label className="space-y-2 md:col-span-2">
+              <span className="text-sm font-medium text-slate-700">备注</span>
+              <input
+                value={tradeForm.note}
+                onChange={(event) =>
+                  setTradeForm((previous) => ({ ...previous, note: event.target.value }))
+                }
+                className="min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="submit"
+                disabled={tradeSubmitting || snapshotSaving}
+                className="min-h-11 rounded-2xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:bg-emerald-300"
+              >
+                {tradeSubmitting ? "提交中..." : "记录交易"}
+              </button>
+            </div>
+          </form>
+          {snapshotResult ? (
+            <div className="mt-3">
+              <StatusBlock title="保存成功" description={`snapshot_id: ${snapshotResult}`} />
+            </div>
+          ) : null}
+          {tradeResult ? (
+            <div className="mt-3">
+              <StatusBlock title="记录成功" description={`trade_id: ${tradeResult}`} />
+            </div>
+          ) : null}
+          {actionError ? (
+            <div className="mt-3">
+              <StatusBlock title="操作失败" description={actionError} tone="error" />
+            </div>
+          ) : null}
+        </div>
       </SectionCard>
 
       {bundle ? (

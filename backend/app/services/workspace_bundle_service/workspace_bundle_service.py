@@ -305,8 +305,15 @@ class WorkspaceBundleService:
                         ResearchInputs(
                             profile=state.profile,
                             technical_snapshot=technical_snapshot,
+                            daily_bars_response=daily_bars_product.payload,
                             financial_summary=financial_summary_product.payload,
                             announcements=announcements_product.payload.items,
+                            announcements_quality_status=(
+                                announcements_product.payload.quality_status
+                            ),
+                            announcements_cleaning_warnings=list(
+                                announcements_product.payload.cleaning_warnings
+                            ),
                         )
                     ),
                 )

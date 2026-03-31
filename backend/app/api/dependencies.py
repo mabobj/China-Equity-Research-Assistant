@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from fastapi import Depends
 
 from app.core.config import get_settings
+from app.db.trade_review_store import TradeReviewStore
 from app.db.market_data_store import LocalMarketDataStore
 from app.services.data_service.market_data_service import MarketDataService
 from app.services.data_service.provider_registry import ProviderRegistry
@@ -68,10 +69,15 @@ if TYPE_CHECKING:
     from app.services.llm_debate_service.progress_tracker import DebateProgressTracker
     from app.services.research_service.research_manager import ResearchManager
     from app.services.research_service.strategy_planner import StrategyPlanner
+    from app.services.review_record_service.review_service import ReviewRecordService
     from app.services.review_service.stock_review_service import StockReviewService
     from app.services.screener_service.deep_pipeline import DeepScreenerPipeline
     from app.services.screener_service.pipeline import ScreenerPipeline
     from app.services.screener_service.batch_service import ScreenerBatchService
+    from app.services.trade_service.trade_service import TradeService
+    from app.services.decision_snapshot_service.decision_snapshot_service import (
+        DecisionSnapshotService,
+    )
     from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
     from app.services.workflow_runtime.workflow_service import WorkflowRuntimeService
     from app.services.workspace_bundle_service.workspace_bundle_service import (
@@ -453,6 +459,47 @@ def get_workflow_artifact_store() -> "FileWorkflowArtifactStore":
 @lru_cache
 def get_workflow_background_executor() -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=2, thread_name_prefix="workflow-runtime")
+
+
+@lru_cache
+def get_trade_review_store() -> TradeReviewStore:
+    settings = get_settings()
+    return TradeReviewStore(database_path=settings.data_dir / "trade_review.sqlite3")
+
+
+@lru_cache
+def get_decision_snapshot_service() -> "DecisionSnapshotService":
+    from app.services.decision_snapshot_service.decision_snapshot_service import (
+        DecisionSnapshotService,
+    )
+
+    return DecisionSnapshotService(
+        store=get_trade_review_store(),
+        workspace_bundle_service=get_workspace_bundle_service(),
+        research_manager=get_research_manager(),
+    )
+
+
+@lru_cache
+def get_trade_service() -> "TradeService":
+    from app.services.trade_service.trade_service import TradeService
+
+    return TradeService(
+        store=get_trade_review_store(),
+        decision_snapshot_service=get_decision_snapshot_service(),
+    )
+
+
+@lru_cache
+def get_review_record_service() -> "ReviewRecordService":
+    from app.services.review_record_service.review_service import ReviewRecordService
+
+    return ReviewRecordService(
+        store=get_trade_review_store(),
+        trade_service=get_trade_service(),
+        decision_snapshot_service=get_decision_snapshot_service(),
+        market_data_service=get_market_data_service(),
+    )
 
 
 def get_workflow_runtime_service(

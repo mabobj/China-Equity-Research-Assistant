@@ -20,55 +20,39 @@ function runCheck(name, fn) {
 runCheck("单票页挂载工作台组件", () => {
   const source = read("src/app/stocks/[symbol]/page.tsx");
   assertContains(source, "StockWorkspace", "单票页应导入 StockWorkspace");
-  assertContains(
-    source,
-    "<StockWorkspace symbol={decodedSymbol} />",
-    "单票页应渲染 StockWorkspace",
-  );
+  assertContains(source, "<StockWorkspace symbol={decodedSymbol} />", "单票页应渲染工作台");
 });
 
-runCheck("单票工作台以 workspace-bundle 为主数据源", () => {
+runCheck("单票工作台接入保存判断与记录交易动作", () => {
   const source = read("src/components/stock-workspace.tsx");
-  assertContains(source, "getWorkspaceBundle", "单票工作台应调用 getWorkspaceBundle");
-  assertContains(source, "setStatus(\"loading\")", "单票工作台应进入 loading 状态");
-  assertContains(source, "runtime_mode_effective", "应展示实际运行模式");
+  assertContains(source, "createDecisionSnapshot", "应调用保存判断接口");
+  assertContains(source, "createTradeFromCurrentDecision", "应调用记录交易接口");
+  assertContains(source, "保存本次判断", "应展示保存判断按钮");
+  assertContains(source, "记录交易", "应展示记录交易按钮");
 });
 
-runCheck("选股工作台使用 workflow + 批次台账", () => {
-  const source = read("src/components/screener-workspace.tsx");
-  assertContains(source, "runScreenerWorkflow", "应发起初筛 workflow");
-  assertContains(source, "getWorkflowRunDetail", "应轮询 workflow 运行详情");
-  assertContains(source, "getLatestScreenerBatch", "应加载最新批次摘要");
-  assertContains(source, "batch_size", "应使用 batch_size 发起初筛");
-  assertContains(source, "当前展示窗口", "应展示时间窗口卡片");
-  assertContains(source, "重置游标", "应提供游标重置入口");
-  assertContains(source, "已有运行中的初筛任务", "应展示互斥运行提示");
-  assertContains(source, "数据质量影响说明", "应展示质量影响说明");
-  assertContains(source, "行情质量", "应展示行情质量标签");
+runCheck("交易页已从占位页升级为可用页面", () => {
+  const source = read("src/app/trades/page.tsx");
+  assertContains(source, "createTradeFromCurrentDecision", "交易页应支持创建交易记录");
+  assertContains(source, "listTrades", "交易页应加载交易记录列表");
+  assertContains(source, "交易记录列表", "交易页应展示列表区块");
 });
 
-runCheck("workflow 运行摘要组件展示状态与结果摘要", () => {
-  const source = read("src/components/workflow-run-summary.tsx");
-  assertContains(source, "run.status", "应读取 workflow 状态");
-  assertContains(source, "final_output_summary", "应展示最终摘要");
-  assertContains(source, "failed_symbols", "应展示局部失败摘要");
+runCheck("复盘页已从占位页升级为可用页面", () => {
+  const source = read("src/app/reviews/page.tsx");
+  assertContains(source, "createReviewFromTrade", "复盘页应支持从交易生成草稿");
+  assertContains(source, "updateReview", "复盘页应支持更新复盘记录");
+  assertContains(source, "复盘列表与详情", "复盘页应展示列表与详情区块");
 });
 
-runCheck("前端 API 层暴露批次查询函数", () => {
+runCheck("前端 API 层暴露交易/复盘闭环接口", () => {
   const source = read("src/lib/api.ts");
-  assertContains(source, "getLatestScreenerBatch", "应提供最新批次接口");
-  assertContains(source, "getScreenerBatchResults", "应提供批次结果接口");
-  assertContains(source, "/screener/latest-batch", "应调用后端 latest-batch 路径");
-});
-
-runCheck("保留页明确标注未启用", () => {
-  const reviewsSource = read("src/app/reviews/page.tsx");
-  assertContains(reviewsSource, "复盘记录（预留）", "reviews 页应保留预留说明");
-  assertContains(reviewsSource, "未启用", "reviews 页应明确未启用");
-
-  const tradesSource = read("src/app/trades/page.tsx");
-  assertContains(tradesSource, "交易记录（预留）", "trades 页应保留预留说明");
-  assertContains(tradesSource, "未启用", "trades 页应明确未启用");
+  assertContains(source, "createDecisionSnapshot", "应暴露决策快照创建方法");
+  assertContains(source, "createTradeFromCurrentDecision", "应暴露从当前决策创建交易方法");
+  assertContains(source, "createReviewFromTrade", "应暴露从交易生成复盘方法");
+  assertContains(source, "/decision-snapshots", "应包含决策快照后端路径");
+  assertContains(source, "/trades/from-current-decision", "应包含交易后端路径");
+  assertContains(source, "/reviews/from-trade/", "应包含复盘后端路径");
 });
 
 process.stdout.write("Smoke tests completed.\n");

@@ -665,6 +665,124 @@ export type WorkflowRunDetailResponse = WorkflowRunResponse & {
   final_output: Record<string, unknown> | null;
 };
 
+export type TradeSide = "BUY" | "SELL" | "ADD" | "REDUCE" | "SKIP";
+export type TradeReasonType =
+  | "signal_entry"
+  | "pullback_entry"
+  | "breakout_entry"
+  | "stop_loss"
+  | "take_profit"
+  | "time_exit"
+  | "manual_override"
+  | "watch_only"
+  | "skip_due_to_quality"
+  | "skip_due_to_risk";
+export type StrategyAlignment =
+  | "aligned"
+  | "partially_aligned"
+  | "not_aligned"
+  | "unknown";
+export type ReviewOutcomeLabel =
+  | "success"
+  | "partial_success"
+  | "failure"
+  | "invalidated"
+  | "no_trade";
+export type DidFollowPlan = "yes" | "partial" | "no";
+
+export type DecisionSourceRef = {
+  module_name: string;
+  as_of_date: string | null;
+  freshness_mode: string | null;
+  source_mode: string | null;
+  note: string | null;
+};
+
+export type DecisionSnapshot = {
+  snapshot_id: string;
+  symbol: string;
+  as_of_date: string;
+  action: string;
+  confidence: number;
+  technical_score: number;
+  fundamental_score: number;
+  event_score: number;
+  overall_score: number;
+  thesis: string;
+  risks: string[];
+  triggers: string[];
+  invalidations: string[];
+  data_quality_summary:
+    | {
+        bars_quality: DataQualityStatus;
+        financial_quality: DataQualityStatus;
+        announcement_quality: DataQualityStatus;
+        technical_modifier: number;
+        fundamental_modifier: number;
+        event_modifier: number;
+        overall_quality_modifier: number;
+      }
+    | null;
+  confidence_reasons: string[];
+  runtime_mode_requested: string | null;
+  runtime_mode_effective: string | null;
+  source_refs: DecisionSourceRef[];
+  created_at: string;
+};
+
+export type DecisionSnapshotListResponse = {
+  count: number;
+  items: DecisionSnapshot[];
+};
+
+export type TradeRecord = {
+  trade_id: string;
+  symbol: string;
+  side: TradeSide;
+  trade_date: string;
+  price: number | null;
+  quantity: number | null;
+  amount: number | null;
+  reason_type: TradeReasonType;
+  note: string | null;
+  decision_snapshot_id: string | null;
+  strategy_alignment: StrategyAlignment;
+  created_at: string;
+  updated_at: string;
+  decision_snapshot: DecisionSnapshot | null;
+};
+
+export type TradeListResponse = {
+  count: number;
+  items: TradeRecord[];
+};
+
+export type ReviewRecord = {
+  review_id: string;
+  symbol: string;
+  review_date: string;
+  linked_trade_id: string | null;
+  linked_decision_snapshot_id: string | null;
+  outcome_label: ReviewOutcomeLabel;
+  holding_days: number | null;
+  max_favorable_excursion: number | null;
+  max_adverse_excursion: number | null;
+  exit_reason: string | null;
+  did_follow_plan: DidFollowPlan;
+  review_summary: string;
+  lesson_tags: string[];
+  warning_messages: string[];
+  created_at: string;
+  updated_at: string;
+  linked_trade: TradeRecord | null;
+  linked_decision_snapshot: DecisionSnapshot | null;
+};
+
+export type ReviewListResponse = {
+  count: number;
+  items: ReviewRecord[];
+};
+
 export type SingleStockWorkflowRunRequest = {
   symbol: string;
   start_from?: string;
@@ -707,3 +825,88 @@ export type DbQueryResponse = {
   rows: Array<Array<unknown>>;
   row_count: number;
 };
+
+export type CreateDecisionSnapshotRequest = {
+  symbol?: string;
+  use_llm?: boolean;
+  payload?: {
+    symbol: string;
+    as_of_date: string;
+    action: string;
+    confidence: number;
+    technical_score: number;
+    fundamental_score: number;
+    event_score: number;
+    overall_score: number;
+    thesis: string;
+    risks?: string[];
+    triggers?: string[];
+    invalidations?: string[];
+    data_quality_summary?: DecisionSnapshot["data_quality_summary"];
+    confidence_reasons?: string[];
+    runtime_mode_requested?: string;
+    runtime_mode_effective?: string;
+    source_refs?: DecisionSourceRef[];
+  };
+};
+
+export type CreateTradeRequest = {
+  symbol: string;
+  side: TradeSide;
+  trade_date: string;
+  price?: number;
+  quantity?: number;
+  amount?: number;
+  reason_type: TradeReasonType;
+  note?: string;
+  decision_snapshot_id?: string;
+  strategy_alignment?: StrategyAlignment;
+  auto_create_snapshot?: boolean;
+  use_llm?: boolean;
+};
+
+export type UpdateTradeRequest = Partial<
+  Omit<CreateTradeRequest, "symbol" | "auto_create_snapshot" | "use_llm">
+>;
+
+export type CreateTradeFromCurrentDecisionRequest = {
+  symbol: string;
+  use_llm?: boolean;
+  side: TradeSide;
+  trade_date?: string;
+  price?: number;
+  quantity?: number;
+  amount?: number;
+  reason_type: TradeReasonType;
+  note?: string;
+  strategy_alignment?: StrategyAlignment;
+};
+
+export type CreateReviewRequest = {
+  symbol: string;
+  review_date: string;
+  linked_trade_id?: string;
+  linked_decision_snapshot_id?: string;
+  outcome_label: ReviewOutcomeLabel;
+  holding_days?: number;
+  max_favorable_excursion?: number;
+  max_adverse_excursion?: number;
+  exit_reason?: string;
+  did_follow_plan?: DidFollowPlan;
+  review_summary: string;
+  lesson_tags?: string[];
+  warning_messages?: string[];
+};
+
+export type CreateReviewFromTradeRequest = {
+  review_date?: string;
+  outcome_label?: ReviewOutcomeLabel;
+  did_follow_plan?: DidFollowPlan;
+  exit_reason?: string;
+};
+
+export type UpdateReviewRequest = Partial<
+  Omit<CreateReviewRequest, "symbol" | "review_date" | "review_summary"> & {
+    review_summary: string;
+  }
+>;

@@ -16,8 +16,8 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/", label: "首页" },
   { href: "/screener", label: "选股工作台" },
   { href: "/stocks/600519.SH", label: "单票工作台" },
-  { href: "/trades", label: "交易记录（预留）" },
-  { href: "/reviews", label: "复盘记录（预留）" },
+  { href: "/trades", label: "交易记录" },
+  { href: "/reviews", label: "复盘记录" },
 ];
 
 export function PageShell({ title, description, children }: PageShellProps) {

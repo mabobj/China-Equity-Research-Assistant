@@ -1,14 +1,23 @@
 import type {
   DataRefreshStatus,
+  CreateDecisionSnapshotRequest,
+  CreateReviewFromTradeRequest,
+  CreateReviewRequest,
+  CreateTradeFromCurrentDecisionRequest,
+  CreateTradeRequest,
   DbQueryResponse,
   DbTablesResponse,
   DecisionBrief,
+  DecisionSnapshot,
+  DecisionSnapshotListResponse,
   DebateReviewProgress,
   DebateReviewReport,
   DeepReviewWorkflowRunRequest,
   DeepScreenerRunResponse,
   FactorSnapshot,
   ResearchReport,
+  ReviewListResponse,
+  ReviewRecord,
   ScreenerRunResponse,
   ScreenerBatchDetailResponse,
   ScreenerBatchResultsResponse,
@@ -20,7 +29,11 @@ import type {
   StockProfile,
   StockReviewReport,
   StrategyPlan,
+  TradeListResponse,
+  TradeRecord,
   TriggerSnapshot,
+  UpdateReviewRequest,
+  UpdateTradeRequest,
   WorkspaceBundleResponse,
   WorkflowRunDetailResponse,
   WorkflowRunResponse,
@@ -74,7 +87,7 @@ type WorkspaceBundleParams = DebateReviewParams & {
 
 type FetchOptions = {
   timeoutMs: number;
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PATCH";
   body?: unknown;
 };
 
@@ -304,6 +317,149 @@ export async function getWorkflowRunDetail(
   );
 }
 
+export async function createDecisionSnapshot(
+  payload: CreateDecisionSnapshotRequest,
+): Promise<DecisionSnapshot> {
+  return fetchBackend<DecisionSnapshot>("/decision-snapshots", {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function getDecisionSnapshot(
+  snapshotId: string,
+): Promise<DecisionSnapshot> {
+  return fetchBackend<DecisionSnapshot>(
+    `/decision-snapshots/${encodeURIComponent(snapshotId)}`,
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function listDecisionSnapshots(
+  params: {
+    symbol?: string;
+    limit?: number;
+  } = {},
+): Promise<DecisionSnapshotListResponse> {
+  return fetchBackend<DecisionSnapshotListResponse>(
+    buildPath("/decision-snapshots", {
+      symbol: params.symbol ? normalizeSymbolInput(params.symbol) : undefined,
+      limit: params.limit,
+    }),
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function createTrade(payload: CreateTradeRequest): Promise<TradeRecord> {
+  return fetchBackend<TradeRecord>("/trades", {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function createTradeFromCurrentDecision(
+  payload: CreateTradeFromCurrentDecisionRequest,
+): Promise<TradeRecord> {
+  return fetchBackend<TradeRecord>("/trades/from-current-decision", {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function listTrades(
+  params: {
+    symbol?: string;
+    side?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  } = {},
+): Promise<TradeListResponse> {
+  return fetchBackend<TradeListResponse>(
+    buildPath("/trades", {
+      symbol: params.symbol ? normalizeSymbolInput(params.symbol) : undefined,
+      side: params.side,
+      from: params.from,
+      to: params.to,
+      limit: params.limit,
+    }),
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function getTrade(tradeId: string): Promise<TradeRecord> {
+  return fetchBackend<TradeRecord>(`/trades/${encodeURIComponent(tradeId)}`, {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+  });
+}
+
+export async function updateTrade(
+  tradeId: string,
+  payload: UpdateTradeRequest,
+): Promise<TradeRecord> {
+  return fetchBackend<TradeRecord>(`/trades/${encodeURIComponent(tradeId)}`, {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    method: "PATCH",
+    body: payload,
+  });
+}
+
+export async function createReview(payload: CreateReviewRequest): Promise<ReviewRecord> {
+  return fetchBackend<ReviewRecord>("/reviews", {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function createReviewFromTrade(
+  tradeId: string,
+  payload: CreateReviewFromTradeRequest,
+): Promise<ReviewRecord> {
+  return fetchBackend<ReviewRecord>(`/reviews/from-trade/${encodeURIComponent(tradeId)}`, {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function listReviews(
+  params: {
+    symbol?: string;
+    outcomeLabel?: string;
+    limit?: number;
+  } = {},
+): Promise<ReviewListResponse> {
+  return fetchBackend<ReviewListResponse>(
+    buildPath("/reviews", {
+      symbol: params.symbol ? normalizeSymbolInput(params.symbol) : undefined,
+      outcome_label: params.outcomeLabel,
+      limit: params.limit,
+    }),
+    { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function getReview(reviewId: string): Promise<ReviewRecord> {
+  return fetchBackend<ReviewRecord>(`/reviews/${encodeURIComponent(reviewId)}`, {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+  });
+}
+
+export async function updateReview(
+  reviewId: string,
+  payload: UpdateReviewRequest,
+): Promise<ReviewRecord> {
+  return fetchBackend<ReviewRecord>(`/reviews/${encodeURIComponent(reviewId)}`, {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    method: "PATCH",
+    body: payload,
+  });
+}
+
 export async function getDataRefreshStatus(): Promise<DataRefreshStatus> {
   return fetchBackend<DataRefreshStatus>("/data/refresh", {
     timeoutMs: DATA_REFRESH_TIMEOUT_MS,
@@ -375,8 +531,8 @@ async function fetchBackend<T>(
   }
 }
 
-function buildHeaders(method: "GET" | "POST"): HeadersInit {
-  if (method === "POST") {
+function buildHeaders(method: "GET" | "POST" | "PATCH"): HeadersInit {
+  if (method === "POST" || method === "PATCH") {
     return {
       Accept: "application/json",
       "Content-Type": "application/json",
