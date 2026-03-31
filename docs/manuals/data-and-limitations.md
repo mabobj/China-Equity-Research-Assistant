@@ -42,6 +42,8 @@
 - `financial_summary`
 - `announcements`（公告索引层）
 
+详细规范见：[Data 清洗层总结 v0.1](data-cleaning.md)。
+
 统一目标：
 - provider 原始字段映射为内部统一语义
 - 空值/脏值/单位口径在清洗层集中处理

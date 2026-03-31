@@ -226,8 +226,9 @@ LLM_DEBATE_TIMEOUT_SECONDS=60
 1. [快速开始](quickstart.md)
 2. [日常使用说明](daily-usage.md)
 3. [数据源与边界说明](data-and-limitations.md)
-4. [系统架构](../architecture.md)
-5. [稳定性审计 v1](../audits/stability-review-v1.md)
+4. [Data 清洗层总结 v0.1](data-cleaning.md)
+5. [系统架构](../architecture.md)
+6. [稳定性审计 v1](../audits/stability-review-v1.md)
 
 ## 12. pytest 启动卡住（插件自动加载）
 

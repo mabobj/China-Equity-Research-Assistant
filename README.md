@@ -123,6 +123,7 @@
 - [快速开始](docs/manuals/quickstart.md)
 - [日常使用说明](docs/manuals/daily-usage.md)
 - [数据源与边界](docs/manuals/data-and-limitations.md)
+- [Data 清洗层总结 v0.1](docs/manuals/data-cleaning.md)
 - [故障排查](docs/manuals/troubleshooting.md)
 
 ## 本地启动

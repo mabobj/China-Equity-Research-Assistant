@@ -606,6 +606,15 @@ function BatchResultDetail({ result }: { result: ScreenerSymbolResult }) {
           value={result.action_now ? formatDecisionBriefAction(result.action_now) : "-"}
         />
       </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="行情质量" value={formatLabel(result.bars_quality ?? "-")} />
+        <Metric label="财务质量" value={formatLabel(result.financial_quality ?? "-")} />
+        <Metric label="公告质量" value={formatLabel(result.announcement_quality ?? "-")} />
+        <Metric
+          label="质量折损"
+          value={result.quality_penalty_applied ? "已应用" : "未应用"}
+        />
+      </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Metric label="支撑位" value={formatPrice(result.support_level)} />
         <Metric label="压力位" value={formatPrice(result.resistance_level)} />
@@ -614,6 +623,9 @@ function BatchResultDetail({ result }: { result: ScreenerSymbolResult }) {
       <div className="mt-4 space-y-3">
         <Metric label="规则版本" value={result.rule_version} />
         <Metric label="规则说明" value={result.rule_summary} />
+        {result.quality_note ? (
+          <StatusBlock title="数据质量影响说明" description={result.quality_note} />
+        ) : null}
         <StringPanel title="证据提示" items={result.evidence_hints} />
         {result.fail_reason ? (
           <StatusBlock title="失败说明" description={result.fail_reason} tone="error" />

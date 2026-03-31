@@ -213,6 +213,9 @@ backend/app/services/screener_service/batch_service.py
 - 清洗与质量评估在 cleaning 层集中处理
 - service 层统一消费清洗结果，避免字段映射逻辑散落
 
+规范文档：
+- [Data 清洗层总结 v0.1](manuals/data-cleaning.md)
+
 ## 财务摘要清洗接入现状
 
 `market_data_service.get_stock_financial_summary()` 已统一走财务清洗与归一化：

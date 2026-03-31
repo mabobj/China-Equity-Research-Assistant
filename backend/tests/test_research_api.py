@@ -42,6 +42,20 @@ class StubResearchManager:
                 "若价格跌破支撑位，技术观点失效。",
                 "若盈利指标明显转弱，基本面判断需要下修。",
             ],
+            data_quality_summary={
+                "bars_quality": "ok",
+                "financial_quality": "warning",
+                "announcement_quality": "ok",
+                "technical_modifier": 1.0,
+                "fundamental_modifier": 0.85,
+                "event_modifier": 1.0,
+                "overall_quality_modifier": 0.9475,
+            },
+            confidence_reasons=[
+                "行情数据质量正常，技术结论可正常参考。",
+                "财务摘要质量为 warning，基本面结论置信度已下调。",
+                "公告索引质量正常，事件结论可正常参考。",
+            ],
         )
 
 
@@ -58,5 +72,7 @@ def test_get_research_report_route_returns_structured_payload() -> None:
     assert response.json()["symbol"] == "600519.SH"
     assert response.json()["action"] == "BUY"
     assert response.json()["overall_score"] == 76
+    assert response.json()["data_quality_summary"]["financial_quality"] == "warning"
+    assert len(response.json()["confidence_reasons"]) >= 1
 
     app.dependency_overrides.clear()

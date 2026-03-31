@@ -43,6 +43,8 @@ runCheck("选股工作台使用 workflow + 批次台账", () => {
   assertContains(source, "当前展示窗口", "应展示时间窗口卡片");
   assertContains(source, "重置游标", "应提供游标重置入口");
   assertContains(source, "已有运行中的初筛任务", "应展示互斥运行提示");
+  assertContains(source, "数据质量影响说明", "应展示质量影响说明");
+  assertContains(source, "行情质量", "应展示行情质量标签");
 });
 
 runCheck("workflow 运行摘要组件展示状态与结果摘要", () => {

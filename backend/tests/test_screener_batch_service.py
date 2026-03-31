@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
@@ -54,6 +54,11 @@ def test_batch_service_persists_batch_and_symbol_results(tmp_path) -> None:
                 short_reason="趋势结构保持向上。",
                 rule_version="screener_workflow_v1",
                 rule_summary="规则筛选测试摘要",
+                bars_quality="ok",
+                financial_quality="warning",
+                announcement_quality="ok",
+                quality_penalty_applied=True,
+                quality_note="财务摘要质量一般，候选保留观察。",
             )
         ],
         watch_pullback_candidates=[],
@@ -77,7 +82,7 @@ def test_batch_service_persists_batch_and_symbol_results(tmp_path) -> None:
     assert finalized.universe_size == 120
     assert finalized.scanned_size == 118
 
-    latest = service.get_latest_batch()
+    latest = service.get_latest_batch(now=finished_at + timedelta(minutes=1))
     assert latest is not None
     assert latest.batch_id == batch.batch_id
 
@@ -86,6 +91,9 @@ def test_batch_service_persists_batch_and_symbol_results(tmp_path) -> None:
     assert results[0].symbol == "600519.SH"
     assert results[0].rule_version == "screener_workflow_v1"
     assert results[0].rule_summary == "规则筛选测试摘要"
+    assert results[0].financial_quality == "warning"
+    assert results[0].quality_penalty_applied is True
+    assert results[0].quality_note is not None
 
     detail = service.load_symbol_result(batch.batch_id, "600519.SH")
     assert detail is not None
@@ -143,7 +151,7 @@ def test_batch_service_returns_latest_completed_batch_by_time(tmp_path) -> None:
         error_message=None,
     )
 
-    latest = service.get_latest_batch()
+    latest = service.get_latest_batch(now=started_b + timedelta(minutes=1))
     assert latest is not None
     assert latest.batch_id == batch_b.batch_id
     assert latest.batch_id != batch_a.batch_id
@@ -209,7 +217,7 @@ def test_batch_service_localizes_legacy_english_headline(tmp_path) -> None:
         error_message=None,
     )
 
-    latest = service.get_latest_batch()
+    latest = service.get_latest_batch(now=started_at + timedelta(minutes=1))
     assert latest is not None
     rows = service.load_batch_results(latest.batch_id)
     assert rows

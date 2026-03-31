@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 import logging
 from time import perf_counter
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 from app.schemas.market_data import DailyBar, DailyBarResponse, UniverseItem
+from app.schemas.research_inputs import FinancialSummary
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.services.data_service.exceptions import DataServiceError
 from app.services.data_service.market_data_service import MarketDataService
@@ -34,6 +35,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 _RULE_VERSION = "screener_workflow_v1"
 _RULE_SUMMARY = "基于趋势评分、因子快照与风险约束的规则初筛。"
+_QUALITY_STATUS = Literal["ok", "warning", "degraded", "failed"]
+_QUALITY_WEIGHT = {
+    "ok": 1.00,
+    "warning": 0.95,
+    "degraded": 0.85,
+    "failed": 0.70,
+}
 
 
 class ScreenerPipeline:
@@ -83,6 +91,7 @@ class ScreenerPipeline:
                 )
             scanned_symbols = len(scan_items)
             candidates: list[ScreenerCandidate] = []
+            failed_placeholders: list[ScreenerCandidate] = []
             latest_as_of_date: Optional[date] = None
             skipped_symbols = 0
             lookback_start_date = (
@@ -114,8 +123,11 @@ class ScreenerPipeline:
                         started_at=started_at,
                     )
                     continue
+                if scan_result.failed_placeholder is not None:
+                    failed_placeholders.append(scan_result.failed_placeholder)
+                if scan_result.candidate is not None:
+                    candidates.append(scan_result.candidate)
 
-                candidates.append(scan_result.candidate)
                 if latest_as_of_date is None or scan_result.as_of_date > latest_as_of_date:
                     latest_as_of_date = scan_result.as_of_date
                 self._log_progress(
@@ -155,6 +167,10 @@ class ScreenerPipeline:
         avoid_candidates = _rank_candidates(
             [item for item in candidates if item.v2_list_type == "AVOID"],
             top_n=top_n,
+        )
+        avoid_candidates = _append_failed_placeholders(
+            ranked_avoid_candidates=avoid_candidates,
+            failed_placeholders=failed_placeholders,
         )
 
         logger.info(
@@ -198,6 +214,18 @@ class ScreenerPipeline:
         except DataServiceError:
             return None
 
+        bars_quality = _normalize_quality_status(daily_bars_response.quality_status)
+        if bars_quality == "failed":
+            return _ScanResult(
+                as_of_date=_resolve_as_of_date(daily_bars_response),
+                candidate=None,
+                failed_placeholder=_build_failed_placeholder_for_bars(
+                    item=item,
+                    response=daily_bars_response,
+                    quality_note="行情数据质量失败，未纳入候选排序。",
+                ),
+            )
+
         daily_bars = daily_bars_response.bars
         if not has_sufficient_daily_bars(daily_bars_response):
             return None
@@ -224,21 +252,23 @@ class ScreenerPipeline:
         except DataServiceError:
             return None
 
+        financial_summary, financial_quality = _safe_get_financial_summary(
+            self._market_data_service,
+            item.symbol,
+        )
+        recent_announcements, announcement_quality = _safe_get_recent_announcements(
+            self._market_data_service,
+            item.symbol,
+            technical_snapshot.as_of_date,
+        )
         if self._factor_snapshot_service is not None:
             factor_snapshot = self._factor_snapshot_service.build_from_inputs(
                 FactorBuildInputs(
                     symbol=item.symbol,
                     technical_snapshot=technical_snapshot,
                     daily_bars=daily_bars,
-                    financial_summary=_safe_get_financial_summary(
-                        self._market_data_service,
-                        item.symbol,
-                    ),
-                    announcements=_safe_get_recent_announcements(
-                        self._market_data_service,
-                        item.symbol,
-                        technical_snapshot.as_of_date,
-                    ),
+                    financial_summary=financial_summary,
+                    announcements=recent_announcements,
                 )
             )
             score_result = score_factor_snapshot(
@@ -248,13 +278,29 @@ class ScreenerPipeline:
         else:
             score_result = score_technical_snapshot(technical_snapshot)
 
+        quality_gate = _apply_quality_gate(
+            origin_v2_list_type=score_result.v2_list_type,
+            origin_screener_score=score_result.screener_score,
+            bars_quality=bars_quality,
+            financial_quality=financial_quality,
+            announcement_quality=announcement_quality,
+        )
+
         return _ScanResult(
             as_of_date=technical_snapshot.as_of_date,
             candidate=_build_candidate(
                 item=item,
                 technical_snapshot=technical_snapshot,
                 score_result=score_result,
+                target_v2_list_type=quality_gate.target_v2_list_type,
+                target_screener_score=quality_gate.target_screener_score,
+                bars_quality=bars_quality,
+                financial_quality=financial_quality,
+                announcement_quality=announcement_quality,
+                quality_penalty_applied=quality_gate.quality_penalty_applied,
+                quality_note=quality_gate.quality_note,
             ),
+            failed_placeholder=None,
         )
 
     def _load_daily_bars_for_scan(
@@ -307,7 +353,18 @@ class _ScanResult:
     """内部扫描结果。"""
 
     as_of_date: date
-    candidate: ScreenerCandidate
+    candidate: Optional[ScreenerCandidate]
+    failed_placeholder: Optional[ScreenerCandidate]
+
+
+@dataclass(frozen=True)
+class _QualityGateResult:
+    """质量门控结果。"""
+
+    target_v2_list_type: str
+    target_screener_score: int
+    quality_penalty_applied: bool
+    quality_note: Optional[str]
 
 
 def _rank_candidates(
@@ -339,8 +396,15 @@ def _build_candidate(
     item: UniverseItem,
     technical_snapshot,
     score_result,
+    target_v2_list_type: str,
+    target_screener_score: int,
+    bars_quality: _QUALITY_STATUS,
+    financial_quality: _QUALITY_STATUS,
+    announcement_quality: _QUALITY_STATUS,
+    quality_penalty_applied: bool,
+    quality_note: Optional[str],
 ) -> ScreenerCandidate:
-    v2_list_type = score_result.v2_list_type
+    v2_list_type = target_v2_list_type
     display_fields = normalize_candidate_display_fields(
         name=item.name,
         list_type=v2_list_type,
@@ -361,10 +425,10 @@ def _build_candidate(
     return ScreenerCandidate(
         symbol=item.symbol,
         name=str(display_fields["name"]),
-        list_type=score_result.list_type,
+        list_type=_to_legacy_list_type(v2_list_type),
         v2_list_type=v2_list_type,
         rank=1,
-        screener_score=score_result.screener_score,
+        screener_score=target_screener_score,
         alpha_score=score_result.alpha_score,
         trigger_score=score_result.trigger_score,
         risk_score=score_result.risk_score,
@@ -383,6 +447,12 @@ def _build_candidate(
         headline_verdict=str(display_fields["headline_verdict"]),
         action_now=_build_action_now(v2_list_type),
         evidence_hints=list(display_fields["evidence_hints"])[:3] or evidence_hints[:3],
+        bars_quality=bars_quality,
+        financial_quality=financial_quality,
+        announcement_quality=announcement_quality,
+        quality_penalty_applied=quality_penalty_applied,
+        quality_note=quality_note,
+        fail_reason=None,
     )
 
 
@@ -396,21 +466,177 @@ def _build_action_now(v2_list_type: str) -> str:
     }
     return mapping.get(v2_list_type, "RESEARCH_ONLY")
 
+
+def _to_legacy_list_type(v2_list_type: str) -> str:
+    if v2_list_type == "READY_TO_BUY":
+        return "BUY_CANDIDATE"
+    if v2_list_type in {"WATCH_PULLBACK", "WATCH_BREAKOUT", "RESEARCH_ONLY"}:
+        return "WATCHLIST"
+    return "AVOID"
+
+
+def _normalize_quality_status(raw_status: Optional[str]) -> _QUALITY_STATUS:
+    if raw_status in _QUALITY_WEIGHT:
+        return raw_status  # type: ignore[return-value]
+    return "warning"
+
+
+def _resolve_as_of_date(response: DailyBarResponse) -> date:
+    if response.bars:
+        return response.bars[-1].trade_date
+    return date.today()
+
+
+def _build_failed_placeholder_for_bars(
+    *,
+    item: UniverseItem,
+    response: DailyBarResponse,
+    quality_note: str,
+) -> ScreenerCandidate:
+    latest_close = response.bars[-1].close if response.bars else None
+    fail_reason = "行情数据清洗质量为 failed，当前股票仅保留失败占位。"
+    if response.cleaning_warnings:
+        fail_reason = "{reason} 告警：{warnings}".format(
+            reason=fail_reason,
+            warnings="；".join(response.cleaning_warnings[:2]),
+        )
+    display_fields = normalize_candidate_display_fields(
+        name=item.name,
+        list_type="AVOID",
+        short_reason="行情数据质量失败，未纳入候选排序。",
+        headline_verdict="行情数据质量失败，本轮仅保留失败占位。",
+        evidence_hints=response.cleaning_warnings[:2],
+    )
+    return ScreenerCandidate(
+        symbol=item.symbol,
+        name=str(display_fields["name"]),
+        list_type="AVOID",
+        v2_list_type="AVOID",
+        rank=1,
+        screener_score=0,
+        alpha_score=0,
+        trigger_score=0,
+        risk_score=100,
+        trend_state="down",
+        trend_score=0,
+        latest_close=latest_close if latest_close is not None else 0.0,
+        support_level=None,
+        resistance_level=None,
+        top_positive_factors=[],
+        top_negative_factors=["行情数据质量 failed"],
+        risk_notes=["该股票未参与本轮候选排序"],
+        short_reason=str(display_fields["short_reason"]),
+        calculated_at=datetime.now(timezone.utc),
+        rule_version=_RULE_VERSION,
+        rule_summary=_RULE_SUMMARY,
+        headline_verdict=str(display_fields["headline_verdict"]),
+        action_now="AVOID",
+        evidence_hints=list(display_fields["evidence_hints"]),
+        bars_quality="failed",
+        financial_quality=None,
+        announcement_quality=None,
+        quality_penalty_applied=True,
+        quality_note=quality_note,
+        fail_reason=fail_reason,
+    )
+
+
+def _apply_quality_gate(
+    *,
+    origin_v2_list_type: str,
+    origin_screener_score: int,
+    bars_quality: _QUALITY_STATUS,
+    financial_quality: _QUALITY_STATUS,
+    announcement_quality: _QUALITY_STATUS,
+) -> _QualityGateResult:
+    target_v2_list_type = origin_v2_list_type
+    quality_notes: list[str] = []
+    quality_penalty_applied = False
+
+    if bars_quality == "degraded" and target_v2_list_type in {
+        "READY_TO_BUY",
+        "WATCH_PULLBACK",
+        "WATCH_BREAKOUT",
+    }:
+        target_v2_list_type = "RESEARCH_ONLY"
+        quality_notes.append("行情数据质量降级，候选已下调为研究观察。")
+        quality_penalty_applied = True
+
+    if financial_quality in {"degraded", "failed"} and target_v2_list_type in {
+        "READY_TO_BUY",
+        "WATCH_PULLBACK",
+        "WATCH_BREAKOUT",
+    }:
+        target_v2_list_type = "RESEARCH_ONLY"
+        quality_notes.append("财务摘要质量不足，候选已下调为研究观察。")
+        quality_penalty_applied = True
+
+    if announcement_quality == "failed" and target_v2_list_type in {
+        "READY_TO_BUY",
+        "WATCH_PULLBACK",
+        "WATCH_BREAKOUT",
+    }:
+        target_v2_list_type = "RESEARCH_ONLY"
+        quality_notes.append("公告输入质量不足，事件驱动不提升优先级。")
+        quality_penalty_applied = True
+
+    if target_v2_list_type == "READY_TO_BUY" and (
+        bars_quality != "ok"
+        or financial_quality == "failed"
+        or announcement_quality == "failed"
+    ):
+        target_v2_list_type = "RESEARCH_ONLY"
+        quality_notes.append("质量门槛未满足，已从交易候选降级为研究观察。")
+        quality_penalty_applied = True
+
+    combined_weight = (
+        0.5 * _QUALITY_WEIGHT[bars_quality]
+        + 0.3 * _QUALITY_WEIGHT[financial_quality]
+        + 0.2 * _QUALITY_WEIGHT[announcement_quality]
+    )
+    adjusted_score = max(0, min(100, int(round(origin_screener_score * combined_weight))))
+    if adjusted_score != origin_screener_score:
+        quality_penalty_applied = True
+        quality_notes.append("数据质量折损已应用于候选评分。")
+
+    quality_note = "；".join(dict.fromkeys(quality_notes)) if quality_notes else None
+    return _QualityGateResult(
+        target_v2_list_type=target_v2_list_type,
+        target_screener_score=adjusted_score,
+        quality_penalty_applied=quality_penalty_applied,
+        quality_note=quality_note,
+    )
+
+
+def _append_failed_placeholders(
+    *,
+    ranked_avoid_candidates: list[ScreenerCandidate],
+    failed_placeholders: list[ScreenerCandidate],
+) -> list[ScreenerCandidate]:
+    if not failed_placeholders:
+        return ranked_avoid_candidates
+    merged = list(ranked_avoid_candidates)
+    for index, item in enumerate(failed_placeholders, start=len(merged) + 1):
+        merged.append(item.model_copy(update={"rank": index}))
+    return merged
+
+
 def _safe_get_financial_summary(
     market_data_service: MarketDataService,
     symbol: str,
-):
+) -> tuple[Optional[FinancialSummary], _QUALITY_STATUS]:
     try:
-        return market_data_service.get_stock_financial_summary(symbol)
+        summary = market_data_service.get_stock_financial_summary(symbol)
+        return summary, _normalize_quality_status(summary.quality_status)
     except DataServiceError:
-        return None
+        return None, "warning"
 
 
 def _safe_get_recent_announcements(
     market_data_service: MarketDataService,
     symbol: str,
     as_of_date: date,
-):
+) -> tuple[list, _QUALITY_STATUS]:
     try:
         response = market_data_service.get_stock_announcements(
             symbol,
@@ -419,5 +645,5 @@ def _safe_get_recent_announcements(
             limit=50,
         )
     except DataServiceError:
-        return []
-    return response.items
+        return [], "warning"
+    return response.items, _normalize_quality_status(response.quality_status)

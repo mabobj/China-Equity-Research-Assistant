@@ -323,6 +323,12 @@ class ScreenerBatchService:
                     action_now=candidate.action_now,
                     headline_verdict=str(display_fields["headline_verdict"]),
                     evidence_hints=list(display_fields["evidence_hints"]),
+                    fail_reason=candidate.fail_reason,
+                    bars_quality=candidate.bars_quality,
+                    financial_quality=candidate.financial_quality,
+                    announcement_quality=candidate.announcement_quality,
+                    quality_penalty_applied=candidate.quality_penalty_applied,
+                    quality_note=candidate.quality_note,
                 )
             )
         return results

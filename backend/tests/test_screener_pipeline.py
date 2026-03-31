@@ -86,6 +86,7 @@ class FakeMarketDataService:
                 symbol=symbol,
                 count=20,
                 bars=_build_bars(symbol=symbol, length=20, close_start=10.0),
+                quality_status="ok",
             )
 
         if symbol == "000001.SZ":
@@ -98,6 +99,7 @@ class FakeMarketDataService:
                     close_start=8.0,
                     amount=25_000_000.0,
                 ),
+                quality_status="ok",
             )
 
         return DailyBarResponse(
@@ -109,6 +111,7 @@ class FakeMarketDataService:
                 close_start=100.0,
                 amount=60_000_000.0,
             ),
+            quality_status="ok",
         )
 
     def get_stock_financial_summary(self, symbol: str) -> FinancialSummary:
@@ -123,6 +126,7 @@ class FakeMarketDataService:
             debt_ratio=35.0,
             eps=2.0,
             source="fake",
+            quality_status="ok",
         )
 
     def get_stock_announcements(
@@ -136,6 +140,8 @@ class FakeMarketDataService:
             symbol=symbol,
             count=1,
             items=[],
+            quality_status="ok",
+            cleaning_warnings=[],
         )
 
 
@@ -305,6 +311,133 @@ def test_run_screener_uses_mootdx_first_provider_priority() -> None:
         "baostock",
         "akshare",
     )
+
+
+def test_run_screener_generates_failed_placeholder_when_bars_quality_failed() -> None:
+    """bars_quality=failed 时应生成失败占位且不进入高优先级候选。"""
+
+    class FailedBarsMarketDataService(FakeMarketDataService):
+        def get_daily_bars(
+            self,
+            symbol: str,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+        ) -> DailyBarResponse:
+            base = super().get_daily_bars(symbol, start_date=start_date, end_date=end_date)
+            return base.model_copy(
+                update={
+                    "quality_status": "failed",
+                    "cleaning_warnings": ["ohlc_relation_invalid"],
+                }
+            )
+
+    pipeline = ScreenerPipeline(
+        market_data_service=FailedBarsMarketDataService(),
+        technical_analysis_service=FakeTechnicalAnalysisService(),
+        factor_snapshot_service=FakeFactorSnapshotService(),
+    )
+    response = pipeline.run_screener(
+        scan_items=[
+            UniverseItem(
+                symbol="600519.SH",
+                code="600519",
+                exchange="SH",
+                name="贵州茅台",
+                source="fake",
+            )
+        ],
+    )
+
+    assert len(response.buy_candidates) == 0
+    assert len(response.watch_candidates) == 0
+    assert len(response.avoid_candidates) == 1
+    placeholder = response.avoid_candidates[0]
+    assert placeholder.v2_list_type == "AVOID"
+    assert placeholder.fail_reason is not None
+    assert placeholder.bars_quality == "failed"
+    assert placeholder.quality_penalty_applied is True
+
+
+def test_run_screener_downgrades_candidate_when_financial_quality_degraded() -> None:
+    """financial_quality=degraded 时应降级到 RESEARCH_ONLY。"""
+
+    class DegradedFinancialMarketDataService(FakeMarketDataService):
+        def get_stock_financial_summary(self, symbol: str) -> FinancialSummary:
+            payload = super().get_stock_financial_summary(symbol)
+            return payload.model_copy(
+                update={
+                    "quality_status": "degraded",
+                    "missing_fields": ["revenue", "net_profit", "roe"],
+                }
+            )
+
+    pipeline = ScreenerPipeline(
+        market_data_service=DegradedFinancialMarketDataService(),
+        technical_analysis_service=FakeTechnicalAnalysisService(),
+        factor_snapshot_service=FakeFactorSnapshotService(),
+    )
+    response = pipeline.run_screener(
+        scan_items=[
+            UniverseItem(
+                symbol="600519.SH",
+                code="600519",
+                exchange="SH",
+                name="贵州茅台",
+                source="fake",
+            )
+        ],
+    )
+
+    assert len(response.ready_to_buy_candidates) == 0
+    assert len(response.research_only_candidates) == 1
+    candidate = response.research_only_candidates[0]
+    assert candidate.financial_quality == "degraded"
+    assert candidate.quality_penalty_applied is True
+    assert candidate.quality_note is not None
+
+
+def test_run_screener_downgrades_candidate_when_announcement_quality_failed() -> None:
+    """announcement_quality=failed 时不允许事件驱动升级。"""
+
+    class FailedAnnouncementMarketDataService(FakeMarketDataService):
+        def get_stock_announcements(
+            self,
+            symbol: str,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+            limit: int = 20,
+        ) -> AnnouncementListResponse:
+            response = super().get_stock_announcements(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+            )
+            return response.model_copy(update={"quality_status": "failed"})
+
+    pipeline = ScreenerPipeline(
+        market_data_service=FailedAnnouncementMarketDataService(),
+        technical_analysis_service=FakeTechnicalAnalysisService(),
+        factor_snapshot_service=FakeFactorSnapshotService(),
+    )
+    response = pipeline.run_screener(
+        scan_items=[
+            UniverseItem(
+                symbol="600519.SH",
+                code="600519",
+                exchange="SH",
+                name="贵州茅台",
+                source="fake",
+            )
+        ],
+    )
+
+    assert len(response.ready_to_buy_candidates) == 0
+    assert len(response.research_only_candidates) == 1
+    candidate = response.research_only_candidates[0]
+    assert candidate.announcement_quality == "failed"
+    assert candidate.quality_penalty_applied is True
+    assert candidate.quality_note is not None
 
 
 def _build_bars(

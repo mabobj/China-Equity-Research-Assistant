@@ -3,10 +3,11 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from app.schemas.market_data import StockProfile
+from app.schemas.market_data import DailyBarResponse, StockProfile
 from app.schemas.research import (
     EventResearchResult,
     FundamentalResearchResult,
+    ResearchDataQualitySummary,
     ResearchReport,
     TechnicalResearchResult,
 )
@@ -26,8 +27,41 @@ class ResearchInputs:
 
     profile: StockProfile
     technical_snapshot: TechnicalSnapshot
+    daily_bars_response: DailyBarResponse
     financial_summary: FinancialSummary
     announcements: list[AnnouncementItem]
+    announcements_quality_status: Optional[str]
+    announcements_cleaning_warnings: list[str]
+
+
+@dataclass(frozen=True)
+class _QualityConsumptionResult:
+    """研究链路质量消费结果。"""
+
+    summary: ResearchDataQualitySummary
+    confidence_reasons: list[str]
+    risk_hints: list[str]
+
+
+_QUALITY_ORDER = ("ok", "warning", "degraded", "failed")
+_TECHNICAL_QUALITY_MODIFIER = {
+    "ok": 1.00,
+    "warning": 0.90,
+    "degraded": 0.70,
+    "failed": 0.30,
+}
+_FUNDAMENTAL_QUALITY_MODIFIER = {
+    "ok": 1.00,
+    "warning": 0.85,
+    "degraded": 0.60,
+    "failed": 0.20,
+}
+_EVENT_QUALITY_MODIFIER = {
+    "ok": 1.00,
+    "warning": 0.85,
+    "degraded": 0.60,
+    "failed": 0.20,
+}
 
 
 class ResearchManager:
@@ -55,8 +89,12 @@ class ResearchManager:
         """集中拉取研究报告所需输入，便于其他服务复用。"""
         try:
             profile = self._market_data_service.get_stock_profile(symbol)
-            technical_snapshot = self._technical_analysis_service.get_technical_snapshot(
+            daily_bars_response = self._market_data_service.get_daily_bars(
                 symbol=symbol,
+            )
+            technical_snapshot = self._technical_analysis_service.build_snapshot_from_bars(
+                symbol=symbol,
+                bars=daily_bars_response.bars,
             )
             financial_summary = self._market_data_service.get_stock_financial_summary(
                 symbol,
@@ -73,8 +111,11 @@ class ResearchManager:
         return ResearchInputs(
             profile=profile,
             technical_snapshot=technical_snapshot,
+            daily_bars_response=daily_bars_response,
             financial_summary=financial_summary,
             announcements=announcements_response.items,
+            announcements_quality_status=announcements_response.quality_status,
+            announcements_cleaning_warnings=list(announcements_response.cleaning_warnings),
         )
 
     def build_research_report(self, inputs: ResearchInputs) -> ResearchReport:
@@ -110,6 +151,15 @@ class ResearchManager:
             fundamental_result=fundamental_result,
             event_result=event_result,
         )
+        quality_consumption = _consume_data_quality(
+            daily_bars_response=inputs.daily_bars_response,
+            financial_summary=inputs.financial_summary,
+            announcements_quality_status=inputs.announcements_quality_status,
+            announcements_cleaning_warnings=inputs.announcements_cleaning_warnings,
+        )
+        confidence = _clamp_score(
+            confidence * quality_consumption.summary.overall_quality_modifier,
+        )
         thesis = _build_thesis(
             name=inputs.profile.name,
             technical_result=technical_result,
@@ -136,6 +186,7 @@ class ResearchManager:
                 event_result.key_reasons,
             ),
             risks=_merge_lists(
+                quality_consumption.risk_hints,
                 technical_result.risks,
                 fundamental_result.risks,
                 event_result.risks,
@@ -150,6 +201,8 @@ class ResearchManager:
                 fundamental_result.invalidations,
                 event_result.invalidations,
             ),
+            data_quality_summary=quality_consumption.summary,
+            confidence_reasons=quality_consumption.confidence_reasons,
         )
 
 
@@ -248,6 +301,98 @@ def _calculate_confidence(
     return _clamp_score(confidence)
 
 
+def _consume_data_quality(
+    *,
+    daily_bars_response: DailyBarResponse,
+    financial_summary: FinancialSummary,
+    announcements_quality_status: Optional[str],
+    announcements_cleaning_warnings: list[str],
+) -> _QualityConsumptionResult:
+    """消费清洗质量状态，生成置信度修正与解释信息。"""
+    bars_quality = _normalize_quality_status(daily_bars_response.quality_status)
+    financial_quality = _normalize_quality_status(financial_summary.quality_status)
+    announcement_quality = _normalize_quality_status(announcements_quality_status)
+
+    technical_modifier = _TECHNICAL_QUALITY_MODIFIER[bars_quality]
+    fundamental_modifier = _FUNDAMENTAL_QUALITY_MODIFIER[financial_quality]
+    event_modifier = _EVENT_QUALITY_MODIFIER[announcement_quality]
+    overall_quality_modifier = (
+        0.4 * technical_modifier
+        + 0.35 * fundamental_modifier
+        + 0.25 * event_modifier
+    )
+
+    confidence_reasons: list[str] = []
+    risk_hints: list[str] = []
+
+    if bars_quality == "ok":
+        confidence_reasons.append("行情数据质量正常，技术结论可正常参考。")
+    else:
+        confidence_reasons.append(
+            "行情数据质量为 {quality}，技术结论置信度已下调。".format(
+                quality=bars_quality,
+            )
+        )
+        risk_hints.append("技术结论受行情数据质量影响，需谨慎解读。")
+        if daily_bars_response.cleaning_warnings:
+            risk_hints.append(
+                "行情数据告警：{warnings}".format(
+                    warnings="；".join(daily_bars_response.cleaning_warnings[:2]),
+                )
+            )
+
+    if financial_quality == "ok":
+        confidence_reasons.append("财务摘要质量正常，基本面结论可正常参考。")
+    else:
+        confidence_reasons.append(
+            "财务摘要质量为 {quality}，基本面结论置信度已下调。".format(
+                quality=financial_quality,
+            )
+        )
+        missing_fields = list(financial_summary.missing_fields)
+        if missing_fields:
+            risk_hints.append(
+                "财务摘要缺失核心字段：{fields}。".format(
+                    fields=" / ".join(missing_fields[:5]),
+                )
+            )
+        risk_hints.append("财务输入质量不足，当前基本面判断应以谨慎口径解读。")
+
+    if announcement_quality == "ok":
+        confidence_reasons.append("公告索引质量正常，事件结论可正常参考。")
+    else:
+        confidence_reasons.append(
+            "公告索引质量为 {quality}，事件结论置信度已下调。".format(
+                quality=announcement_quality,
+            )
+        )
+        risk_hints.append("公告输入存在不确定性，事件结论可能存在遗漏。")
+        if announcements_cleaning_warnings:
+            risk_hints.append(
+                "公告数据告警：{warnings}".format(
+                    warnings="；".join(announcements_cleaning_warnings[:2]),
+                )
+            )
+
+    return _QualityConsumptionResult(
+        summary=ResearchDataQualitySummary(
+            bars_quality=bars_quality,  # type: ignore[arg-type]
+            financial_quality=financial_quality,  # type: ignore[arg-type]
+            announcement_quality=announcement_quality,  # type: ignore[arg-type]
+            technical_modifier=round(technical_modifier, 2),
+            fundamental_modifier=round(fundamental_modifier, 2),
+            event_modifier=round(event_modifier, 2),
+            overall_quality_modifier=round(overall_quality_modifier, 4),
+        ),
+        confidence_reasons=confidence_reasons,
+        risk_hints=_limit_items(
+            items=risk_hints,
+            fallback="",
+            limit=3,
+        ),
+    )
+
+
 def _build_thesis(
     name: str,
     technical_result: TechnicalResearchResult,
@@ -278,6 +423,27 @@ def _merge_lists(*groups: list[str]) -> list[str]:
     return merged[:3]
 
 
+def _normalize_quality_status(status: Optional[str]) -> str:
+    """归一化质量状态，未知值按 warning 处理。"""
+    if status in _QUALITY_ORDER:
+        return status
+    return "warning"
+
+
 def _clamp_score(score: float) -> int:
     """将分数限制在 0 到 100。"""
     return max(0, min(100, int(round(score))))
+
+
+def _limit_items(items: list[str], fallback: str, limit: int = 3) -> list[str]:
+    """去重并限制数量。"""
+    deduped: list[str] = []
+    for item in items:
+        normalized = item.strip()
+        if not normalized:
+            continue
+        if normalized not in deduped:
+            deduped.append(normalized)
+    if not deduped and fallback:
+        deduped.append(fallback)
+    return deduped[:limit]

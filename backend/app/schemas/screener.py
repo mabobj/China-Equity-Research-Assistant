@@ -19,6 +19,7 @@ ScreenerListType = Literal[
     "RESEARCH_ONLY",
     "AVOID",
 ]
+QualityStatus = Literal["ok", "warning", "degraded", "failed"]
 
 
 class ScreenerCandidate(BaseModel):
@@ -57,6 +58,12 @@ class ScreenerCandidate(BaseModel):
     ]] = None
     evidence_hints: list[str] = Field(default_factory=list)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list)
+    bars_quality: Optional[QualityStatus] = None
+    financial_quality: Optional[QualityStatus] = None
+    announcement_quality: Optional[QualityStatus] = None
+    quality_penalty_applied: bool = False
+    quality_note: Optional[str] = None
+    fail_reason: Optional[str] = None
 
 
 class ScreenerRunResponse(BaseModel):
@@ -167,6 +174,11 @@ class ScreenerSymbolResult(BaseModel):
     headline_verdict: Optional[str] = None
     evidence_hints: list[str] = Field(default_factory=list)
     fail_reason: Optional[str] = None
+    bars_quality: Optional[QualityStatus] = None
+    financial_quality: Optional[QualityStatus] = None
+    announcement_quality: Optional[QualityStatus] = None
+    quality_penalty_applied: bool = False
+    quality_note: Optional[str] = None
 
 
 class ScreenerLatestBatchResponse(BaseModel):

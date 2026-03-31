@@ -1,9 +1,11 @@
 """结构化研究输出相关 schema。"""
 
 from datetime import date
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+QualityStatus = Literal["ok", "warning", "degraded", "failed"]
 
 
 class TechnicalResearchResult(BaseModel):
@@ -45,6 +47,20 @@ class EventResearchResult(BaseModel):
     invalidations: list[str]
 
 
+class ResearchDataQualitySummary(BaseModel):
+    """研究链路的数据质量摘要。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bars_quality: QualityStatus
+    financial_quality: QualityStatus
+    announcement_quality: QualityStatus
+    technical_modifier: float = Field(ge=0, le=1)
+    fundamental_modifier: float = Field(ge=0, le=1)
+    event_modifier: float = Field(ge=0, le=1)
+    overall_quality_modifier: float = Field(ge=0, le=1)
+
+
 class ResearchReport(BaseModel):
     """结构化单票研究报告。"""
 
@@ -65,3 +81,5 @@ class ResearchReport(BaseModel):
     risks: list[str]
     triggers: list[str]
     invalidations: list[str]
+    data_quality_summary: Optional[ResearchDataQualitySummary] = None
+    confidence_reasons: list[str] = Field(default_factory=list)

@@ -1,8 +1,10 @@
 """研究聚合 manager 测试。"""
 
-from datetime import date
+from datetime import date, timedelta
 
 from app.schemas.market_data import StockProfile
+from app.schemas.market_data import DailyBarResponse
+from app.schemas.market_data import DailyBar
 from app.schemas.research import ResearchReport
 from app.schemas.research_inputs import (
     AnnouncementItem,
@@ -23,6 +25,9 @@ from app.services.research_service.research_manager import ResearchManager
 class FakeMarketDataService:
     """用于研究聚合测试的假数据服务。"""
 
+    def __init__(self, *, financial_quality_status: str = "ok") -> None:
+        self._financial_quality_status = financial_quality_status
+
     def get_stock_profile(self, symbol: str) -> StockProfile:
         return StockProfile(
             symbol="600519.SH",
@@ -33,10 +38,11 @@ class FakeMarketDataService:
         )
 
     def get_stock_financial_summary(self, symbol: str) -> FinancialSummary:
-        return FinancialSummary(
+        payload = FinancialSummary(
             symbol="600519.SH",
             name="贵州茅台",
             report_period=date(2024, 9, 30),
+            report_type="q3",
             revenue=1000.0,
             revenue_yoy=12.0,
             net_profit=500.0,
@@ -47,6 +53,56 @@ class FakeMarketDataService:
             eps=5.0,
             bps=25.0,
             source="fake",
+            quality_status=self._financial_quality_status,
+        )
+        if self._financial_quality_status == "degraded":
+            return payload.model_copy(
+                update={
+                    "revenue": None,
+                    "revenue_yoy": None,
+                    "net_profit": None,
+                    "net_profit_yoy": None,
+                    "roe": None,
+                    "missing_fields": [
+                        "revenue",
+                        "revenue_yoy",
+                        "net_profit",
+                        "net_profit_yoy",
+                        "roe",
+                    ],
+                    "cleaning_warnings": ["关键财务字段缺失较多"],
+                }
+            )
+        return payload
+
+    def get_daily_bars(
+        self,
+        symbol: str,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> DailyBarResponse:
+        start = date(2024, 1, 1)
+        return DailyBarResponse(
+            symbol="600519.SH",
+            count=40,
+            bars=[
+                DailyBar(
+                    symbol="600519.SH",
+                    trade_date=start + timedelta(days=index),
+                    open=1600.0 + index,
+                    high=1610.0 + index,
+                    low=1590.0 + index,
+                    close=1605.0 + index,
+                    volume=500000.0 + index * 1000,
+                    amount=800000000.0 + index * 1000000,
+                    source="fake",
+                )
+                for index in range(40)
+            ],
+            quality_status="ok",
+            cleaning_warnings=[],
+            dropped_rows=0,
+            dropped_duplicate_rows=0,
         )
 
     def get_stock_announcements(
@@ -59,6 +115,8 @@ class FakeMarketDataService:
         return AnnouncementListResponse(
             symbol="600519.SH",
             count=2,
+            quality_status="ok",
+            cleaning_warnings=[],
             items=[
                 AnnouncementItem(
                     symbol="600519.SH",
@@ -130,6 +188,9 @@ class FakeTechnicalAnalysisService:
             resistance_level=1705.0,
         )
 
+    def build_snapshot_from_bars(self, symbol: str, bars: list[DailyBar]) -> TechnicalSnapshot:
+        return self.get_technical_snapshot(symbol)
+
 
 def test_research_manager_returns_structured_report() -> None:
     """research manager 应聚合多源输入并返回结构化报告。"""
@@ -150,4 +211,27 @@ def test_research_manager_returns_structured_report() -> None:
     assert 0 <= report.risk_score <= 100
     assert 0 <= report.overall_score <= 100
     assert len(report.key_reasons) >= 1
+    assert report.data_quality_summary is not None
+    assert report.data_quality_summary.bars_quality == "ok"
+    assert report.confidence_reasons
 
+
+def test_research_manager_lowers_confidence_when_financial_quality_degraded() -> None:
+    """财务质量降级应下调研究置信度并附带解释。"""
+    baseline_manager = ResearchManager(
+        market_data_service=FakeMarketDataService(financial_quality_status="ok"),
+        technical_analysis_service=FakeTechnicalAnalysisService(),
+    )
+    degraded_manager = ResearchManager(
+        market_data_service=FakeMarketDataService(financial_quality_status="degraded"),
+        technical_analysis_service=FakeTechnicalAnalysisService(),
+    )
+
+    baseline_report = baseline_manager.get_research_report("600519")
+    degraded_report = degraded_manager.get_research_report("600519")
+
+    assert degraded_report.confidence < baseline_report.confidence
+    assert degraded_report.data_quality_summary is not None
+    assert degraded_report.data_quality_summary.financial_quality == "degraded"
+    assert any("财务摘要质量为 degraded" in item for item in degraded_report.confidence_reasons)
+    assert any("财务摘要缺失核心字段" in item for item in degraded_report.risks)

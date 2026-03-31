@@ -22,6 +22,7 @@ export type DecisionBriefActionNow =
   | "RESEARCH_ONLY"
   | "AVOID";
 export type DecisionConvictionLevel = "low" | "medium" | "high";
+export type DataQualityStatus = "ok" | "warning" | "degraded" | "failed";
 
 export type PriceRange = {
   low: number;
@@ -284,6 +285,12 @@ export type ScreenerCandidate = {
   headline_verdict: string | null;
   action_now: DecisionBriefActionNow | null;
   evidence_hints: string[];
+  bars_quality?: DataQualityStatus | null;
+  financial_quality?: DataQualityStatus | null;
+  announcement_quality?: DataQualityStatus | null;
+  quality_penalty_applied?: boolean;
+  quality_note?: string | null;
+  fail_reason?: string | null;
 };
 
 export type ScreenerRunResponse = {
@@ -340,6 +347,11 @@ export type ScreenerSymbolResult = {
   headline_verdict: string | null;
   evidence_hints: string[];
   fail_reason: string | null;
+  bars_quality?: DataQualityStatus | null;
+  financial_quality?: DataQualityStatus | null;
+  announcement_quality?: DataQualityStatus | null;
+  quality_penalty_applied?: boolean;
+  quality_note?: string | null;
 };
 
 export type ScreenerLatestBatchResponse = {
@@ -413,6 +425,16 @@ export type ResearchReport = {
   risks: string[];
   triggers: string[];
   invalidations: string[];
+  data_quality_summary?: {
+    bars_quality: DataQualityStatus;
+    financial_quality: DataQualityStatus;
+    announcement_quality: DataQualityStatus;
+    technical_modifier: number;
+    fundamental_modifier: number;
+    event_modifier: number;
+    overall_quality_modifier: number;
+  } | null;
+  confidence_reasons?: string[];
 };
 
 export type StrategyPlan = {
