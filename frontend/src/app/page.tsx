@@ -8,30 +8,30 @@ const FEATURE_ITEMS = [
   {
     title: "单票工作台",
     description:
-      "输入一个股票代码后，按主链路查看：基础信息、因子快照、review-report v2、debate-review、策略计划（strategy plan）、触发快照（trigger snapshot）。",
+      "输入股票代码后，按“结论 -> 证据 -> 动作 -> 详情”顺序查看单票分析，默认由 workspace-bundle 聚合驱动。",
     href: "/stocks/600519.SH",
     actionLabel: "进入单票工作台",
   },
   {
     title: "选股工作台",
     description:
-      "在同一页面完成数据补全、初筛与深筛；候选卡片可直接跳转到单票页面继续分析。",
+      "通过 workflow 运行初筛与深筛，查看 run_id、步骤状态、批次摘要与候选结果。",
     href: "/screener",
     actionLabel: "进入选股工作台",
   },
   {
-    title: "工作流运行记录",
+    title: "交易记录工作台",
     description:
-      "单票和选股页面都使用工作流模式，可查看 run_id、节点摘要和最终输出摘要，避免长请求阻塞。",
-    href: "/screener#workflow",
-    actionLabel: "查看工作流面板",
+      "将执行动作与当时决策快照关联，形成“判断 -> 执行”的可追溯记录链。",
+    href: "/trades",
+    actionLabel: "进入交易记录",
   },
   {
-    title: "交易与复盘",
+    title: "复盘工作台",
     description:
-      "当前阶段这两个页面为预留态，会明确标注“未启用”，不会展示伪造功能。",
-    href: "/trades",
-    actionLabel: "查看预留页面",
+      "从交易记录生成复盘草稿，回看当时判断、执行偏差与复盘结论，积累可迭代经验。",
+    href: "/reviews",
+    actionLabel: "进入复盘工作台",
   },
 ] as const;
 
@@ -39,7 +39,7 @@ export default function HomePage() {
   return (
     <PageShell
       title="A 股研究助手工作台"
-      description="前端按工作台方式组织：入口清晰、术语统一、关键运行状态可见。"
+      description="以“先结论、再证据、后细节”为主交互逻辑，覆盖选股、单票、交易、复盘完整链路。"
     >
       <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
         <SectionCard
@@ -57,14 +57,14 @@ export default function HomePage() {
 
         <SectionCard
           title="当前能力范围"
-          description="本阶段聚焦研究输出稳定性，不涉及自动交易执行。"
+          description="当前系统是研究与决策辅助产品，不做自动实盘执行。"
         >
           <div className="space-y-3">
             <FeaturePill label="单票研究输出" />
             <FeaturePill label="结构化裁决" />
             <FeaturePill label="策略计划输出" />
             <FeaturePill label="选股工作流" />
-            <FeaturePill label="工作流运行记录" />
+            <FeaturePill label="交易记录与复盘" />
           </div>
         </SectionCard>
       </div>
@@ -98,13 +98,16 @@ export default function HomePage() {
       >
         <ul className="space-y-3 text-sm leading-7 text-slate-700">
           <li>
-            <strong>review-report v2</strong>：单票主研究产物。
+            <strong>review-report v2</strong>：单票主研究产物（方向层结论）。
           </li>
           <li>
-            <strong>debate-review</strong>：结构化裁决层。
+            <strong>decision brief</strong>：单票主输出层（当前动作、证据、风险、下一步）。
           </li>
           <li>
-            <strong>/reviews</strong>：预留页面，当前未启用。
+            <strong>debate-review</strong>：结构化裁决层，用于补充解释，不替代确定性计算。
+          </li>
+          <li>
+            <strong>/trades 与 /reviews</strong>：当前已启用，分别用于执行记录与复盘学习。
           </li>
           <li>
             <strong>工作流运行记录（workflow run record）</strong>：工作流运行元数据与步骤摘要，不等于人工复盘笔记。

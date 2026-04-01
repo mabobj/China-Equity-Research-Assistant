@@ -132,6 +132,7 @@ npm.cmd run test:smoke
 
 ## 文档导航
 
+- [项目任务书 v2.1（产品化增强版）](docs/taskbook-v2.1.md)
 - [系统架构](docs/architecture.md)
 - [路线图](docs/roadmap.md)
 - [稳定性审计 v1](docs/audits/stability-review-v1.md)
