@@ -128,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
 
 ```powershell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
-python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py -q
+python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py backend/tests/test_trade_review_api.py -q
 ```
 
 ### 前端校验
@@ -213,6 +213,13 @@ Set-Location ..
 - `provider_used`
 - `source_mode`
 - `freshness_mode`
+
+### F. 快速验证交易与复盘闭环（可选）
+
+1. 在单票页点击“保存本次判断”，确认返回 `snapshot_id`
+2. 填写最小交易表单并点击“记录交易”，确认返回 `trade_id`
+3. 打开 `/reviews`，选择该交易点击“生成复盘草稿”，确认返回 `review_id`
+4. 编辑并保存复盘，确认列表可回看且详情已更新
 
 ## 9. 如果最小验证失败
 

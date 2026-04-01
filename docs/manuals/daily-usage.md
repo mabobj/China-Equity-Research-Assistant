@@ -16,6 +16,13 @@
 - 点击“保存本次判断”
 - 填写最小表单后点击“记录交易”
 
+判断口径说明（重要）：
+- 页面会同时展示两层信息：
+  - 方向基线（用于一致性校验）
+  - 执行动作（时机层，来自 `decision_brief.action_now`）
+- 当前一致性校验优先使用“方向基线”，并在页面显示来源（决策简报映射或 review-report 回退）。
+- 若页面提示“结论口径不一致”，表示方向层与时机层表达角度不同，不等于系统报错。
+
 说明：
 - 单票页主数据来自 `workspace-bundle`
 - 模块失败时页面会给出模块级失败提示，不会整页阻断
@@ -49,6 +56,10 @@
 动作约束：
 - `SKIP` 允许不填价格和数量
 - `BUY/SELL/ADD/REDUCE` 需要有效价格与数量
+- `reason_type` 需要与动作匹配（如 `watch_only` 仅用于 `SKIP`）
+- 若交易与方向基线冲突：
+  - 默认记为 `not_aligned`
+  - 若手动指定 `aligned/partially_aligned`，必须填写“人工覆盖原因（alignment_override_reason）”
 
 ## 4. 交易记录页（`/trades`）
 
@@ -69,6 +80,10 @@
 - 从交易记录一键生成复盘草稿
 - 编辑 outcome/did_follow_plan/review_summary/lesson_tags
 - 查看关联交易和关联决策快照
+
+一致性提示：
+- 当关联交易为 `not_aligned` 时，系统会对 `did_follow_plan=yes` 做自动纠偏并写入 warning。
+- 复盘里看到 `did_follow_plan` 被调整，优先以“交易对齐状态 + warning_messages”理解原因。
 
 自动计算项：
 - `holding_days`

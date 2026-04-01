@@ -8,6 +8,7 @@
 - 选股与深筛工作流（`/screener`）
 - 结构化研究输出：`review-report v2`、`debate-review`、`strategy plan`、`decision brief`
 - workflow 运行记录与轮询查看
+- 初筛批次台账与结果回看（17:00 展示窗口口径）
 - 数据清洗层（bars / financial_summary / announcements）
 - 交易与复盘最小闭环（`decision snapshot -> trade -> review`）
 
@@ -51,6 +52,20 @@
 - `SKIP` 允许 `price/quantity/amount` 为空
 - 复盘草稿默认自动计算 `holding_days/MFE/MAE`（行情不足时返回受控 warning）
 - 决策快照记录 `runtime_mode_requested/effective` 与数据质量摘要
+
+## 交易一致性校验口径（2026-04）
+
+为避免“同一只股票出现两套冲突结论”导致执行混乱，当前系统对交易一致性采用以下统一口径：
+
+- 方向基线（用于 `strategy_alignment` 推断）按优先级确定：
+  1. `decision_brief.action_now`（映射为 `BUY/WATCH/AVOID`）
+  2. `review_report.final_judgement.action`
+  3. `research.action`
+- 若交易动作与方向基线冲突：
+  - 系统默认判为 `not_aligned`
+  - 若仍需手动指定 `aligned/partially_aligned`，必须提供 `alignment_override_reason`
+- `reason_type` 与 `side` 必须匹配（如 `watch_only` 仅用于 `SKIP`，`stop_loss/take_profit` 仅用于 `SELL/REDUCE`）
+- 复盘 `did_follow_plan` 会与交易对齐状态联动校正，避免“交易不一致但复盘写 yes”的语义冲突
 
 ## 数据清洗层（v0.1）
 

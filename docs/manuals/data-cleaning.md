@@ -188,11 +188,13 @@ contracts 层负责项目内部标准对象定义，不允许下游直接消费 
 - 技术输入更稳定
 - 公告标题与分类可复用
 - 评分与短理由可解释性增强
+- 质量门控已接入分桶逻辑（如 `bars_quality=failed` 走失败占位，不参与高优先级候选）
 
 对 research：
 - 财务缺字段不再误判为高质量
 - 事件输入可稳定消费公告索引
 - `thesis/key_reasons/triggers` 证据链更清晰
+- `quality_status` 已影响 `confidence` 与 `confidence_reasons`，实现“质量影响置信度、而非直接当利空”
 
 ## 8. 当前边界（必须坚持）
 
@@ -209,14 +211,20 @@ cleaning 层职责始终是：
 
 ## 9. 后续建议
 
-### 9.1 下游显式消费质量字段
+### 9.1 已落地能力（质量消费）
 
-建议在 `research/screener` 中显式消费质量元数据，例如：
-- `financial_summary.quality_status=degraded` 时，下调基本面置信度
-- `announcements` 出现 warning 时，下调事件结论置信度
-- `bars` 发生 fallback 时，前端提示“谨慎解读”
+当前已落地：
+- `research` 会消费 `bars/financial/announcements` 质量状态，并修正 `confidence`
+- `screener` 会消费三路质量状态，执行降权、分桶上限与失败占位
+- 关键响应会暴露 `quality_status/cleaning_warnings/fallback` 相关字段供前端解释
 
-### 9.2 持续维护本规范文档
+### 9.2 下一步建议（不改清洗层边界）
+
+建议继续完善：
+- 在更多页面显式展示“质量影响说明”，降低用户误读
+- 持续收敛 provider 失败时的提示文案，统一“无数据”与“降级”差异表达
+
+### 9.3 持续维护本规范文档
 
 本文件作为清洗层规范基线，后续新增对象时按同一结构补充：
 - 对象契约

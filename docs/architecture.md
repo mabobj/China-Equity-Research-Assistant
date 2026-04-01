@@ -56,6 +56,17 @@
 - `GET /screener/run`
 - `GET /screener/deep-run`
 
+初筛批次台账（产品化第一阶段）：
+- `GET /screener/latest-batch`
+- `GET /screener/batches/{batch_id}`
+- `GET /screener/batches/{batch_id}/results`
+- `GET /screener/batches/{batch_id}/results/{symbol}`
+- `POST /screener/cursor/reset`
+
+展示窗口口径（Asia/Shanghai）：
+- 17:00 前：展示前一日 17:00（含）到当日 17:00（不含）完成结果
+- 17:00 后：展示当日 17:00（含）到当前时刻完成结果
+
 ## 4. 日级数据产品与 freshness
 
 数据产品目录：
@@ -144,6 +155,15 @@ freshness 策略：
 - `SKIP` 允许空价格/数量/金额
 - 复盘草稿默认自动计算 `holding_days/MFE/MAE`，行情不足时返回受控 warning
 - 不做自动下单，不做券商接入，不做组合级归因
+- 交易动作与决策基线冲突时，默认记为 `not_aligned`
+- 若冲突场景下手动指定 `aligned/partially_aligned`，必须提供 `alignment_override_reason`
+- `reason_type` 与 `side` 做基础一致性校验（入场类仅 `BUY/ADD`，离场类仅 `SELL/REDUCE`，观察类仅 `SKIP`）
+- `did_follow_plan` 会结合交易对齐状态做自动纠偏，避免“执行不一致但复盘写 yes”
+
+### 6.6 决策基线口径（方向层与时机层）
+- 方向层：用于交易一致性校验，优先读取 `decision_brief.action_now` 映射结果，回退到 `review_report.final_judgement.action`
+- 时机层：保留 `decision_brief.action_now` 原始语义（`BUY_NOW / WAIT_PULLBACK / WAIT_BREAKOUT / RESEARCH_ONLY / AVOID`）
+- 页面会同时展示“方向基线”和“执行动作（时机层）”；当两层口径不一致时给出显式提示
 
 ## 7. 前端页面职责
 

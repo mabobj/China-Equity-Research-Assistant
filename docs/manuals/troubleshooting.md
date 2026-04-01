@@ -259,3 +259,38 @@ python -m pytest backend/tests/test_workspace_bundle_service.py -q
 - `quality_status=warning/degraded`：需要结合 warning/缺失字段判断可信度
 - `count=0` 且有 fallback/warning：更可能是 provider 不可用或降级路径
 - `count=0` 且无异常字段：更可能是窗口内确实无数据
+
+## 14. 交易记录常见报错（405 / 422 / 冲突提示）
+
+### 14.1 “操作失败 请求失败（405）”
+
+常见原因：
+- 前端仍在调用旧方法（例如历史缓存里是 `PUT`），而后端当前是 `PATCH /reviews/{review_id}`
+- 本地前端代码已更新但浏览器缓存未更新
+
+建议排查：
+1. 强制刷新页面（`Ctrl+F5`）后重试
+2. 在浏览器开发者工具 Network 确认实际请求方法为 `PATCH`
+3. 若仍异常，重启前端开发服务并再次验证
+
+### 14.2 “操作失败 请求失败（422）”
+
+常见原因：
+- `BUY/SELL/ADD/REDUCE` 未填写有效 `price` 或 `quantity`
+- `reason_type` 与 `side` 不匹配（如 `watch_only` 搭配 `BUY`）
+
+建议排查：
+1. 先检查动作是否为 `SKIP`
+2. 非 `SKIP` 必填价格与数量
+3. 根据动作重新选择原因类型
+
+### 14.3 “当前交易与原判断存在冲突”
+
+这条提示来自一致性校验，核心含义：
+- 当前交易：你在表单里选择的 `side`（买入/卖出/加仓/减仓/跳过）
+- 原判断：系统用于校验的“方向基线”（优先 `decision_brief.action_now` 映射，回退 `review-report`）
+- 冲突：两者方向不一致（例如原判断 `AVOID`，但你选择 `BUY`）
+
+处理方式：
+- 直接接受系统默认：`strategy_alignment=not_aligned`
+- 若仍要手动改为 `aligned/partially_aligned`，必须填写 `alignment_override_reason`
