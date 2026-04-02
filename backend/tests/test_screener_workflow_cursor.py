@@ -40,8 +40,17 @@ class _StubMarketDataService:
 
 
 class _StubScreenerSnapshotDaily:
+    def __init__(
+        self,
+        *,
+        load_result: DataProductResult[ScreenerRunResponse] | None = None,
+    ) -> None:
+        self.load_result = load_result
+        self.load_calls = 0
+
     def load(self, *, run_date, params):
-        return None
+        self.load_calls += 1
+        return self.load_result
 
     def save(self, *, run_date, params, payload: ScreenerRunResponse):
         return DataProductResult(
@@ -151,6 +160,61 @@ def test_screener_workflow_after_1700_resets_cursor_and_runs_from_start(
         )
         == "2026-03-30"
     )
+
+
+def test_screener_workflow_manual_reset_invalidates_same_day_snapshot(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _patch_now(
+        monkeypatch,
+        datetime(2026, 3, 30, 10, 1, tzinfo=screener_workflow_module._SHANGHAI_TZ),
+    )
+    market_data_service = _StubMarketDataService()
+    market_data_service.set_refresh_cursor(
+        screener_workflow_module._CURSOR_SNAPSHOT_INVALIDATED_DATE_KEY,
+        "2026-03-30",
+    )
+    pipeline = _StubScreenerPipeline()
+    cached_payload = ScreenerRunResponse(
+        as_of_date=date(2026, 3, 30),
+        freshness_mode="cache_hit",
+        source_mode="snapshot",
+        total_symbols=5,
+        scanned_symbols=1,
+        buy_candidates=[],
+        watch_candidates=[],
+        avoid_candidates=[],
+        ready_to_buy_candidates=[],
+        watch_pullback_candidates=[],
+        watch_breakout_candidates=[],
+        research_only_candidates=[],
+    )
+    snapshot_dataset = _StubScreenerSnapshotDaily(
+        load_result=DataProductResult(
+            dataset=SCREENER_SNAPSHOT_DAILY,
+            symbol="screener_run",
+            as_of_date=date(2026, 3, 30),
+            payload=cached_payload,
+            freshness_mode="cache_hit",
+            source_mode="snapshot",
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    definition = screener_workflow_module.build_screener_workflow_definition(
+        screener_pipeline=pipeline,
+        screener_snapshot_daily=snapshot_dataset,
+        market_data_service=market_data_service,
+    )
+    executor = WorkflowExecutor(artifact_store=FileWorkflowArtifactStore(tmp_path))
+
+    result = executor.execute(definition, ScreenerWorkflowRunRequest(batch_size=2))
+
+    assert result.status == "completed"
+    assert result.final_output is not None
+    assert result.final_output.scanned_symbols == 2
+    assert pipeline.last_scan_symbols == ["000001.SZ", "000002.SZ"]
+    assert snapshot_dataset.load_calls == 0
 
 
 def _patch_now(monkeypatch, value: datetime) -> None:

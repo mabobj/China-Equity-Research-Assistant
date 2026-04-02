@@ -146,6 +146,10 @@ def reset_screener_cursor(
         "screener_run_cursor_last_reset_date",
         now.date().isoformat(),
     )
+    market_data_service.set_refresh_cursor(
+        "screener_run_snapshot_invalidated_date",
+        now.date().isoformat(),
+    )
     return ScreenerCursorResetResponse(
         reset_at=now,
         message="初筛游标已重置，下一次运行将从首支股票开始。",

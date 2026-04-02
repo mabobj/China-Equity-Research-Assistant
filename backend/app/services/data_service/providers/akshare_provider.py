@@ -5,6 +5,7 @@ import importlib
 import importlib.util
 import math
 import random
+import re
 import time
 from typing import Any, Optional
 
@@ -218,7 +219,7 @@ class AkshareProvider:
         """当前 provider 不负责公告列表。"""
         return []
 
-    def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
+    def _get_stock_financial_summary_v2(self, symbol: str) -> Optional[FinancialSummary]:
         """获取单只股票基础财务摘要。"""
         self._ensure_available()
         ak = _get_akshare_module()
@@ -235,7 +236,7 @@ class AkshareProvider:
         if frame is None or frame.empty:
             return None
 
-        latest_row = _select_latest_financial_row(frame)
+        latest_row = _select_latest_financial_row_v2(frame)
         if latest_row is None:
             return None
 
@@ -292,6 +293,125 @@ class AkshareProvider:
             bps=_pick_first_float(
                 latest_row,
                 ["BPS", "每股净资产"],
+            ),
+            source=self.name,
+        )
+
+    def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
+        """获取单只股票财务摘要（覆盖实现，优先稳健字段提取）。"""
+        self._ensure_available()
+        ak = _get_akshare_module()
+        parts = parse_symbol(symbol)
+
+        try:
+            frame = ak.stock_financial_analysis_indicator_em(
+                symbol=parts.canonical,
+                indicator="按报告期",
+            )
+        except Exception as exc:  # pragma: no cover - network/runtime dependent
+            raise ProviderError("AKShare failed to load financial summary.") from exc
+
+        if frame is None or frame.empty:
+            return None
+
+        latest_row = _select_latest_financial_row_v2(frame)
+        if latest_row is None:
+            return None
+
+        return FinancialSummary(
+            symbol=parts.canonical,
+            name=(
+                _pick_first_string(
+                    latest_row,
+                    [
+                        "SECURITY_NAME_ABBR",
+                        "SECURITY_NAME",
+                        "SEC_NAME",
+                        "NAME",
+                        "股票简称",
+                        "名称",
+                    ],
+                )
+                or _pick_first_string_by_key_fragments(latest_row, ["NAME", "简称", "股票名称"])
+                or parts.code
+            ),
+            report_period=_parse_flexible_date(
+                _pick_first_value(
+                    latest_row,
+                    ["REPORT_DATE", "REPORT_PERIOD", "NOTICE_DATE", "报告期", "报告日期"],
+                )
+            ),
+            revenue=(
+                _pick_first_float_v2(
+                    latest_row,
+                    ["TOTAL_OPERATE_INCOME", "OPERATE_INCOME", "TOTAL_REVENUE", "营业总收入", "营业收入"],
+                )
+                or _pick_first_float_by_key_fragments(
+                    latest_row,
+                    ["TOTALOPERATEINCOME", "OPERATEINCOME", "TOTALREVENUE", "营业总收入", "营业收入", "营收"],
+                )
+            ),
+            revenue_yoy=(
+                _pick_first_float_v2(
+                    latest_row,
+                    [
+                        "YSTZ",
+                        "TOTAL_OPERATE_INCOME_YOY",
+                        "OPERATE_INCOME_YOY",
+                        "营业总收入同比增长",
+                        "营业收入同比增长",
+                    ],
+                )
+                or _pick_first_float_by_key_fragments(
+                    latest_row,
+                    ["YSTZ", "INCOMEYOY", "收入同比", "营收同比", "营业总收入同比", "营业收入同比"],
+                )
+            ),
+            net_profit=(
+                _pick_first_float_v2(
+                    latest_row,
+                    ["PARENT_NETPROFIT", "NETPROFIT", "NET_INCOME", "归母净利润", "净利润"],
+                )
+                or _pick_first_float_by_key_fragments(
+                    latest_row,
+                    ["PARENTNETPROFIT", "NETPROFIT", "NETINCOME", "归母净利润", "净利润", "母公司股东的净利润"],
+                )
+            ),
+            net_profit_yoy=(
+                _pick_first_float_v2(
+                    latest_row,
+                    ["SJLTZ", "NETPROFIT_YOY", "PARENT_NETPROFIT_YOY", "归母净利润同比增长", "净利润同比增长"],
+                )
+                or _pick_first_float_by_key_fragments(
+                    latest_row,
+                    ["SJLTZ", "PROFITYOY", "净利润同比", "归母净利润同比"],
+                )
+            ),
+            roe=(
+                _pick_first_float_v2(
+                    latest_row,
+                    ["ROE_WEIGHT", "WEIGHTAVG_ROE", "ROE", "净资产收益率", "加权净资产收益率"],
+                )
+                or _pick_first_float_by_key_fragments(
+                    latest_row,
+                    ["ROE", "净资产收益率", "加权净资产收益率"],
+                )
+            ),
+            gross_margin=(
+                _pick_first_float_v2(latest_row, ["XSMLL", "GROSS_MARGIN", "销售毛利率", "毛利率"])
+                or _pick_first_float_by_key_fragments(latest_row, ["GROSSMARGIN", "销售毛利率", "毛利率"])
+            ),
+            debt_ratio=(
+                _pick_first_float_v2(latest_row, ["ZCFZL", "DEBT_RATIO", "资产负债率"])
+                or _pick_first_float_by_key_fragments(latest_row, ["DEBTRATIO", "资产负债率", "负债率"])
+            ),
+            eps=(
+                _pick_first_float_v2(latest_row, ["BASIC_EPS", "EPSJB", "EPS", "基本每股收益", "每股收益"])
+                or _pick_first_float_by_key_fragments(latest_row, ["BASICEPS", "EPS", "每股收益"])
+            ),
+            bps=(
+                _pick_first_float_v2(latest_row, ["BPS", "每股净资产"])
+                or _pick_first_float_by_key_fragments(latest_row, ["BPS", "每股净资产"])
             ),
             source=self.name,
         )
@@ -419,6 +539,106 @@ def _pick_first_string(row: dict[str, Any], keys: list[str]) -> Optional[str]:
 def _pick_first_float(row: dict[str, Any], keys: list[str]) -> Optional[float]:
     """按候选字段顺序读取首个数值。"""
     return _as_optional_float(_pick_first_value(row, keys))
+
+
+def _normalize_field_key(key: Any) -> str:
+    text = str(key or "").strip()
+    if text == "":
+        return ""
+    text = re.sub(r"[\s_\-./:：%()（）\[\]【】]+", "", text)
+    return text.upper()
+
+
+def _pick_first_string_by_key_fragments(
+    row: dict[str, Any],
+    fragments: list[str],
+) -> Optional[str]:
+    normalized_fragments = [_normalize_field_key(item) for item in fragments if item]
+    for raw_key, raw_value in row.items():
+        normalized_key = _normalize_field_key(raw_key)
+        if normalized_key == "":
+            continue
+        if not any(fragment and fragment in normalized_key for fragment in normalized_fragments):
+            continue
+        parsed = _as_optional_string(raw_value)
+        if parsed:
+            return parsed
+    return None
+
+
+def _pick_first_float_by_key_fragments(
+    row: dict[str, Any],
+    fragments: list[str],
+) -> Optional[float]:
+    normalized_fragments = [_normalize_field_key(item) for item in fragments if item]
+    for raw_key, raw_value in row.items():
+        normalized_key = _normalize_field_key(raw_key)
+        if normalized_key == "":
+            continue
+        if not any(fragment and fragment in normalized_key for fragment in normalized_fragments):
+            continue
+        parsed = _as_optional_float_v2(raw_value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _pick_first_float_v2(row: dict[str, Any], keys: list[str]) -> Optional[float]:
+    return _as_optional_float_v2(_pick_first_value(row, keys))
+
+
+def _as_optional_float_v2(value: Any) -> Optional[float]:
+    """覆盖旧实现：支持百分号、千分位和中文金额单位。"""
+    if _is_missing(value):
+        return None
+
+    if isinstance(value, str):
+        text = value.strip()
+        if text == "":
+            return None
+        text = text.replace(",", "").replace("%", "")
+        multiplier = 1.0
+        if text.endswith("亿"):
+            multiplier = 100000000.0
+            text = text[:-1]
+        elif text.endswith("万"):
+            multiplier = 10000.0
+            text = text[:-1]
+        text = text.strip()
+        if text == "":
+            return None
+        try:
+            return float(text) * multiplier
+        except ValueError:
+            return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _select_latest_financial_row_v2(frame: Any) -> Optional[dict[str, Any]]:
+    """覆盖旧实现：补充报告期候选字段，避免字段名漂移。"""
+    if frame is None or frame.empty:
+        return None
+
+    rows: list[dict[str, Any]] = frame.to_dict(orient="records")
+    if not rows:
+        return None
+
+    def _sort_key(row: dict[str, Any]) -> tuple[int, str]:
+        report_date = _parse_flexible_date(
+            _pick_first_value(
+                row,
+                ["REPORT_DATE", "REPORT_PERIOD", "NOTICE_DATE", "报告期", "报告日期"],
+            ),
+        )
+        if report_date is None:
+            return (0, "")
+        return (1, report_date.isoformat())
+
+    return sorted(rows, key=_sort_key, reverse=True)[0]
 
 
 def _is_transient_akshare_error(exc: Exception) -> bool:

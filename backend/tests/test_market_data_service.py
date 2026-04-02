@@ -949,6 +949,38 @@ def test_service_financial_summary_cache_hit_with_key_fields_missing_is_degraded
     assert "roe" in summary.missing_fields
 
 
+def test_service_financial_summary_with_secondary_metrics_is_warning(tmp_path: Path) -> None:
+    """核心字段缺失但替代字段充足时，应降为 warning 而非一律 degraded。"""
+    provider = FinancialSummaryProvider()
+    local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
+    local_store.upsert_stock_financial_summary(
+        FinancialSummary(
+            symbol="000002.SZ",
+            name="万科A",
+            report_period=date(2025, 9, 30),
+            gross_margin=21.8,
+            debt_ratio=58.2,
+            eps=0.73,
+            bps=8.31,
+            source="legacy_cache",
+        )
+    )
+    service = MarketDataService(
+        providers=[provider],
+        local_store=local_store,
+    )
+
+    summary = service.get_stock_financial_summary("000002.SZ")
+
+    assert provider.financial_call_count == 0
+    assert summary.report_type == "q3"
+    assert summary.quality_status == "warning"
+    assert "core_financial_fields_missing_use_secondary_metrics" in summary.cleaning_warnings
+    assert "revenue" in summary.missing_fields
+    assert "net_profit" in summary.missing_fields
+    assert "roe" in summary.missing_fields
+
+
 def test_service_announcements_runs_cleaning_and_deduplicates() -> None:
     """公告接口应统一走清洗链路并输出去重后的结构化结果。"""
     provider = AnnouncementProvider()

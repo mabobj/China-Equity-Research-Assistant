@@ -1418,6 +1418,10 @@ def _resolve_financial_quality_status(
     missing_set = set(missing_fields)
     key_missing_count = len(key_missing_fields & missing_set)
     total_missing_count = len(missing_set)
+    secondary_fields = ("gross_margin", "debt_ratio", "eps", "bps")
+    secondary_available_count = sum(
+        1 for field_name in secondary_fields if getattr(summary, field_name) is not None
+    )
     has_any_value = any(
         getattr(summary, field_name) is not None
         for field_name in (
@@ -1440,7 +1444,11 @@ def _resolve_financial_quality_status(
         if summary.report_period is None and summary.report_type in {None, "unknown"}:
             inferred_status = "failed"
     elif key_missing_count >= 5 or total_missing_count >= 6:
-        inferred_status = "degraded"
+        if secondary_available_count >= 3 and summary.report_period is not None:
+            inferred_status = "warning"
+            warning_messages.append("core_financial_fields_missing_use_secondary_metrics")
+        else:
+            inferred_status = "degraded"
     elif key_missing_count > 0 or total_missing_count > 0 or has_warning:
         inferred_status = "warning"
 
@@ -1448,6 +1456,12 @@ def _resolve_financial_quality_status(
         return inferred_status
     if existing_status == "failed":
         return existing_status
+    if (
+        existing_status == "degraded"
+        and inferred_status == "warning"
+        and "core_financial_fields_missing_use_secondary_metrics" in warning_messages
+    ):
+        return "warning"
     if inferred_status == "failed":
         return "degraded"
     if existing_status == "degraded" or inferred_status == "degraded":

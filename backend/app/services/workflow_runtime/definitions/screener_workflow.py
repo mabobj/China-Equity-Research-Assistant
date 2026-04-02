@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import date, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -23,6 +23,7 @@ from app.services.workflow_runtime.context import WorkflowContext
 _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 _CURSOR_SYMBOL_KEY = "screener_run_cursor_symbol"
 _CURSOR_LAST_RESET_DATE_KEY = "screener_run_cursor_last_reset_date"
+_CURSOR_SNAPSHOT_INVALIDATED_DATE_KEY = "screener_run_snapshot_invalidated_date"
 _DEFAULT_BATCH_SIZE = 50
 
 
@@ -71,6 +72,7 @@ class ScreenerWorkflowDefinitionBuilder:
     def _run_screener(self, context: WorkflowContext) -> ScreenerRunResponse:
         request = self._get_request(context)
         now = datetime.now(_SHANGHAI_TZ)
+        current_date = now.date()
         batch_size = self._resolve_batch_size(request)
         total_symbols, universe_items = load_scan_universe(
             market_data_service=self._market_data_service,
@@ -110,9 +112,19 @@ class ScreenerWorkflowDefinitionBuilder:
             cursor_start_index=selection.start_index,
             reset_trade_date=now.date().isoformat(),
         )
-        if not bool(request.force_refresh):
+        snapshot_invalidated_today = self._is_snapshot_invalidated_for_date(
+            current_date=current_date
+        )
+        if snapshot_invalidated_today:
+            warning_messages = list(context.get_meta("warning_messages") or [])
+            warning_messages.append(
+                "已检测到当日游标重置：今日初筛快照已作废，将按游标分批重新计算。"
+            )
+            context.set_meta("warning_messages", warning_messages)
+
+        if not bool(request.force_refresh) and not snapshot_invalidated_today:
             cached = self._screener_snapshot_daily.load(
-                run_date=now.date(),
+                run_date=current_date,
                 params=snapshot_params,
             )
             if cached is not None:
@@ -135,7 +147,7 @@ class ScreenerWorkflowDefinitionBuilder:
         )
         normalized_response = self._normalize_response(response)
         saved = self._screener_snapshot_daily.save(
-            run_date=now.date(),
+            run_date=current_date,
             params=snapshot_params,
             payload=normalized_response.model_copy(
                 update={
@@ -313,6 +325,14 @@ class ScreenerWorkflowDefinitionBuilder:
 
     def _get_request(self, context: WorkflowContext) -> ScreenerWorkflowRunRequest:
         return context.request_as(ScreenerWorkflowRunRequest)
+
+    def _is_snapshot_invalidated_for_date(self, *, current_date: date) -> bool:
+        marker = self._market_data_service.get_refresh_cursor(
+            _CURSOR_SNAPSHOT_INVALIDATED_DATE_KEY
+        )
+        if not isinstance(marker, str) or not marker:
+            return False
+        return marker == current_date.isoformat()
 
 
 def build_screener_workflow_definition(

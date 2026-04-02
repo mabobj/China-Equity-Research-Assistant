@@ -216,3 +216,20 @@ def test_reset_screener_cursor_route_returns_ok() -> None:
     assert "初筛游标已重置" in payload["message"]
 
     app.dependency_overrides.clear()
+
+
+def test_reset_screener_cursor_route_marks_snapshot_invalidated() -> None:
+    stub_market_data = StubMarketDataService()
+    app.dependency_overrides[get_market_data_service] = lambda: stub_market_data
+
+    response = client.post("/screener/cursor/reset")
+
+    assert response.status_code == 200
+    assert stub_market_data.storage["screener_run_cursor_symbol"] is None
+    assert stub_market_data.storage.get("screener_run_cursor_last_reset_date")
+    assert (
+        stub_market_data.storage.get("screener_run_snapshot_invalidated_date")
+        == stub_market_data.storage.get("screener_run_cursor_last_reset_date")
+    )
+
+    app.dependency_overrides.clear()
