@@ -1,0 +1,270 @@
+"""标签服务（最小真实链路版）。"""
+
+from __future__ import annotations
+
+from contextlib import nullcontext
+from datetime import date, timedelta
+import json
+import logging
+from pathlib import Path
+from typing import Any
+
+from app.schemas.dataset import (
+    FeatureDatasetBuildRequest,
+    LabelDatasetBuildRequest,
+    LabelDatasetResponse,
+    LabelDatasetSummary,
+)
+from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_service.market_data_service import MarketDataService
+from app.services.dataset_service.dataset_service import DatasetService
+
+logger = logging.getLogger(__name__)
+
+
+class LabelService:
+    """管理标签数据集版本，支持从特征样本生成未来收益标签。"""
+
+    def __init__(
+        self,
+        *,
+        default_label_version: str,
+        root_dir: Path,
+        market_data_service: MarketDataService,
+        dataset_service: DatasetService,
+    ) -> None:
+        self._default_label_version = default_label_version
+        self._root_dir = root_dir
+        self._root_dir.mkdir(parents=True, exist_ok=True)
+        self._labels_dir = self._root_dir / "labels"
+        self._labels_dir.mkdir(parents=True, exist_ok=True)
+        self._manifest_path = self._root_dir / "label_manifest.json"
+        self._market_data_service = market_data_service
+        self._dataset_service = dataset_service
+
+    def get_default_label_version(self) -> str:
+        return self._default_label_version
+
+    def get_label_window(self) -> tuple[int, int]:
+        """返回默认标签窗口（未来 5/10 交易日）。"""
+        return (5, 10)
+
+    def resolve_as_of_date(self, as_of_date: date | None) -> date:
+        return as_of_date or resolve_last_closed_trading_day()
+
+    def build_label_dataset(
+        self,
+        request: LabelDatasetBuildRequest,
+    ) -> LabelDatasetResponse:
+        as_of_date = request.as_of_date or _default_label_as_of_date()
+        label_version = f"labels-{as_of_date.isoformat()}-v1"
+        label_path = self._labels_dir / f"{label_version}.json"
+
+        manifest = self._load_manifest()
+        existing = manifest.get("datasets", {}).get(label_version)
+        if existing is not None and label_path.exists() and not request.force_refresh:
+            return _build_label_response(label_version, existing)
+
+        # 先确保同日特征数据集可用（同样走本地优先构建）。
+        self._dataset_service.build_feature_dataset(
+            FeatureDatasetBuildRequest(
+                as_of_date=as_of_date,
+                max_symbols=request.max_symbols,
+                force_refresh=request.force_refresh,
+            )
+        )
+        feature_version = f"features-{as_of_date.isoformat()}-v1"
+        feature_records = self._dataset_service.load_feature_records(feature_version)
+
+        records: list[dict[str, Any]] = []
+        warning_messages: list[str] = []
+        session_scope = getattr(self._market_data_service, "session_scope", None)
+        scope = session_scope() if callable(session_scope) else nullcontext()
+        with scope:
+            for record in feature_records:
+                symbol = str(record.get("symbol") or "").strip()
+                if symbol == "":
+                    continue
+                try:
+                    bars_response = self._get_daily_bars_for_labels(symbol=symbol)
+                except Exception:
+                    warning_messages.append(f"{symbol}:daily_bars_unavailable_for_labels")
+                    continue
+
+                bars = [bar for bar in bars_response.bars if bar.close is not None]
+                bars.sort(key=lambda item: item.trade_date)
+                index = _find_trade_date_index(bars, as_of_date)
+                if index is None or (index + 10) >= len(bars):
+                    warning_messages.append(f"{symbol}:insufficient_forward_window")
+                    continue
+
+                base_close = float(bars[index].close or 0.0)
+                if base_close <= 0:
+                    warning_messages.append(f"{symbol}:invalid_base_close")
+                    continue
+
+                forward_close_5d = float(bars[index + 5].close or 0.0)
+                forward_close_10d = float(bars[index + 10].close or 0.0)
+                if forward_close_5d <= 0 or forward_close_10d <= 0:
+                    warning_messages.append(f"{symbol}:invalid_forward_close")
+                    continue
+
+                forward_return_5d = (forward_close_5d / base_close) - 1.0
+                forward_return_10d = (forward_close_10d / base_close) - 1.0
+                records.append(
+                    {
+                        "symbol": symbol,
+                        "as_of_date": as_of_date.isoformat(),
+                        "forward_return_5d": round(forward_return_5d, 6),
+                        "forward_return_10d": round(forward_return_10d, 6),
+                        "hit_label_5d": int(forward_return_5d > 0),
+                    }
+                )
+
+        payload = {
+            "label_version": label_version,
+            "as_of_date": as_of_date.isoformat(),
+            "symbol_count": len(records),
+            "window_5d": 5,
+            "window_10d": 10,
+            "source_mode": "mixed",
+            "description": "基于日线未来收益构建的最小标签集",
+            "warning_messages": warning_messages[:200],
+            "records": records,
+        }
+        with label_path.open("w", encoding="utf-8") as file:
+            json.dump(payload, file, ensure_ascii=False, indent=2)
+
+        manifest.setdefault("datasets", {})[label_version] = {
+            "as_of_date": payload["as_of_date"],
+            "symbol_count": payload["symbol_count"],
+            "window_5d": payload["window_5d"],
+            "window_10d": payload["window_10d"],
+            "source_mode": payload["source_mode"],
+            "description": payload["description"],
+            "warning_messages": payload["warning_messages"],
+        }
+        manifest["latest_version"] = label_version
+        self._save_manifest(manifest)
+
+        logger.info(
+            "prediction.labels.build_done label_version=%s symbol_count=%s warning_count=%s",
+            label_version,
+            len(records),
+            len(warning_messages),
+        )
+        return _build_label_response(label_version, manifest["datasets"][label_version])
+
+    def get_label_dataset(self, label_version: str) -> LabelDatasetResponse:
+        manifest = self._load_manifest()
+        resolved_version = (
+            str(manifest.get("latest_version", self._default_label_version))
+            if label_version == "latest"
+            else label_version
+        )
+        dataset = manifest.get("datasets", {}).get(resolved_version)
+        if dataset is None:
+            raise ValueError(f"label dataset version 不存在：{label_version}")
+        return _build_label_response(resolved_version, dataset)
+
+    def load_label_records(self, label_version: str = "latest") -> list[dict[str, Any]]:
+        manifest = self._load_manifest()
+        resolved_version = (
+            str(manifest.get("latest_version", self._default_label_version))
+            if label_version == "latest"
+            else label_version
+        )
+        label_path = self._labels_dir / f"{resolved_version}.json"
+        if not label_path.exists():
+            raise ValueError(f"label dataset records 不存在：{resolved_version}")
+        with label_path.open("r", encoding="utf-8") as file:
+            payload = json.load(file)
+        records = payload.get("records", [])
+        if not isinstance(records, list):
+            return []
+        return [record for record in records if isinstance(record, dict)]
+
+    def _load_manifest(self) -> dict[str, Any]:
+        if self._manifest_path.exists():
+            with self._manifest_path.open("r", encoding="utf-8") as file:
+                return json.load(file)
+        manifest = self._build_default_manifest()
+        self._save_manifest(manifest)
+        return manifest
+
+    def _save_manifest(self, manifest: dict[str, Any]) -> None:
+        with self._manifest_path.open("w", encoding="utf-8") as file:
+            json.dump(manifest, file, ensure_ascii=False, indent=2)
+
+    def _build_default_manifest(self) -> dict[str, Any]:
+        today = date.today().isoformat()
+        return {
+            "latest_version": self._default_label_version,
+            "datasets": {
+                self._default_label_version: {
+                    "as_of_date": today,
+                    "symbol_count": 0,
+                    "window_5d": 5,
+                    "window_10d": 10,
+                    "source_mode": "local",
+                    "description": "预测标签骨架初始版本（未构建真实标签）",
+                    "warning_messages": ["尚未构建真实标签数据集。"],
+                }
+            },
+        }
+
+    def _get_daily_bars_for_labels(self, *, symbol: str):
+        try:
+            return self._market_data_service.get_daily_bars(
+                symbol=symbol,
+                allow_remote_sync=False,
+                provider_names=("mootdx", "baostock", "akshare"),
+            )
+        except TypeError:
+            try:
+                return self._market_data_service.get_daily_bars(
+                    symbol=symbol,
+                    provider_names=("mootdx", "baostock", "akshare"),
+                )
+            except TypeError:
+                return self._market_data_service.get_daily_bars(symbol=symbol)
+
+
+def _find_trade_date_index(bars: list[Any], target_date: date) -> int | None:
+    for index, bar in enumerate(bars):
+        if bar.trade_date == target_date:
+            return index
+    return None
+
+
+def _build_label_response(
+    label_version: str,
+    dataset: dict[str, Any],
+) -> LabelDatasetResponse:
+    return LabelDatasetResponse(
+        summary=LabelDatasetSummary(
+            label_version=label_version,
+            as_of_date=date.fromisoformat(str(dataset["as_of_date"])),
+            symbol_count=int(dataset.get("symbol_count", 0)),
+            window_5d=int(dataset.get("window_5d", 5)),
+            window_10d=int(dataset.get("window_10d", 10)),
+            source_mode=str(dataset.get("source_mode", "local")),
+            description=_optional_text(dataset.get("description")),
+        ),
+        warning_messages=list(dataset.get("warning_messages", [])),
+    )
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _default_label_as_of_date() -> date:
+    # 为保证 5/10 日未来窗口通常可用，默认回退约 14 个自然日。
+    candidate = resolve_last_closed_trading_day() - timedelta(days=14)
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+    return candidate

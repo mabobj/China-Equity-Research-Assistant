@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from app.schemas.market_data import DailyBar, DailyBarResponse, StockProfile
+from app.schemas.prediction import PredictionSnapshotResponse
 from app.schemas.research import ResearchReport
 from app.schemas.research_inputs import AnnouncementListResponse, FinancialSummary
 from app.schemas.technical import (
@@ -265,6 +266,29 @@ class _StubDecisionBriefDaily:
         )
 
 
+class _StubPredictionService:
+    def get_symbol_prediction(self, symbol: str, as_of_date):
+        return PredictionSnapshotResponse(
+            symbol=symbol,
+            as_of_date=as_of_date,
+            model_version="baseline-rule-v1",
+            feature_version=f"features-{as_of_date.isoformat()}-v1",
+            label_version="labels-v0-forward-return",
+            predictive_score=68,
+            upside_probability=0.68,
+            expected_excess_return=0.045,
+            model_confidence=0.7,
+            runtime_mode="baseline",
+            warning_messages=[],
+            generated_at=datetime.now(),
+        )
+
+
+class _FailingPredictionService:
+    def get_symbol_prediction(self, symbol: str, as_of_date):
+        raise ValueError("feature dataset records 不存在：features-v0-baseline")
+
+
 class _CachedReviewReportDaily(_StubReviewReportDaily):
     def load(self, symbol: str, *, as_of_date):
         payload = build_review_report().model_copy(
@@ -368,6 +392,7 @@ def test_workspace_bundle_service_returns_bundle_with_evidence_and_freshness() -
         strategy_plan_daily=_StubStrategyPlanDaily(),
         debate_review_daily=_StubDebateReviewDaily(),
         decision_brief_daily=_StubDecisionBriefDaily(),
+        prediction_service=_StubPredictionService(),
     )
 
     bundle = service.get_workspace_bundle("600519.SH", use_llm=False)
@@ -375,6 +400,7 @@ def test_workspace_bundle_service_returns_bundle_with_evidence_and_freshness() -
     assert bundle.profile is not None
     assert bundle.factor_snapshot is not None
     assert bundle.decision_brief is not None
+    assert bundle.predictive_snapshot is not None
     assert bundle.evidence_manifest is not None
     assert bundle.freshness_summary.items
     assert any(item.module_name == "decision_brief" for item in bundle.module_status_summary)
@@ -451,7 +477,26 @@ def test_workspace_bundle_service_reuses_review_strategy_and_debate_snapshots() 
     assert bundle.fallback_applied is False
 
 
-def test_workspace_bundle_service_use_llm_prefers_rule_snapshot_when_llm_snapshot_missing() -> None:
+def test_workspace_bundle_service_use_llm_computes_live_when_llm_snapshot_missing() -> None:
+    class _TrackingDebateRuntimeService:
+        def __init__(self) -> None:
+            self.calls: list[bool | None] = []
+
+        def get_debate_review_report_from_inputs(self, inputs, **kwargs):
+            self.calls.append(kwargs.get("use_llm"))
+            return build_debate_review_report().model_copy(
+                update={
+                    "runtime_mode": "llm",
+                    "runtime_mode_requested": "llm",
+                    "runtime_mode_effective": "llm",
+                    "provider_used": "llm",
+                }
+            )
+
+        def get_debate_review_progress(self, symbol: str, **kwargs):
+            return None
+
+    runtime_service = _TrackingDebateRuntimeService()
     service = WorkspaceBundleService(
         market_data_service=_StubMarketDataService(),
         technical_analysis_service=_StubTechnicalAnalysisService(),
@@ -459,7 +504,7 @@ def test_workspace_bundle_service_use_llm_prefers_rule_snapshot_when_llm_snapsho
         factor_snapshot_service=_StubFactorSnapshotService(),
         stock_review_service=_StubStockReviewService(),
         debate_orchestrator=_StubDebateOrchestrator(),
-        debate_runtime_service=_FailingDebateRuntimeService(),
+        debate_runtime_service=runtime_service,
         strategy_planner=_StubStrategyPlanner(),
         trigger_snapshot_service=_StubTriggerSnapshotService(),
         daily_bars_daily=_StubDailyBarsDaily(),
@@ -475,13 +520,47 @@ def test_workspace_bundle_service_use_llm_prefers_rule_snapshot_when_llm_snapsho
     bundle = service.get_workspace_bundle("600519.SH", use_llm=True)
 
     assert bundle.debate_review is not None
+    assert runtime_service.calls == [True]
     assert bundle.debate_review.runtime_mode_requested == "llm"
-    assert bundle.debate_review.runtime_mode_effective == "rule_based"
-    assert bundle.debate_review.fallback_applied is True
-    assert bundle.debate_review.fallback_reason is not None
+    assert bundle.debate_review.runtime_mode_effective == "llm"
+    assert bundle.debate_review.fallback_applied is False
     assert bundle.runtime_mode_requested == "llm"
-    assert bundle.runtime_mode_effective == "rule_based"
+    assert bundle.runtime_mode_effective == "llm"
     assert any(
-        item.module_name == "debate_review" and item.fallback_applied
+        item.module_name == "debate_review" and item.status == "success"
         for item in bundle.module_status_summary
     )
+
+
+def test_workspace_bundle_service_skips_predictive_snapshot_when_assets_missing() -> None:
+    service = WorkspaceBundleService(
+        market_data_service=_StubMarketDataService(),
+        technical_analysis_service=_StubTechnicalAnalysisService(),
+        research_manager=_StubResearchManager(),
+        factor_snapshot_service=_StubFactorSnapshotService(),
+        stock_review_service=_StubStockReviewService(),
+        debate_orchestrator=_StubDebateOrchestrator(),
+        debate_runtime_service=_StubDebateRuntimeService(),
+        strategy_planner=_StubStrategyPlanner(),
+        trigger_snapshot_service=_StubTriggerSnapshotService(),
+        daily_bars_daily=_StubDailyBarsDaily(),
+        announcements_daily=_StubAnnouncementsDaily(),
+        financial_summary_daily=_StubFinancialSummaryDaily(),
+        factor_snapshot_daily=_StubFactorSnapshotDaily(),
+        review_report_daily=_StubReviewReportDaily(),
+        strategy_plan_daily=_StubStrategyPlanDaily(),
+        debate_review_daily=_StubDebateReviewDaily(),
+        decision_brief_daily=_StubDecisionBriefDaily(),
+        prediction_service=_FailingPredictionService(),
+    )
+
+    bundle = service.get_workspace_bundle("600519.SH", use_llm=False)
+
+    assert bundle.predictive_snapshot is None
+    predictive_status = next(
+        item
+        for item in bundle.module_status_summary
+        if item.module_name == "predictive_snapshot"
+    )
+    assert predictive_status.status == "skipped"
+    assert bundle.fallback_applied is False

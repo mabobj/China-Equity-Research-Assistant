@@ -40,7 +40,10 @@ class WorkflowRuntimeService:
         artifact_store: FileWorkflowArtifactStore,
         background_executor: ThreadPoolExecutor | None = None,
         screener_batch_service: Any | None = None,
-        stale_running_timeout_seconds: int = 60,
+        evaluation_service: Any | None = None,
+        experiment_service: Any | None = None,
+        stale_running_timeout_seconds: int = 600,
+        recommendation_cache_ttl_seconds: int = 600,
     ) -> None:
         self._registry = registry
         self._executor = executor
@@ -50,11 +53,17 @@ class WorkflowRuntimeService:
             thread_name_prefix="workflow-runtime",
         )
         self._screener_batch_service = screener_batch_service
+        self._evaluation_service = evaluation_service
+        self._experiment_service = experiment_service
         self._stale_running_timeout = timedelta(
             seconds=max(stale_running_timeout_seconds, 30)
         )
+        self._recommendation_cache_ttl = timedelta(
+            seconds=max(recommendation_cache_ttl_seconds, 60)
+        )
         self._active_futures: dict[str, Future] = {}
         self._future_lock = Lock()
+        self._recommendation_cache: dict[str, tuple[datetime, dict[str, Any] | None]] = {}
 
     def run_single_stock_workflow(
         self,
@@ -120,6 +129,7 @@ class WorkflowRuntimeService:
 
     def get_run_detail(self, run_id: str) -> WorkflowRunDetailResponse:
         artifact = self._artifact_store.load_run(run_id)
+        artifact = self._resolve_running_artifact_for_read(artifact)
         visibility = self._build_runtime_visibility(
             workflow_name=artifact.workflow_name,
             input_summary=artifact.input_summary,
@@ -228,11 +238,17 @@ class WorkflowRuntimeService:
                 started_at=started_at,
                 persist_initial_state=False,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "workflow.runtime.background_failed workflow=%s run_id=%s",
                 definition.name,
                 run_id,
+            )
+            self._mark_background_run_failed(
+                run_id=run_id,
+                workflow_name=definition.name,
+                started_at=started_at,
+                error_message=f"后台执行异常：{exc}",
             )
             return
         finally:
@@ -335,6 +351,22 @@ class WorkflowRuntimeService:
 
         provider_used = debate_payload.get("provider_used") or "workflow_runtime"
         provider_candidates = debate_payload.get("provider_candidates") or [provider_used]
+        model_versions = self._extract_model_versions(
+            final_output=final_output,
+            final_output_summary=final_output_summary,
+        )
+        model_recommendation, recommendation_warning = self._resolve_model_recommendation(
+            model_versions=model_versions
+        )
+        if recommendation_warning is not None:
+            warning_messages.append(recommendation_warning)
+        version_recommendation_alert = self._build_version_recommendation_alert(
+            model_versions=model_versions,
+            model_recommendation=model_recommendation,
+        )
+        if version_recommendation_alert is not None:
+            warning_messages.append(version_recommendation_alert)
+        warning_messages = self._dedupe_messages(warning_messages)
 
         return {
             "provider_used": provider_used,
@@ -345,6 +377,8 @@ class WorkflowRuntimeService:
             "runtime_mode_effective": effective_mode,
             "warning_messages": warning_messages,
             "failed_symbols": failed_symbols,
+            "model_recommendation": model_recommendation,
+            "version_recommendation_alert": version_recommendation_alert,
         }
 
     def _build_existing_running_response(
@@ -402,6 +436,140 @@ class WorkflowRuntimeService:
                 symbols.append(item)
         return symbols
 
+    def _extract_model_versions(
+        self,
+        *,
+        final_output: dict[str, Any] | None,
+        final_output_summary: dict[str, Any],
+    ) -> list[str]:
+        versions: list[str] = []
+        seen: set[str] = set()
+
+        def add_version(value: Any) -> None:
+            if not isinstance(value, str):
+                return
+            normalized = value.strip()
+            if normalized == "" or normalized in seen:
+                return
+            seen.add(normalized)
+            versions.append(normalized)
+
+        def walk(value: Any) -> None:
+            if isinstance(value, dict):
+                add_version(value.get("predictive_model_version"))
+                predictive_snapshot = value.get("predictive_snapshot")
+                if isinstance(predictive_snapshot, dict):
+                    add_version(predictive_snapshot.get("model_version"))
+                for nested in value.values():
+                    walk(nested)
+                return
+            if isinstance(value, list):
+                for item in value:
+                    walk(item)
+
+        raw_versions = final_output_summary.get("predictive_model_versions")
+        if isinstance(raw_versions, list):
+            for item in raw_versions:
+                add_version(item)
+        if isinstance(final_output, dict):
+            walk(final_output)
+        return versions
+
+    def _resolve_model_recommendation(
+        self,
+        *,
+        model_versions: list[str],
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        if self._evaluation_service is None or not model_versions:
+            return None, None
+
+        default_model_version = self._get_default_model_version()
+        primary_model_version = (
+            default_model_version
+            if default_model_version in model_versions
+            else model_versions[0]
+        )
+        warning_message = None
+        if len(model_versions) > 1:
+            warning_message = (
+                "本次工作流检测到多个预测模型版本，建议关注版本一致性。"
+            )
+        recommendation = self._load_model_recommendation(primary_model_version)
+        return recommendation, warning_message
+
+    def _load_model_recommendation(self, model_version: str) -> dict[str, Any] | None:
+        now = datetime.now(timezone.utc)
+        cached = self._recommendation_cache.get(model_version)
+        if cached is not None and now - cached[0] < self._recommendation_cache_ttl:
+            return cached[1]
+        try:
+            evaluation = self._evaluation_service.get_model_evaluation(model_version)
+        except Exception:
+            logger.exception(
+                "workflow.runtime.recommendation_failed model_version=%s",
+                model_version,
+            )
+            return None
+        recommendation = evaluation.recommendation
+        recommendation_dump = (
+            recommendation.model_dump(mode="json")
+            if recommendation is not None
+            else None
+        )
+        self._recommendation_cache[model_version] = (now, recommendation_dump)
+        return recommendation_dump
+
+    def _build_version_recommendation_alert(
+        self,
+        *,
+        model_versions: list[str],
+        model_recommendation: dict[str, Any] | None,
+    ) -> str | None:
+        if model_recommendation is None:
+            return None
+        recommended_model_version = model_recommendation.get("recommended_model_version")
+        if not isinstance(recommended_model_version, str) or recommended_model_version == "":
+            return None
+        default_model_version = self._get_default_model_version()
+        if (
+            default_model_version is not None
+            and default_model_version != recommended_model_version
+        ):
+            return (
+                "模型版本建议发生变化：默认版本为 "
+                f"{default_model_version}，建议关注 {recommended_model_version}。"
+            )
+        if model_versions and model_versions[0] != recommended_model_version:
+            return (
+                "当前运行主要使用模型 "
+                f"{model_versions[0]}，评估建议为 {recommended_model_version}。"
+            )
+        return None
+
+    def _get_default_model_version(self) -> str | None:
+        if self._experiment_service is None:
+            return None
+        try:
+            default_version = self._experiment_service.get_default_model_version()
+        except Exception:
+            logger.exception("workflow.runtime.default_model_version_failed")
+            return None
+        if not isinstance(default_version, str):
+            return None
+        normalized = default_version.strip()
+        return normalized if normalized else None
+
+    def _dedupe_messages(self, messages: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for message in messages:
+            text = str(message).strip()
+            if text == "" or text in seen:
+                continue
+            seen.add(text)
+            result.append(text)
+        return result
+
     def _find_valid_running_artifact(self, *, workflow_name: str) -> WorkflowArtifact | None:
         running = self._artifact_store.find_latest_run(
             workflow_name=workflow_name,
@@ -410,14 +578,22 @@ class WorkflowRuntimeService:
         if running is None:
             return None
 
+        now = datetime.now(timezone.utc)
+
         with self._future_lock:
             future = self._active_futures.get(running.run_id)
             if future is not None and not future.done():
-                return running
+                if now - running.started_at < self._stale_running_timeout:
+                    return running
+                self._active_futures.pop(running.run_id, None)
+                self._mark_stale_running_artifact_failed(
+                    running,
+                    finished_at=now,
+                )
+                return None
             if future is not None and future.done():
                 self._active_futures.pop(running.run_id, None)
 
-        now = datetime.now(timezone.utc)
         if now - running.started_at < self._stale_running_timeout:
             return running
 
@@ -454,6 +630,71 @@ class WorkflowRuntimeService:
             final_output_summary=artifact.final_output_summary,
             error_message=reason,
         )
+
+    def _resolve_running_artifact_for_read(
+        self,
+        artifact: WorkflowArtifact,
+    ) -> WorkflowArtifact:
+        if artifact.status != "running":
+            return artifact
+
+        now = datetime.now(timezone.utc)
+        if now - artifact.started_at < self._stale_running_timeout:
+            return artifact
+
+        with self._future_lock:
+            future = self._active_futures.get(artifact.run_id)
+            if future is not None and not future.done():
+                self._active_futures.pop(artifact.run_id, None)
+            elif future is not None and future.done():
+                self._active_futures.pop(artifact.run_id, None)
+
+        self._mark_stale_running_artifact_failed(artifact, finished_at=now)
+        return self._artifact_store.load_run(artifact.run_id)
+
+    def _mark_background_run_failed(
+        self,
+        *,
+        run_id: str,
+        workflow_name: str,
+        started_at: datetime,
+        error_message: str,
+    ) -> None:
+        finished_at = datetime.now(timezone.utc)
+        try:
+            existing = self._artifact_store.load_run(run_id)
+            steps = existing.steps
+            input_summary = existing.input_summary
+            final_output_summary = existing.final_output_summary
+            final_output = existing.final_output
+        except FileNotFoundError:
+            steps = tuple()
+            input_summary = {}
+            final_output_summary = {}
+            final_output = None
+
+        failed_artifact = WorkflowArtifact(
+            run_id=run_id,
+            workflow_name=workflow_name,
+            status="failed",
+            started_at=started_at,
+            finished_at=finished_at,
+            input_summary=input_summary,
+            steps=steps,
+            final_output_summary=final_output_summary,
+            final_output=final_output,
+            error_message=error_message,
+        )
+        self._artifact_store.save_artifact(failed_artifact)
+        if self._screener_batch_service is not None:
+            self._screener_batch_service.finalize_batch(
+                run_id=run_id,
+                status="failed",
+                finished_at=finished_at,
+                final_output=final_output,
+                final_output_summary=final_output_summary,
+                error_message=error_message,
+            )
 
     def _resolve_screener_batch_size(self, request: ScreenerWorkflowRunRequest) -> int:
         if request.batch_size is not None:

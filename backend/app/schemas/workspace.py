@@ -13,6 +13,7 @@ from app.schemas.evidence import EvidenceManifest
 from app.schemas.factor import FactorSnapshot
 from app.schemas.intraday import TriggerSnapshot
 from app.schemas.market_data import StockProfile
+from app.schemas.prediction import PredictionSnapshotResponse
 from app.schemas.review import StockReviewReport
 from app.schemas.strategy import StrategyPlan
 
@@ -69,6 +70,7 @@ class WorkspaceBundleResponse(BaseModel):
     strategy_plan: Optional[StrategyPlan] = None
     trigger_snapshot: Optional[TriggerSnapshot] = None
     decision_brief: Optional[DecisionBrief] = None
+    predictive_snapshot: Optional[PredictionSnapshotResponse] = None
     module_status_summary: list[WorkspaceModuleStatus] = Field(default_factory=list)
     evidence_manifest: Optional[EvidenceManifest] = None
     freshness_summary: FreshnessSummary = Field(default_factory=FreshnessSummary)

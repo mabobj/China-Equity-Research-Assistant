@@ -105,6 +105,7 @@ class DecisionSnapshotService:
             for item in bundle.freshness_summary.items
         ]
         snapshot_action = _resolve_snapshot_action(bundle=bundle, research_action=research.action)
+        predictive_snapshot = getattr(bundle, "predictive_snapshot", None)
         return {
             "snapshot_id": "ds-" + uuid4().hex[:16],
             "symbol": normalized_symbol,
@@ -127,6 +128,27 @@ class DecisionSnapshotService:
             "confidence_reasons": list(research.confidence_reasons),
             "runtime_mode_requested": bundle.runtime_mode_requested,
             "runtime_mode_effective": bundle.runtime_mode_effective,
+            "predictive_score": getattr(predictive_snapshot, "predictive_score", None),
+            "predictive_confidence": getattr(
+                predictive_snapshot,
+                "model_confidence",
+                None,
+            ),
+            "predictive_model_version": getattr(
+                predictive_snapshot,
+                "model_version",
+                None,
+            ),
+            "predictive_feature_version": getattr(
+                predictive_snapshot,
+                "feature_version",
+                None,
+            ),
+            "predictive_label_version": getattr(
+                predictive_snapshot,
+                "label_version",
+                None,
+            ),
             "source_refs": source_refs,
             "created_at": utc_now_iso(),
         }
@@ -154,6 +176,11 @@ class DecisionSnapshotService:
             "confidence_reasons": list(payload.confidence_reasons),
             "runtime_mode_requested": payload.runtime_mode_requested,
             "runtime_mode_effective": payload.runtime_mode_effective,
+            "predictive_score": payload.predictive_score,
+            "predictive_confidence": payload.predictive_confidence,
+            "predictive_model_version": payload.predictive_model_version,
+            "predictive_feature_version": payload.predictive_feature_version,
+            "predictive_label_version": payload.predictive_label_version,
             "source_refs": [item.model_dump(mode="json") for item in payload.source_refs],
             "created_at": utc_now_iso(),
         }
@@ -178,6 +205,11 @@ class DecisionSnapshotService:
             confidence_reasons=[str(item) for item in payload.get("confidence_reasons", [])],
             runtime_mode_requested=payload.get("runtime_mode_requested"),
             runtime_mode_effective=payload.get("runtime_mode_effective"),
+            predictive_score=payload.get("predictive_score"),
+            predictive_confidence=payload.get("predictive_confidence"),
+            predictive_model_version=payload.get("predictive_model_version"),
+            predictive_feature_version=payload.get("predictive_feature_version"),
+            predictive_label_version=payload.get("predictive_label_version"),
             source_refs=[DecisionSourceRef.model_validate(item) for item in payload.get("source_refs", [])],
             created_at=parse_iso_datetime(str(payload["created_at"])).astimezone(timezone.utc),
         )

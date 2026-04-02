@@ -104,6 +104,14 @@ class StubWorkflowRuntimeService:
                 final_output_summary={"ready_to_buy_count": 2, "watch_count": 3},
                 final_output=None,
                 error_message=None,
+                model_recommendation={
+                    "recommendation": "observe",
+                    "recommended_model_version": "baseline-rule-v1",
+                    "reason": "样本量仍需继续积累。",
+                    "supporting_metrics": {"quality_score": 0.58},
+                    "guardrails": ["保持质量门控。"],
+                },
+                version_recommendation_alert="模型版本建议发生变化：默认版本为 baseline-rule-v1，建议关注 candidate-v2。",
             )
 
         if run_id == "run-deep" and count == 1:
@@ -263,6 +271,8 @@ def test_workflow_run_detail_route_supports_polling_chain_for_screener() -> None
     assert second_poll.status_code == 200
     assert second_poll.json()["status"] == "completed"
     assert second_poll.json()["final_output_summary"]["ready_to_buy_count"] == 2
+    assert second_poll.json()["model_recommendation"]["recommendation"] == "observe"
+    assert second_poll.json()["version_recommendation_alert"] is not None
 
     app.dependency_overrides.clear()
 

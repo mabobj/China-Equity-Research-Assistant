@@ -9,6 +9,7 @@ import { createTradeFromCurrentDecision, listTrades, normalizeSymbolInput } from
 import {
   formatAction,
   formatDateTime,
+  formatRatioPercent,
   formatStrategyAlignment,
   formatTradeReasonType,
   formatTradeSide,
@@ -70,6 +71,24 @@ const REASON_OPTIONS: OptionItem[] = [
   { value: "skip_due_to_risk", label: formatTradeReasonType("skip_due_to_risk") },
 ];
 
+const ENTRY_REASON_TYPES: TradeReasonType[] = [
+  "signal_entry",
+  "pullback_entry",
+  "breakout_entry",
+];
+const EXIT_REASON_TYPES: TradeReasonType[] = ["stop_loss", "take_profit", "time_exit"];
+const SKIP_REASON_TYPES: TradeReasonType[] = [
+  "watch_only",
+  "skip_due_to_quality",
+  "skip_due_to_risk",
+];
+
+const ALIGNMENT_OVERRIDE_TEMPLATES: string[] = [
+  "与原判断存在冲突，基于盘中新信息执行人工覆盖。",
+  "按小仓位试错执行，后续若不达预期将快速退出。",
+  "当前交易为计划外动作，已明确风险并纳入复盘跟踪。",
+];
+
 const ALIGNMENT_OPTIONS: OptionItem[] = [
   { value: "unknown", label: formatStrategyAlignment("unknown") },
   { value: "aligned", label: formatStrategyAlignment("aligned") },
@@ -91,6 +110,30 @@ export default function TradesPage() {
     () => records.find((item) => item.trade_id === selectedTradeId) ?? null,
     [records, selectedTradeId],
   );
+  const isSkipSide = form.side === "SKIP";
+  const compatibleReasonOptions = useMemo(() => {
+    return REASON_OPTIONS.filter((item) =>
+      isReasonTypeCompatible(form.side, item.value as TradeReasonType),
+    );
+  }, [form.side]);
+  const isReasonCompatible = useMemo(() => {
+    return isReasonTypeCompatible(form.side, form.reasonType);
+  }, [form.reasonType, form.side]);
+  const recommendedReasonType = useMemo(() => {
+    return defaultReasonTypeForSide(form.side);
+  }, [form.side]);
+  const tradeSummary = useMemo(() => {
+    return records.reduce(
+      (summary, item) => {
+        summary.total += 1;
+        if (item.side === "BUY" || item.side === "ADD") summary.entry += 1;
+        if (item.side === "SELL" || item.side === "REDUCE") summary.exit += 1;
+        if (item.side === "SKIP") summary.skip += 1;
+        return summary;
+      },
+      { total: 0, entry: 0, exit: 0, skip: 0 },
+    );
+  }, [records]);
 
   const refreshList = async (symbol?: string) => {
     setStatus("loading");
@@ -167,7 +210,7 @@ export default function TradesPage() {
       setSubmitMessage("交易记录创建成功，已自动关联当前决策快照。");
       await refreshList(filterSymbol || symbol);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "创建交易记录失败，请稍后重试。");
+      setError(normalizeTradeSubmitError(cause));
     } finally {
       setSubmitting(false);
     }
@@ -181,9 +224,9 @@ export default function TradesPage() {
   return (
     <PageShell
       title="交易记录"
-      description="记录执行动作并关联当时决策快照，形成“判断 -> 执行”可追溯链路。"
+      description="优先完成快速记录，再按需补充高级参数，形成“判断 -> 执行”可追溯链路。"
     >
-      <SectionCard title="新建交易记录" description="默认从当前研究上下文自动固化决策快照并关联。">
+      <SectionCard title="快速记录交易" description="默认自动固化并关联当前决策快照。">
         <form className="grid gap-4 lg:grid-cols-4" onSubmit={handleCreateTrade}>
           <Field
             label="股票代码"
@@ -208,60 +251,24 @@ export default function TradesPage() {
             }
             options={SIDE_OPTIONS}
           />
-          <SelectField
-            label="原因类型"
-            value={form.reasonType}
-            onChange={(value) =>
-              setForm((previous) => ({ ...previous, reasonType: value as TradeReasonType }))
-            }
-            options={REASON_OPTIONS}
-          />
-          <SelectField
-            label="策略对齐"
-            value={form.strategyAlignment}
-            onChange={(value) =>
-              setForm((previous) => ({
-                ...previous,
-                strategyAlignment: value as StrategyAlignment,
-              }))
-            }
-            options={ALIGNMENT_OPTIONS}
-          />
-          <Field
-            label="人工覆盖原因（可选）"
-            value={form.alignmentOverrideReason}
-            onChange={(value) =>
-              setForm((previous) => ({ ...previous, alignmentOverrideReason: value }))
-            }
-          />
-          <Field
-            label="价格（非 SKIP 必填）"
-            value={form.price}
-            onChange={(value) => setForm((previous) => ({ ...previous, price: value }))}
-          />
-          <Field
-            label="数量（非 SKIP 必填）"
-            value={form.quantity}
-            onChange={(value) => setForm((previous) => ({ ...previous, quantity: value }))}
-          />
-          <Field
-            label="备注"
-            value={form.note}
-            onChange={(value) => setForm((previous) => ({ ...previous, note: value }))}
-          />
-          <label className="flex items-end">
-            <span className="flex min-h-11 items-center gap-3 rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.useLlm}
-                onChange={(event) =>
-                  setForm((previous) => ({ ...previous, useLlm: event.target.checked }))
-                }
-                className="h-4 w-4 rounded border-slate-300"
+          {!isSkipSide ? (
+            <>
+              <Field
+                label="价格（必填）"
+                value={form.price}
+                onChange={(value) => setForm((previous) => ({ ...previous, price: value }))}
               />
-              使用 LLM 上下文
-            </span>
-          </label>
+              <Field
+                label="数量（必填）"
+                value={form.quantity}
+                onChange={(value) => setForm((previous) => ({ ...previous, quantity: value }))}
+              />
+            </>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 lg:col-span-2">
+              当前动作为“跳过”，无需填写价格和数量。
+            </div>
+          )}
           <div className="flex items-end">
             <button
               type="submit"
@@ -272,6 +279,98 @@ export default function TradesPage() {
             </button>
           </div>
         </form>
+        <details className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-900">
+            高级参数（原因类型、对齐策略、人工覆盖、备注）
+          </summary>
+          <div className="mt-4">
+            <StatusBlock
+              title="动作与原因类型提示"
+              description={`当前动作：${formatTradeSide(form.side)}。推荐原因类型：${formatTradeReasonType(
+                recommendedReasonType,
+              )}。若你选择了不匹配原因，提交时会自动纠正为推荐值。`}
+            />
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-4">
+            <SelectField
+              label="原因类型"
+              value={form.reasonType}
+              onChange={(value) =>
+                setForm((previous) => ({ ...previous, reasonType: value as TradeReasonType }))
+              }
+              options={compatibleReasonOptions}
+            />
+            <SelectField
+              label="策略对齐"
+              value={form.strategyAlignment}
+              onChange={(value) =>
+                setForm((previous) => ({
+                  ...previous,
+                  strategyAlignment: value as StrategyAlignment,
+                }))
+              }
+              options={ALIGNMENT_OPTIONS}
+            />
+            <label className="flex items-end">
+              <span className="flex min-h-11 items-center gap-3 rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.useLlm}
+                  onChange={(event) =>
+                    setForm((previous) => ({ ...previous, useLlm: event.target.checked }))
+                  }
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                使用 LLM 上下文
+              </span>
+            </label>
+            <Field
+              label="人工覆盖原因（可选）"
+              value={form.alignmentOverrideReason}
+              onChange={(value) =>
+                setForm((previous) => ({ ...previous, alignmentOverrideReason: value }))
+              }
+            />
+            <div className="lg:col-span-4 rounded-2xl border border-slate-200 bg-white p-3">
+              <p className="text-sm font-medium text-slate-700">覆盖原因模板（可一键填入）</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {ALIGNMENT_OVERRIDE_TEMPLATES.map((template) => (
+                  <button
+                    key={template}
+                    type="button"
+                    onClick={() =>
+                      setForm((previous) => ({
+                        ...previous,
+                        alignmentOverrideReason: template,
+                      }))
+                    }
+                    className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-1 text-xs text-slate-700 transition hover:bg-slate-100"
+                  >
+                    使用模板
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="lg:col-span-4">
+              <Field
+                label="备注"
+                value={form.note}
+                onChange={(value) => setForm((previous) => ({ ...previous, note: value }))}
+              />
+            </div>
+          </div>
+          {!isReasonCompatible ? (
+            <div className="mt-4">
+              <StatusBlock
+                title="原因类型已自动建议纠正"
+                description={`动作“${formatTradeSide(form.side)}”与原因“${formatTradeReasonType(
+                  form.reasonType,
+                )}”不匹配。建议改为“${formatTradeReasonType(recommendedReasonType)}”。`}
+                tone="error"
+              />
+            </div>
+          ) : null}
+        </details>
         {submitMessage ? (
           <div className="mt-4">
             <StatusBlock title="操作成功" description={submitMessage} />
@@ -285,6 +384,12 @@ export default function TradesPage() {
       </SectionCard>
 
       <SectionCard title="交易记录列表" description="可按股票代码过滤，并查看关联决策快照摘要。">
+        <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Metric label="总记录数" value={String(tradeSummary.total)} />
+          <Metric label="入场动作数" value={String(tradeSummary.entry)} />
+          <Metric label="离场动作数" value={String(tradeSummary.exit)} />
+          <Metric label="跳过动作数" value={String(tradeSummary.skip)} />
+        </div>
         <form className="grid gap-3 md:grid-cols-[1fr_auto]" onSubmit={handleFilterSubmit}>
           <Field label="筛选股票代码" value={filterSymbol} onChange={setFilterSymbol} />
           <div className="flex items-end">
@@ -367,6 +472,51 @@ export default function TradesPage() {
         {selectedRecord ? (
           <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <p className="text-sm font-semibold text-slate-950">关联快照摘要（{selectedRecord.trade_id}）</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <Metric
+                label="动作 / 对齐"
+                value={`${formatTradeSide(selectedRecord.side)} / ${formatStrategyAlignment(selectedRecord.strategy_alignment)}`}
+              />
+              <Metric
+                label="决策动作"
+                value={
+                  selectedRecord.decision_snapshot?.action
+                    ? formatAction(selectedRecord.decision_snapshot.action as "BUY" | "WATCH" | "AVOID")
+                    : "-"
+                }
+              />
+              <Metric
+                label="决策置信度"
+                value={String(selectedRecord.decision_snapshot?.confidence ?? "-")}
+              />
+              <Metric
+                label="数据质量"
+                value={
+                  selectedRecord.decision_snapshot?.data_quality_summary
+                    ? `${selectedRecord.decision_snapshot.data_quality_summary.bars_quality}/${selectedRecord.decision_snapshot.data_quality_summary.financial_quality}/${selectedRecord.decision_snapshot.data_quality_summary.announcement_quality}`
+                    : "-"
+                }
+              />
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <Metric
+                label="预测分"
+                value={
+                  selectedRecord.decision_snapshot?.predictive_score === null ||
+                  selectedRecord.decision_snapshot?.predictive_score === undefined
+                    ? "-"
+                    : `${selectedRecord.decision_snapshot.predictive_score} / 100`
+                }
+              />
+              <Metric
+                label="预测置信度"
+                value={formatRatioPercent(selectedRecord.decision_snapshot?.predictive_confidence)}
+              />
+              <Metric
+                label="预测模型版本"
+                value={selectedRecord.decision_snapshot?.predictive_model_version ?? "-"}
+              />
+            </div>
             <p className="mt-2 text-sm text-slate-700">
               thesis：{selectedRecord.decision_snapshot?.thesis ?? "暂无"}
             </p>
@@ -435,6 +585,15 @@ function SelectField({
   );
 }
 
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</p>
+      <p className="mt-2 break-all text-sm font-semibold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
 function defaultReasonTypeForSide(side: TradeSide): TradeReasonType {
   if (side === "SKIP") return "watch_only";
   if (side === "SELL" || side === "REDUCE") return "take_profit";
@@ -442,22 +601,30 @@ function defaultReasonTypeForSide(side: TradeSide): TradeReasonType {
 }
 
 function isReasonTypeCompatible(side: TradeSide, reasonType: TradeReasonType): boolean {
-  const entryReasonTypes: TradeReasonType[] = ["signal_entry", "pullback_entry", "breakout_entry"];
-  const exitReasonTypes: TradeReasonType[] = ["stop_loss", "take_profit", "time_exit"];
-  const skipReasonTypes: TradeReasonType[] = [
-    "watch_only",
-    "skip_due_to_quality",
-    "skip_due_to_risk",
-  ];
-
-  if (entryReasonTypes.includes(reasonType)) {
+  if (ENTRY_REASON_TYPES.includes(reasonType)) {
     return side === "BUY" || side === "ADD";
   }
-  if (exitReasonTypes.includes(reasonType)) {
+  if (EXIT_REASON_TYPES.includes(reasonType)) {
     return side === "SELL" || side === "REDUCE";
   }
-  if (skipReasonTypes.includes(reasonType)) {
+  if (SKIP_REASON_TYPES.includes(reasonType)) {
     return side === "SKIP";
   }
   return true;
+}
+
+function normalizeTradeSubmitError(cause: unknown): string {
+  const fallbackMessage = "创建交易记录失败，请稍后重试。";
+  const message = cause instanceof Error ? cause.message : fallbackMessage;
+  if (!message) return fallbackMessage;
+
+  if (message.includes("alignment_override_reason")) {
+    return "当前交易与原判断存在冲突。若仍要手动指定“对齐/部分对齐”，请填写“人工覆盖原因”；或将“策略对齐”改为“不一致”。";
+  }
+
+  if (message.includes("422")) {
+    return "参数校验未通过：请检查动作、原因类型、价格和数量是否匹配。";
+  }
+
+  return message;
 }

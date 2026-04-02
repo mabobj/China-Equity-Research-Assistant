@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from app.schemas.decision_brief import DecisionBrief
 from app.schemas.evidence import EvidenceManifest
 from app.schemas.market_data import StockProfile
+from app.schemas.prediction import PredictionSnapshotResponse
 from app.schemas.workspace import (
     FreshnessSummary,
     WorkspaceBundleResponse,
@@ -53,6 +54,7 @@ class _WorkspaceState:
     strategy_plan: Any | None = None
     trigger_snapshot: Any | None = None
     decision_brief: DecisionBrief | None = None
+    predictive_snapshot: PredictionSnapshotResponse | None = None
     evidence_manifest: EvidenceManifest | None = None
 
 
@@ -79,6 +81,7 @@ class WorkspaceBundleService:
         strategy_plan_daily: StrategyPlanDailyDataset,
         debate_review_daily: DebateReviewDailyDataset,
         decision_brief_daily: DecisionBriefDailyDataset,
+        prediction_service=None,
     ) -> None:
         self._market_data_service = market_data_service
         self._technical_analysis_service = technical_analysis_service
@@ -97,6 +100,7 @@ class WorkspaceBundleService:
         self._strategy_plan_daily = strategy_plan_daily
         self._debate_review_daily = debate_review_daily
         self._decision_brief_daily = decision_brief_daily
+        self._prediction_service = prediction_service
 
     def get_workspace_bundle(
         self,
@@ -431,6 +435,12 @@ class WorkspaceBundleService:
             as_of_date=as_of_date,
             variant=debate_variant,
         )
+        if debate_cached is not None and bool(use_llm):
+            cached_fallback_reason = debate_cached.payload.fallback_reason or ""
+            if cached_fallback_reason.startswith(
+                "Workspace bundle deferred live LLM debate"
+            ):
+                debate_cached = None
         if debate_cached is not None:
             state.debate_review = debate_cached.payload.model_copy(
                 update={
@@ -463,50 +473,8 @@ class WorkspaceBundleService:
                 factor_snapshot=state.factor_snapshot,
                 strategy_plan=state.strategy_plan,
             )
-            if bool(use_llm) and not force_refresh:
-                rule_cached = self._debate_review_daily.load(
-                    symbol,
-                    as_of_date=as_of_date,
-                    variant="rule_based",
-                )
-                if rule_cached is not None:
-                    state.debate_review = rule_cached.payload.model_copy(
-                        update={
-                            "freshness_mode": rule_cached.freshness_mode,
-                            "source_mode": rule_cached.source_mode,
-                            "runtime_mode_requested": "llm",
-                            "runtime_mode_effective": (
-                                rule_cached.payload.runtime_mode_effective
-                                or "rule_based"
-                            ),
-                            "fallback_applied": True,
-                            "fallback_reason": "Workspace bundle deferred live LLM debate and reused rule-based snapshot.",
-                            "warning_messages": list(rule_cached.payload.warning_messages)
-                            + [
-                                "Workspace bundle deferred live LLM debate and reused rule-based snapshot."
-                            ],
-                        }
-                    )
-                    statuses.append(
-                        WorkspaceModuleStatus(
-                            module_name="debate_review",
-                            status="success",
-                            message="Loaded rule-based snapshot to avoid long LLM blocking.",
-                            fallback_applied=True,
-                            fallback_reason="LLM debate deferred in workspace bundle.",
-                        )
-                    )
-                    freshness_items.append(
-                        WorkspaceFreshnessItem(
-                            item_name="debate_review_daily",
-                            as_of_date=rule_cached.as_of_date,
-                            freshness_mode=rule_cached.freshness_mode,
-                            source_mode=rule_cached.source_mode,
-                        )
-                    )
-
             if state.debate_review is None:
-                runtime_use_llm = bool(use_llm) if force_refresh else False
+                runtime_use_llm = bool(use_llm)
                 computed_debate = self._run_module(
                     module_name="debate_review",
                     statuses=statuses,
@@ -517,19 +485,6 @@ class WorkspaceBundleService:
                     ),
                 )
                 if computed_debate is not None:
-                    if bool(use_llm) and not force_refresh:
-                        computed_debate = computed_debate.model_copy(
-                            update={
-                                "runtime_mode_requested": "llm",
-                                "runtime_mode_effective": "rule_based",
-                                "fallback_applied": True,
-                                "fallback_reason": "Workspace bundle deferred live LLM debate and used rule-based output.",
-                                "warning_messages": list(computed_debate.warning_messages)
-                                + [
-                                    "Workspace bundle deferred live LLM debate and used rule-based output."
-                                ],
-                            }
-                        )
                     debate_variant_to_save = (
                         "llm"
                         if (
@@ -631,6 +586,18 @@ class WorkspaceBundleService:
         if state.decision_brief is not None:
             state.evidence_manifest = build_evidence_manifest(state.decision_brief)
 
+        if self._prediction_service is not None:
+            state.predictive_snapshot = self._run_optional_module(
+                module_name="predictive_snapshot",
+                statuses=statuses,
+                fn=lambda: self._get_prediction_snapshot(
+                    symbol=symbol,
+                    as_of_date=as_of_date,
+                ),
+                skip_message="Predictive snapshot is not ready yet. Continue with research modules.",
+                fallback_reason="Predictive assets are not ready; module was skipped.",
+            )
+
         debate_progress = None
         if request_id is not None:
             debate_progress = self._debate_runtime_service.get_debate_review_progress(
@@ -681,6 +648,7 @@ class WorkspaceBundleService:
             strategy_plan=state.strategy_plan,
             trigger_snapshot=state.trigger_snapshot,
             decision_brief=state.decision_brief,
+            predictive_snapshot=state.predictive_snapshot,
             module_status_summary=statuses,
             evidence_manifest=state.evidence_manifest,
             freshness_summary=FreshnessSummary(
@@ -734,3 +702,50 @@ class WorkspaceBundleService:
             )
         )
         return value
+
+    def _run_optional_module(
+        self,
+        *,
+        module_name: str,
+        statuses: list[WorkspaceModuleStatus],
+        fn,
+        skip_message: str,
+        fallback_reason: str,
+    ):
+        try:
+            value = fn()
+        except Exception as exc:
+            logger.debug("workspace.bundle.module_skip module=%s error=%s", module_name, exc)
+            statuses.append(
+                WorkspaceModuleStatus(
+                    module_name=module_name,
+                    status="skipped",
+                    message=skip_message,
+                    fallback_applied=True,
+                    fallback_reason=fallback_reason,
+                    warning_messages=[str(exc)],
+                )
+            )
+            return None
+
+        statuses.append(
+            WorkspaceModuleStatus(
+                module_name=module_name,
+                status="success",
+                message=None,
+            )
+        )
+        return value
+
+    def _get_prediction_snapshot(self, *, symbol: str, as_of_date):
+        try:
+            return self._prediction_service.get_symbol_prediction(
+                symbol=symbol,
+                as_of_date=as_of_date,
+                build_feature_dataset=False,
+            )
+        except TypeError:
+            return self._prediction_service.get_symbol_prediction(
+                symbol=symbol,
+                as_of_date=as_of_date,
+            )

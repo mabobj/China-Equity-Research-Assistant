@@ -140,7 +140,7 @@ class DebateProgressTracker:
                     status="idle",
                     stage="idle",
                     runtime_mode=runtime_mode,
-                    message="褰撳墠娌℃湁杩愯涓殑 Debate Review 浠诲姟銆?",
+                    message="当前没有运行中的 Debate Review 任务。",
                 )
             return self._to_schema(state)
 

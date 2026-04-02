@@ -34,6 +34,7 @@ import type {
   TriggerSnapshot,
   UpdateReviewRequest,
   UpdateTradeRequest,
+  ModelEvaluationResponse,
   WorkspaceBundleResponse,
   WorkflowRunDetailResponse,
   WorkflowRunResponse,
@@ -42,6 +43,7 @@ import type {
 const API_PREFIX = "/api/backend";
 const STOCK_PAGE_TIMEOUT_MS = 90_000;
 const DEBATE_REVIEW_TIMEOUT_MS = 240_000;
+const MODEL_EVALUATION_TIMEOUT_MS = 300_000;
 const DATA_REFRESH_TIMEOUT_MS = 30_000;
 const MIN_SCREENER_TIMEOUT_MS = 120_000;
 const MAX_SCREENER_TIMEOUT_MS = 1_800_000;
@@ -275,6 +277,15 @@ export async function getStrategyPlan(symbol: string): Promise<StrategyPlan> {
   return fetchBackend<StrategyPlan>(
     `/strategy/${encodeURIComponent(normalizeSymbolInput(symbol))}`,
     { timeoutMs: STOCK_PAGE_TIMEOUT_MS },
+  );
+}
+
+export async function getModelEvaluation(
+  modelVersion: string,
+): Promise<ModelEvaluationResponse> {
+  return fetchBackend<ModelEvaluationResponse>(
+    `/evaluations/models/${encodeURIComponent(modelVersion)}`,
+    { timeoutMs: MODEL_EVALUATION_TIMEOUT_MS },
   );
 }
 

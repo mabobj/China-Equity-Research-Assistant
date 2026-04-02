@@ -19,6 +19,7 @@ from app.services.data_service.providers.cninfo_provider import CninfoProvider
 from app.services.data_service.providers.mootdx_provider import MootdxProvider
 
 if TYPE_CHECKING:
+    from app.services.backtest_service.backtest_service import BacktestService
     from app.services.data_products.datasets.announcements_daily import (
         AnnouncementsDailyDataset,
     )
@@ -49,9 +50,12 @@ if TYPE_CHECKING:
     from app.services.data_service.intraday_service import IntradayService
     from app.services.data_service.refresh_service import DataRefreshService
     from app.services.debate_service.debate_orchestrator import DebateOrchestrator
+    from app.services.dataset_service.dataset_service import DatasetService
     from app.services.decision_brief_service.decision_brief_service import (
         DecisionBriefService,
     )
+    from app.services.evaluation_service.evaluation_service import EvaluationService
+    from app.services.experiment_service.experiment_service import ExperimentService
     from app.services.factor_service.factor_snapshot_service import (
         FactorSnapshotService,
     )
@@ -67,6 +71,8 @@ if TYPE_CHECKING:
     )
     from app.services.llm_debate_service.llm_role_runner import LLMRoleRunner
     from app.services.llm_debate_service.progress_tracker import DebateProgressTracker
+    from app.services.label_service.label_service import LabelService
+    from app.services.prediction_service.prediction_service import PredictionService
     from app.services.research_service.research_manager import ResearchManager
     from app.services.research_service.strategy_planner import StrategyPlanner
     from app.services.review_record_service.review_service import ReviewRecordService
@@ -293,6 +299,71 @@ def get_data_product_repository() -> "DataProductRepository":
 
 
 @lru_cache
+def get_experiment_service() -> "ExperimentService":
+    from app.services.experiment_service.experiment_service import ExperimentService
+
+    return ExperimentService()
+
+
+@lru_cache
+def get_label_service() -> "LabelService":
+    from app.services.label_service.label_service import LabelService
+
+    settings = get_settings()
+    return LabelService(
+        default_label_version=get_experiment_service().get_default_label_version(),
+        root_dir=settings.data_dir / "prediction_assets" / "datasets",
+        market_data_service=get_market_data_service(),
+        dataset_service=get_dataset_service(),
+    )
+
+
+@lru_cache
+def get_dataset_service() -> "DatasetService":
+    from app.services.dataset_service.dataset_service import DatasetService
+
+    settings = get_settings()
+    return DatasetService(
+        root_dir=settings.data_dir / "prediction_assets" / "datasets",
+        default_feature_version=get_experiment_service().get_default_feature_version(),
+        market_data_service=get_market_data_service(),
+    )
+
+
+@lru_cache
+def get_prediction_service() -> "PredictionService":
+    from app.services.prediction_service.prediction_service import PredictionService
+
+    return PredictionService(
+        dataset_service=get_dataset_service(),
+        label_service=get_label_service(),
+        experiment_service=get_experiment_service(),
+    )
+
+
+@lru_cache
+def get_backtest_service() -> "BacktestService":
+    from app.services.backtest_service.backtest_service import BacktestService
+
+    return BacktestService(
+        experiment_service=get_experiment_service(),
+        label_service=get_label_service(),
+        prediction_service=get_prediction_service(),
+    )
+
+
+@lru_cache
+def get_evaluation_service() -> "EvaluationService":
+    from app.services.evaluation_service.evaluation_service import EvaluationService
+
+    return EvaluationService(
+        experiment_service=get_experiment_service(),
+        label_service=get_label_service(),
+        backtest_service=get_backtest_service(),
+    )
+
+
+@lru_cache
 def get_daily_bars_daily_dataset() -> "DailyBarsDailyDataset":
     from app.services.data_products.datasets.daily_bars_daily import DailyBarsDailyDataset
 
@@ -395,6 +466,7 @@ def get_workspace_bundle_service() -> "WorkspaceBundleService":
         strategy_plan_daily=get_strategy_plan_daily_dataset(),
         debate_review_daily=get_debate_review_daily_dataset(),
         decision_brief_daily=get_decision_brief_daily_dataset(),
+        prediction_service=get_prediction_service(),
     )
 
 
@@ -424,6 +496,7 @@ def get_screener_pipeline() -> "ScreenerPipeline":
         market_data_service=get_market_data_service(),
         technical_analysis_service=get_technical_analysis_service(),
         factor_snapshot_service=get_factor_snapshot_service(),
+        prediction_service=get_prediction_service(),
         lookback_days=settings.screener_lookback_days,
         progress_log_interval=settings.screener_progress_log_interval,
     )
@@ -445,7 +518,10 @@ def get_screener_batch_service() -> "ScreenerBatchService":
     from app.services.screener_service.batch_service import ScreenerBatchService
 
     settings = get_settings()
-    return ScreenerBatchService(root_dir=settings.data_dir / "screener_batches")
+    return ScreenerBatchService(
+        root_dir=settings.data_dir / "screener_batches",
+        prediction_service=get_prediction_service(),
+    )
 
 
 @lru_cache
@@ -519,6 +595,8 @@ def get_workflow_runtime_service(
     screener_batch_service: "ScreenerBatchService" = Depends(
         get_screener_batch_service
     ),
+    evaluation_service: "EvaluationService" = Depends(get_evaluation_service),
+    experiment_service: "ExperimentService" = Depends(get_experiment_service),
 ) -> "WorkflowRuntimeService":
     from app.services.workflow_runtime.definitions.deep_review_workflow import (
         build_deep_review_workflow_definition,
@@ -569,4 +647,6 @@ def get_workflow_runtime_service(
         artifact_store=artifact_store,
         background_executor=get_workflow_background_executor(),
         screener_batch_service=screener_batch_service,
+        evaluation_service=evaluation_service,
+        experiment_service=experiment_service,
     )

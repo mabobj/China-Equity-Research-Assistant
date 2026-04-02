@@ -63,6 +63,9 @@ class ScreenerCandidate(BaseModel):
     announcement_quality: Optional[QualityStatus] = None
     quality_penalty_applied: bool = False
     quality_note: Optional[str] = None
+    predictive_score: Optional[int] = Field(default=None, ge=0, le=100)
+    predictive_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    predictive_model_version: Optional[str] = None
     fail_reason: Optional[str] = None
 
 
@@ -107,6 +110,9 @@ class DeepScreenerCandidate(BaseModel):
     thesis: str
     short_reason: str
     priority_score: int = Field(ge=0, le=100)
+    predictive_score: Optional[int] = Field(default=None, ge=0, le=100)
+    predictive_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    predictive_model_version: Optional[str] = None
 
 
 class DeepScreenerRunResponse(BaseModel):
@@ -179,6 +185,9 @@ class ScreenerSymbolResult(BaseModel):
     announcement_quality: Optional[QualityStatus] = None
     quality_penalty_applied: bool = False
     quality_note: Optional[str] = None
+    predictive_score: Optional[int] = Field(default=None, ge=0, le=100)
+    predictive_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    predictive_model_version: Optional[str] = None
 
 
 class ScreenerLatestBatchResponse(BaseModel):

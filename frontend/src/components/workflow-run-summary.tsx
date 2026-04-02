@@ -3,6 +3,7 @@
 import {
   formatDateTime,
   formatLabel,
+  formatModelRecommendation,
   formatUnknownValue,
   formatWorkflowStepStatus,
 } from "@/lib/format";
@@ -41,6 +42,30 @@ export function WorkflowRunSummary({ run }: WorkflowRunSummaryProps) {
         <Metric label="使用数据提供方" value={run.provider_used ?? "-"} />
         <Metric label="已降级" value={run.fallback_applied ? "是" : "否"} />
       </div>
+
+      {run.model_recommendation ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <h3 className="text-base font-semibold text-slate-950">模型版本建议</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            {formatModelRecommendation(run.model_recommendation.recommendation)}
+            {" · 建议版本："}
+            <span className="font-semibold text-slate-950">
+              {run.model_recommendation.recommended_model_version}
+            </span>
+          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            {run.model_recommendation.reason}
+          </p>
+        </div>
+      ) : null}
+
+      {run.version_recommendation_alert ? (
+        <StatusBlock
+          title="版本建议变化提醒"
+          description={run.version_recommendation_alert}
+          tone="warning"
+        />
+      ) : null}
 
       {run.error_message ? (
         <StatusBlock title="工作流执行失败" description={run.error_message} tone="error" />

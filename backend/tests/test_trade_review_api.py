@@ -43,11 +43,21 @@ class _WorkspaceBundle:
     runtime_mode_requested: str
     runtime_mode_effective: str
     decision_brief: Optional[object] = None
+    predictive_snapshot: Optional[object] = None
 
 
 @dataclass
 class _DecisionBriefMini:
     action_now: str
+
+
+@dataclass
+class _PredictiveSnapshotMini:
+    predictive_score: int
+    model_confidence: float
+    model_version: str
+    feature_version: str
+    label_version: str
 
 
 class _StubWorkspaceBundleService:
@@ -66,6 +76,13 @@ class _StubWorkspaceBundleService:
             runtime_mode_requested="rule_based",
             runtime_mode_effective="rule_based",
             decision_brief=_DecisionBriefMini(action_now="WAIT_PULLBACK"),
+            predictive_snapshot=_PredictiveSnapshotMini(
+                predictive_score=63,
+                model_confidence=0.71,
+                model_version="baseline-v1",
+                feature_version="features-daily-v1",
+                label_version="labels-fwd-v1",
+            ),
         )
 
 
@@ -171,6 +188,8 @@ def test_decision_snapshot_trade_review_flow(tmp_path) -> None:
     assert snapshot_payload["symbol"] == "600519.SH"
     assert snapshot_payload["action"] == "WATCH"
     assert snapshot_payload["data_quality_summary"]["financial_quality"] == "degraded"
+    assert snapshot_payload["predictive_score"] == 63
+    assert snapshot_payload["predictive_model_version"] == "baseline-v1"
 
     trade_response = client.post(
         "/trades",
@@ -190,6 +209,7 @@ def test_decision_snapshot_trade_review_flow(tmp_path) -> None:
     trade_payload = trade_response.json()
     assert trade_payload["decision_snapshot_id"] is not None
     assert trade_payload["decision_snapshot"]["runtime_mode_effective"] == "rule_based"
+    assert trade_payload["decision_snapshot"]["predictive_feature_version"] == "features-daily-v1"
 
     skip_response = client.post(
         "/trades",

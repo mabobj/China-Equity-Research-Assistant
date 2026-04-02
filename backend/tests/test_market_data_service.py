@@ -635,6 +635,29 @@ def test_service_merges_remote_daily_bars_into_local_store(tmp_path: Path) -> No
     assert second_response.count == 2
 
 
+def test_service_skips_remote_daily_bars_when_sync_disabled_and_cache_empty(
+    tmp_path: Path,
+) -> None:
+    """批量场景关闭远端补齐时，无本地缓存也应快速返回而不是触发 provider。"""
+    provider = FakeProvider()
+    local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
+    service = MarketDataService(
+        providers=[provider],
+        local_store=local_store,
+    )
+
+    response = service.get_daily_bars(
+        symbol="600519.SH",
+        start_date="2024-01-01",
+        end_date="2024-01-10",
+        allow_remote_sync=False,
+    )
+
+    assert provider.daily_bar_call_count == 0
+    assert response.count == 0
+    assert "remote_sync_skipped_no_cache" in response.cleaning_warnings
+
+
 def test_refresh_daily_bars_initial_sync_uses_lookback_window(tmp_path: Path) -> None:
     """首次补全应使用最近 lookback_days 的窗口。"""
     provider = FakeProvider()

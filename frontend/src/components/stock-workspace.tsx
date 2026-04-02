@@ -8,6 +8,7 @@ import {
   createDecisionSnapshot,
   createTradeFromCurrentDecision,
   getDebateReviewProgress,
+  getModelEvaluation,
   getWorkspaceBundle,
   normalizeSymbolInput,
 } from "@/lib/api";
@@ -15,10 +16,15 @@ import {
   formatAction,
   formatConvictionLevel,
   formatDate,
+  formatDateTime,
   formatDecisionBriefAction,
+  formatModelRecommendation,
+  formatPredictiveConfidenceLevel,
+  formatPredictiveScoreLevel,
   formatStrategyAlignment,
   formatLabel,
   formatPercent,
+  formatRatioPercent,
   formatPrice,
   formatRange,
   formatScore,
@@ -30,6 +36,7 @@ import type {
   DecisionBriefActionNow,
   DebateReviewProgress,
   DecisionBriefEvidence,
+  ModelEvaluationResponse,
   StrategyAlignment,
   TradeReasonType,
   TradeSide,
@@ -56,6 +63,10 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
   const [snapshotResult, setSnapshotResult] = useState<string | null>(null);
   const [tradeResult, setTradeResult] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [modelEvaluation, setModelEvaluation] = useState<ModelEvaluationResponse | null>(null);
+  const [modelEvaluationError, setModelEvaluationError] = useState<string | null>(null);
+  const [modelEvaluationLoading, setModelEvaluationLoading] = useState(false);
+  const [modelEvaluationRequestKey, setModelEvaluationRequestKey] = useState(0);
   const [tradeForm, setTradeForm] = useState<{
     side: TradeSide;
     reasonType: TradeReasonType;
@@ -86,6 +97,10 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
     setStatus("loading");
     setError(null);
     setBundle(null);
+    setModelEvaluation(null);
+    setModelEvaluationError(null);
+    setModelEvaluationLoading(false);
+    setModelEvaluationRequestKey(0);
     setProgress(
       useLlm
         ? {
@@ -145,6 +160,42 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
       if (timer !== null) window.clearInterval(timer);
     };
   }, [refreshToken, symbol, useLlm]);
+
+  useEffect(() => {
+    let active = true;
+    const modelVersion = bundle?.predictive_snapshot?.model_version;
+    if (!modelVersion || modelEvaluationRequestKey === 0) {
+      setModelEvaluation(null);
+      setModelEvaluationError(null);
+      setModelEvaluationLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setModelEvaluationLoading(true);
+    setModelEvaluationError(null);
+    void getModelEvaluation(modelVersion)
+      .then((value) => {
+        if (!active) return;
+        setModelEvaluation(value);
+      })
+      .catch((cause) => {
+        if (!active) return;
+        setModelEvaluationError(
+          cause instanceof Error ? cause.message : "模型评估加载失败，请稍后重试。",
+        );
+        setModelEvaluation(null);
+      })
+      .finally(() => {
+        if (!active) return;
+        setModelEvaluationLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [bundle?.predictive_snapshot?.model_version, modelEvaluationRequestKey]);
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -280,7 +331,7 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
     <div className="space-y-6">
       <SectionCard
         title="单票工作台"
-        description="单票页以工作台聚合（workspace-bundle）作为主入口，并可在启用 LLM 时轮询 debate-review 进度。"
+        description="推荐顺序：先看结论，再看证据，最后按需展开高级模块。启用 LLM 时会显示 debate-review 进度。"
         actions={
           <button
             type="button"
@@ -323,14 +374,21 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <Metric label="聚合状态" value={formatLabel(status)} />
           <Metric
+            label="当前动作（时机）"
+            value={
+              bundle?.decision_brief?.action_now
+                ? formatDecisionBriefAction(bundle.decision_brief.action_now)
+                : "-"
+            }
+          />
+          <Metric
+            label="方向基线"
+            value={formatAction(tradeConflictState.snapshotAction ?? "WATCH")}
+          />
+          <Metric
             label="默认基准日"
             value={formatDate(bundle?.freshness_summary.default_as_of_date ?? null)}
           />
-          <Metric
-            label="成功模块数"
-            value={String(bundle?.module_status_summary.filter((item) => item.status === "success").length ?? 0)}
-          />
-          <Metric label="失败模块数" value={String(failedModules.length)} />
           <Metric
             label="运行模式"
             value={formatLabel(bundle?.runtime_mode_effective ?? "-")}
@@ -343,40 +401,240 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
             <StatusBlock title="工作台聚合失败" description={error ?? "请稍后重试。"} tone="error" />
           </div>
         ) : null}
-        {failedModules.length > 0 ? (
+        {failedModules.length > 0 || bundle?.fallback_applied || (bundle?.warning_messages.length ?? 0) > 0 ? (
           <div className="mt-5">
             <StatusBlock
-              title="模块部分失败"
-              description={`失败模块：${failedModules.map((item) => item.module_name).join("、")}。`}
+              title="检测到运行告警"
+              description="本次聚合存在模块失败或降级，但主结果仍可继续查看。可展开下方“运行详情”查看原因。"
               tone="error"
             />
           </div>
         ) : null}
-        {bundle?.fallback_applied ? (
-          <div className="mt-5">
-            <StatusBlock
-              title="已触发降级"
-              description={
-                bundle.fallback_reason ??
-                "运行时已触发降级，请查看下方告警信息。"
-              }
-              tone="error"
-            />
-          </div>
+        {bundle ? (
+          <details className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-950">
+              高级：运行详情（模块状态、降级与告警）
+            </summary>
+            <div className="mt-4 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <Metric
+                  label="成功模块数"
+                  value={String(
+                    bundle.module_status_summary.filter((item) => item.status === "success").length,
+                  )}
+                />
+                <Metric label="失败模块数" value={String(failedModules.length)} />
+                <Metric
+                  label="请求模式 / 实际模式"
+                  value={`${formatLabel(bundle.runtime_mode_requested)} / ${formatLabel(bundle.runtime_mode_effective)}`}
+                />
+              </div>
+              {failedModules.length > 0 ? (
+                <StatusBlock
+                  title="模块部分失败"
+                  description={`失败模块：${failedModules.map((item) => item.module_name).join("、")}。`}
+                  tone="error"
+                />
+              ) : null}
+              {bundle.fallback_applied ? (
+                <StatusBlock
+                  title="已触发降级"
+                  description={bundle.fallback_reason ?? "运行时已触发降级。"}
+                  tone="error"
+                />
+              ) : null}
+              {bundle.warning_messages.length > 0 ? (
+                <StatusBlock
+                  title="运行告警"
+                  description={bundle.warning_messages.join(" | ")}
+                />
+              ) : null}
+            </div>
+          </details>
         ) : null}
-        {bundle && bundle.warning_messages.length > 0 ? (
-          <div className="mt-5">
-            <StatusBlock
-              title="运行告警"
-              description={bundle.warning_messages.join(" | ")}
-            />
-          </div>
-        ) : null}
-        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="text-sm font-semibold text-slate-950">决策固化与交易记录</p>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            可先保存本次判断，再记录交易动作，系统会自动关联当前决策快照。
-          </p>
+      </SectionCard>
+
+      {bundle ? (
+        <>
+          <SectionCard title="决策简报" description="先看结论，再看证据和行动建议。">
+            {bundle.decision_brief ? (
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <Metric label="执行动作（时机）" value={formatDecisionBriefAction(bundle.decision_brief.action_now)} />
+                  <Metric label="置信度" value={formatConvictionLevel(bundle.decision_brief.conviction_level)} />
+                  <Metric label="截至日期" value={formatDate(bundle.decision_brief.as_of_date)} />
+                  <Metric label="下次复查窗口" value={formatLabel(bundle.decision_brief.next_review_window)} />
+                </div>
+                <TextPanel title={bundle.decision_brief.name} content={bundle.decision_brief.headline_verdict} />
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <StringPanel title="入选理由" items={bundle.decision_brief.why_it_made_the_list} />
+                  <StringPanel title="暂不重仓原因" items={bundle.decision_brief.why_not_all_in} />
+                </div>
+              </div>
+            ) : (
+              <StatusBlock title="暂无决策简报" description="本次工作台聚合未返回决策简报。" />
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="预测快照（辅助）"
+            description="预测结果用于辅助排序与优先级判断，不替代研究结论与质量门控。"
+          >
+            {bundle.predictive_snapshot ? (
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <Metric
+                    label="预测分"
+                    value={formatScore(bundle.predictive_snapshot.predictive_score)}
+                  />
+                  <Metric
+                    label="预测分解释"
+                    value={formatPredictiveScoreLevel(bundle.predictive_snapshot.predictive_score)}
+                  />
+                  <Metric
+                    label="模型置信度"
+                    value={formatRatioPercent(bundle.predictive_snapshot.model_confidence)}
+                  />
+                  <Metric
+                    label="置信度等级"
+                    value={formatPredictiveConfidenceLevel(bundle.predictive_snapshot.model_confidence)}
+                  />
+                  <Metric
+                    label="上涨概率"
+                    value={formatRatioPercent(bundle.predictive_snapshot.upside_probability)}
+                  />
+                  <Metric
+                    label="预期超额收益"
+                    value={formatRatioPercent(bundle.predictive_snapshot.expected_excess_return)}
+                  />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <Metric label="模型版本" value={bundle.predictive_snapshot.model_version} />
+                  <Metric label="特征版本" value={bundle.predictive_snapshot.feature_version} />
+                  <Metric label="标签版本" value={bundle.predictive_snapshot.label_version} />
+                  <Metric
+                    label="生成时间"
+                    value={formatDateTime(bundle.predictive_snapshot.generated_at)}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setModelEvaluationRequestKey((value) => value + 1)}
+                    disabled={modelEvaluationLoading}
+                    className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {modelEvaluation ? "重新加载模型评估建议" : "加载模型评估建议"}
+                  </button>
+                  <span className="text-xs text-slate-500">
+                    模型评估默认按需加载，避免首屏等待过长。
+                  </span>
+                </div>
+                {modelEvaluationLoading ? (
+                  <StatusBlock
+                    title="模型评估建议"
+                    description="正在加载该模型版本的评估建议..."
+                  />
+                ) : null}
+                {modelEvaluation ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-slate-950">模型版本建议</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <Metric
+                        label="建议动作"
+                        value={formatModelRecommendation(
+                          modelEvaluation.recommendation?.recommendation,
+                        )}
+                      />
+                      <Metric
+                        label="建议版本"
+                        value={modelEvaluation.recommendation?.recommended_model_version ?? "-"}
+                      />
+                      <Metric
+                        label="评估质量分"
+                        value={formatRatioPercent(modelEvaluation.metrics.quality_score)}
+                      />
+                      <Metric
+                        label="回测胜率"
+                        value={formatRatioPercent(modelEvaluation.metrics.screener_win_rate)}
+                      />
+                    </div>
+                    {modelEvaluation.recommendation ? (
+                      <p className="mt-3 text-sm leading-6 text-slate-700">
+                        {modelEvaluation.recommendation.reason}
+                      </p>
+                    ) : null}
+                    {modelEvaluation.recommendation?.guardrails.length ? (
+                      <StringPanel
+                        title="建议护栏"
+                        items={modelEvaluation.recommendation.guardrails}
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
+                {modelEvaluationError ? (
+                  <StatusBlock
+                    title="模型评估建议加载失败"
+                    description={modelEvaluationError}
+                    tone="error"
+                  />
+                ) : null}
+                {bundle.predictive_snapshot.warning_messages.length > 0 ? (
+                  <StatusBlock
+                    title="预测运行告警"
+                    description={bundle.predictive_snapshot.warning_messages.join(" | ")}
+                  />
+                ) : null}
+              </div>
+            ) : (
+              <StatusBlock
+                title="暂无预测快照"
+                description="当前工作台未返回预测结果，系统仍可使用研究与策略链路继续判断。"
+              />
+            )}
+          </SectionCard>
+
+          <SectionCard title="证据与行动" description="以下证据与行动建议均可追溯到下层模块真实输出。">
+            {bundle.decision_brief ? (
+              <div className="space-y-4">
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <EvidencePanel title="看多证据" items={bundle.decision_brief.key_evidence} />
+                  <EvidencePanel title="风险证据" items={bundle.decision_brief.key_risks} />
+                </div>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <StringPanel title="下一步动作" items={bundle.decision_brief.what_to_do_next} />
+                  <StringPanel
+                    title="来源模块"
+                    items={bundle.decision_brief.source_modules.map((item) => `${item.module_name}${item.note ? ` / ${item.note}` : ""}`)}
+                  />
+                </div>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <StringPanel
+                    title="关注价位"
+                    items={bundle.decision_brief.price_levels_to_watch.map((item) => `${item.label}: ${item.value_text}${item.note ? ` / ${item.note}` : ""}`)}
+                  />
+                  <StringPanel
+                    title="证据索引"
+                    items={(bundle.evidence_manifest?.bundles ?? []).flatMap((item) =>
+                      item.refs.slice(0, 3).map((ref) => `${ref.dataset} / ${ref.provider} / ${ref.field_path}`),
+                    )}
+                  />
+                </div>
+              </div>
+            ) : (
+              <StatusBlock title="暂无证据层" description="决策简报证据暂不可用。" />
+            )}
+          </SectionCard>
+
+          <SectionCard title="执行记录（可选）" description="当你决定执行或跳过时，再展开此区进行记录。">
+            <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-950">
+                展开保存判断与记录交易
+              </summary>
+              <div className="mt-4">
+                <p className="text-sm leading-6 text-slate-600">
+                  可先保存本次判断，再记录交易动作，系统会自动关联当前决策快照。
+                </p>
           <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             原判断（方向基线，用于一致性校验）：
             {formatAction(tradeConflictState.snapshotAction ?? "WATCH")}
@@ -576,65 +834,16 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
               <StatusBlock title="操作失败" description={actionError} tone="error" />
             </div>
           ) : null}
-        </div>
-      </SectionCard>
-
-      {bundle ? (
-        <>
-          <SectionCard title="决策简报" description="先看结论，再看证据和行动建议。">
-            {bundle.decision_brief ? (
-              <div className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <Metric label="执行动作（时机）" value={formatDecisionBriefAction(bundle.decision_brief.action_now)} />
-                  <Metric label="置信度" value={formatConvictionLevel(bundle.decision_brief.conviction_level)} />
-                  <Metric label="截至日期" value={formatDate(bundle.decision_brief.as_of_date)} />
-                  <Metric label="下次复查窗口" value={formatLabel(bundle.decision_brief.next_review_window)} />
-                </div>
-                <TextPanel title={bundle.decision_brief.name} content={bundle.decision_brief.headline_verdict} />
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <StringPanel title="入选理由" items={bundle.decision_brief.why_it_made_the_list} />
-                  <StringPanel title="暂不重仓原因" items={bundle.decision_brief.why_not_all_in} />
-                </div>
               </div>
-            ) : (
-              <StatusBlock title="暂无决策简报" description="本次工作台聚合未返回决策简报。" />
-            )}
-          </SectionCard>
-
-          <SectionCard title="证据与行动" description="以下证据与行动建议均可追溯到下层模块真实输出。">
-            {bundle.decision_brief ? (
-              <div className="space-y-4">
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <EvidencePanel title="看多证据" items={bundle.decision_brief.key_evidence} />
-                  <EvidencePanel title="风险证据" items={bundle.decision_brief.key_risks} />
-                </div>
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <StringPanel title="下一步动作" items={bundle.decision_brief.what_to_do_next} />
-                  <StringPanel
-                    title="来源模块"
-                    items={bundle.decision_brief.source_modules.map((item) => `${item.module_name}${item.note ? ` / ${item.note}` : ""}`)}
-                  />
-                </div>
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <StringPanel
-                    title="关注价位"
-                    items={bundle.decision_brief.price_levels_to_watch.map((item) => `${item.label}: ${item.value_text}${item.note ? ` / ${item.note}` : ""}`)}
-                  />
-                  <StringPanel
-                    title="证据索引"
-                    items={(bundle.evidence_manifest?.bundles ?? []).flatMap((item) =>
-                      item.refs.slice(0, 3).map((ref) => `${ref.dataset} / ${ref.provider} / ${ref.field_path}`),
-                    )}
-                  />
-                </div>
-              </div>
-            ) : (
-              <StatusBlock title="暂无证据层" description="决策简报证据暂不可用。" />
-            )}
+            </details>
           </SectionCard>
 
           <SectionCard title="详细模块" description="下层模块仍可查看，但展示顺序已下沉到结论层之后。">
-            <div className="space-y-4">
+            <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-950">
+                展开详细模块（基础信息、因子、review、debate、策略与触发）
+              </summary>
+              <div className="mt-4 space-y-4">
               <div className="grid gap-4 lg:grid-cols-2">
                 <Panel title="基础信息">
                   {bundle.profile ? (
@@ -775,10 +984,18 @@ export function StockWorkspace({ symbol }: StockWorkspaceProps) {
                   </div>
                 </Panel>
               </div>
-            </div>
+              </div>
+            </details>
           </SectionCard>
 
-          <SingleStockWorkflowPanel symbol={symbol} />
+          <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-950">
+              高级：单票 workflow 面板
+            </summary>
+            <div className="mt-4">
+              <SingleStockWorkflowPanel symbol={symbol} />
+            </div>
+          </details>
         </>
       ) : null}
     </div>
@@ -798,7 +1015,9 @@ function LoadingBlock({
         title="正在加载工作台聚合"
         description={
           useLlm && progress
-            ? `${progress.current_step ?? progress.message} (${progress.completed_steps}/${progress.total_steps || "?"})`
+            ? progress.status === "idle"
+              ? "正在初始化 Debate Review 任务，请稍候..."
+              : `${progress.current_step ?? progress.message} (${progress.completed_steps}/${progress.total_steps || "?"})`
             : "正在等待后端返回工作台聚合结果。"
         }
       />

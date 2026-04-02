@@ -369,3 +369,186 @@ def test_load_window_results_keeps_latest_record_per_symbol(tmp_path) -> None:
     assert rows[0].batch_id == batch_b.batch_id
     assert rows[0].screener_score == 76
     assert rows[0].batch_id != batch_a.batch_id
+
+
+def test_load_window_results_same_timestamp_keeps_newer_batch(tmp_path) -> None:
+    service = ScreenerBatchService(root_dir=tmp_path)
+    started_a = datetime(2026, 3, 30, 17, 1, tzinfo=ZoneInfo("Asia/Shanghai"))
+    started_b = datetime(2026, 3, 30, 17, 3, tzinfo=ZoneInfo("Asia/Shanghai"))
+    batch_a = service.create_running_batch(
+        run_id="run-tie-a",
+        batch_size=20,
+        max_symbols=20,
+        top_n=None,
+        started_at=started_a,
+    )
+    batch_b = service.create_running_batch(
+        run_id="run-tie-b",
+        batch_size=20,
+        max_symbols=20,
+        top_n=None,
+        started_at=started_b,
+    )
+
+    same_calculated_at = datetime(2026, 3, 30, 17, 5, tzinfo=ZoneInfo("Asia/Shanghai"))
+    candidate_a = ScreenerCandidate(
+        symbol="600519.SH",
+        name="贵州茅台",
+        list_type="WATCHLIST",
+        v2_list_type="WATCH_BREAKOUT",
+        rank=1,
+        screener_score=70,
+        alpha_score=66,
+        trigger_score=65,
+        risk_score=43,
+        trend_state="up",
+        trend_score=72,
+        latest_close=1670.0,
+        support_level=1620.0,
+        resistance_level=1680.0,
+        top_positive_factors=[],
+        top_negative_factors=[],
+        risk_notes=[],
+        short_reason="趋势尚可，等待突破确认。",
+        calculated_at=same_calculated_at,
+        predictive_score=None,
+        predictive_confidence=None,
+        predictive_model_version=None,
+    )
+    candidate_b = candidate_a.model_copy(
+        update={
+            "screener_score": 76,
+            "short_reason": "趋势继续改善，等待突破确认。",
+            "predictive_score": 78,
+            "predictive_confidence": 0.78,
+            "predictive_model_version": "baseline-rule-v1",
+        }
+    )
+    output_a = ScreenerRunResponse(
+        as_of_date=date(2026, 3, 30),
+        freshness_mode="computed",
+        source_mode="pipeline",
+        total_symbols=20,
+        scanned_symbols=20,
+        buy_candidates=[],
+        watch_candidates=[],
+        avoid_candidates=[],
+        ready_to_buy_candidates=[],
+        watch_pullback_candidates=[],
+        watch_breakout_candidates=[candidate_a],
+        research_only_candidates=[],
+    )
+    output_b = output_a.model_copy(
+        update={
+            "watch_breakout_candidates": [candidate_b],
+        }
+    )
+    service.finalize_batch(
+        run_id="run-tie-a",
+        status="completed",
+        finished_at=started_a,
+        final_output=output_a.model_dump(mode="json"),
+        final_output_summary={},
+        error_message=None,
+    )
+    service.finalize_batch(
+        run_id="run-tie-b",
+        status="completed",
+        finished_at=started_b,
+        final_output=output_b.model_dump(mode="json"),
+        final_output_summary={},
+        error_message=None,
+    )
+
+    _, _, rows = service.load_window_results(
+        now=datetime(2026, 3, 30, 17, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+    assert len(rows) == 1
+    assert rows[0].batch_id == batch_b.batch_id
+    assert rows[0].batch_id != batch_a.batch_id
+    assert rows[0].predictive_score == 78
+
+
+class _StubPredictionService:
+    def get_symbol_prediction(
+        self,
+        *,
+        symbol: str,
+        as_of_date: date,
+        build_feature_dataset: bool = False,
+    ):
+        class _Snapshot:
+            predictive_score = 66
+            model_confidence = 0.7
+            model_version = "baseline-rule-v1"
+
+        assert symbol == "600519.SH"
+        assert as_of_date == date(2026, 3, 30)
+        assert build_feature_dataset is False
+        return _Snapshot()
+
+
+def test_load_batch_results_hydrates_missing_predictive_fields(tmp_path) -> None:
+    service = ScreenerBatchService(
+        root_dir=tmp_path,
+        prediction_service=_StubPredictionService(),
+    )
+    started_at = datetime(2026, 3, 30, 17, 1, tzinfo=ZoneInfo("Asia/Shanghai"))
+    batch = service.create_running_batch(
+        run_id="run-hydrate",
+        batch_size=20,
+        max_symbols=20,
+        top_n=None,
+        started_at=started_at,
+    )
+    candidate = ScreenerCandidate(
+        symbol="600519.SH",
+        name="贵州茅台",
+        list_type="WATCHLIST",
+        v2_list_type="WATCH_BREAKOUT",
+        rank=1,
+        screener_score=70,
+        alpha_score=66,
+        trigger_score=65,
+        risk_score=43,
+        trend_state="up",
+        trend_score=72,
+        latest_close=1670.0,
+        support_level=1620.0,
+        resistance_level=1680.0,
+        top_positive_factors=[],
+        top_negative_factors=[],
+        risk_notes=[],
+        short_reason="趋势尚可，等待突破确认。",
+        calculated_at=datetime(2026, 3, 30, 8, 0, tzinfo=ZoneInfo("UTC")),
+        predictive_score=None,
+        predictive_confidence=None,
+        predictive_model_version=None,
+    )
+    output = ScreenerRunResponse(
+        as_of_date=date(2026, 3, 30),
+        freshness_mode="computed",
+        source_mode="pipeline",
+        total_symbols=20,
+        scanned_symbols=20,
+        buy_candidates=[],
+        watch_candidates=[],
+        avoid_candidates=[],
+        ready_to_buy_candidates=[],
+        watch_pullback_candidates=[],
+        watch_breakout_candidates=[candidate],
+        research_only_candidates=[],
+    )
+    service.finalize_batch(
+        run_id="run-hydrate",
+        status="completed",
+        finished_at=started_at,
+        final_output=output.model_dump(mode="json"),
+        final_output_summary={},
+        error_message=None,
+    )
+    rows = service.load_batch_results(batch.batch_id)
+    assert rows
+    assert rows[0].predictive_score == 66
+    assert rows[0].predictive_confidence == 0.7
+    assert rows[0].predictive_model_version == "baseline-rule-v1"

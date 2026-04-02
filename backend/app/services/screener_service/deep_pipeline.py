@@ -105,6 +105,9 @@ class DeepScreenerPipeline:
             thesis=research_report.thesis,
             short_reason=short_reason,
             priority_score=priority_score,
+            predictive_score=candidate.predictive_score,
+            predictive_confidence=candidate.predictive_confidence,
+            predictive_model_version=candidate.predictive_model_version,
         )
 
 

@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta
 import json
 from pathlib import Path
 from threading import Lock
-from typing import Iterable
+from typing import Any, Iterable
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -26,11 +26,17 @@ _DEFAULT_RULE_SUMMARY = "基于趋势评分、因子快照与风险约束的规�
 class ScreenerBatchService:
     """管理初筛批次记录和批次结果。"""
 
-    def __init__(self, root_dir: Path) -> None:
+    def __init__(
+        self,
+        root_dir: Path,
+        prediction_service: Any | None = None,
+    ) -> None:
         self._root_dir = root_dir
         self._batch_dir = root_dir / "batches"
         self._result_dir = root_dir / "results"
         self._run_index_dir = root_dir / "run_index"
+        self._prediction_service = prediction_service
+        self._prediction_cache: dict[tuple[str, str], tuple[int, float, str]] = {}
         self._lock = Lock()
         self._batch_dir.mkdir(parents=True, exist_ok=True)
         self._result_dir.mkdir(parents=True, exist_ok=True)
@@ -215,7 +221,7 @@ class ScreenerBatchService:
                 if current is None:
                     latest_by_symbol[key] = result
                     continue
-                if _to_shanghai_datetime(result.calculated_at) >= _to_shanghai_datetime(
+                if _to_shanghai_datetime(result.calculated_at) > _to_shanghai_datetime(
                     current.calculated_at
                 ):
                     latest_by_symbol[key] = result
@@ -238,10 +244,15 @@ class ScreenerBatchService:
         if not file_path.exists():
             return []
         payload = json.loads(file_path.read_text(encoding="utf-8"))
-        return [
+        results = [
             _normalize_symbol_result(ScreenerSymbolResult.model_validate(item))
             for item in payload
         ]
+        results, updated = self._hydrate_missing_predictive_fields(results)
+        if updated:
+            with self._lock:
+                self._save_batch_results(batch_id=batch_id, results=results)
+        return results
 
     def load_symbol_result(self, batch_id: str, symbol: str) -> ScreenerSymbolResult | None:
         normalized = symbol.strip().upper()
@@ -329,6 +340,9 @@ class ScreenerBatchService:
                     announcement_quality=candidate.announcement_quality,
                     quality_penalty_applied=candidate.quality_penalty_applied,
                     quality_note=candidate.quality_note,
+                    predictive_score=candidate.predictive_score,
+                    predictive_confidence=candidate.predictive_confidence,
+                    predictive_model_version=candidate.predictive_model_version,
                 )
             )
         return results
@@ -376,6 +390,56 @@ class ScreenerBatchService:
 
     def _batch_reference_time(self, record: ScreenerBatchRecord) -> datetime:
         return _to_shanghai_datetime(record.finished_at or record.started_at)
+
+    def _hydrate_missing_predictive_fields(
+        self,
+        results: list[ScreenerSymbolResult],
+    ) -> tuple[list[ScreenerSymbolResult], bool]:
+        if self._prediction_service is None or not results:
+            return results, False
+
+        updated = False
+        hydrated: list[ScreenerSymbolResult] = []
+        for result in results:
+            if (
+                result.predictive_score is not None
+                and result.predictive_confidence is not None
+                and result.predictive_model_version
+            ):
+                hydrated.append(result)
+                continue
+
+            as_of_date = _to_shanghai_datetime(result.calculated_at).date()
+            cache_key = (result.symbol.upper(), as_of_date.isoformat())
+            prediction_tuple = self._prediction_cache.get(cache_key)
+            if prediction_tuple is None:
+                try:
+                    snapshot = self._prediction_service.get_symbol_prediction(
+                        symbol=result.symbol,
+                        as_of_date=as_of_date,
+                        build_feature_dataset=False,
+                    )
+                except Exception:
+                    hydrated.append(result)
+                    continue
+                prediction_tuple = (
+                    int(snapshot.predictive_score),
+                    float(snapshot.model_confidence),
+                    str(snapshot.model_version),
+                )
+                self._prediction_cache[cache_key] = prediction_tuple
+
+            hydrated.append(
+                result.model_copy(
+                    update={
+                        "predictive_score": prediction_tuple[0],
+                        "predictive_confidence": prediction_tuple[1],
+                        "predictive_model_version": prediction_tuple[2],
+                    }
+                )
+            )
+            updated = True
+        return hydrated, updated
 
 
 def resolve_screener_trade_date(now: datetime | None = None) -> date:

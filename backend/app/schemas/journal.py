@@ -74,6 +74,11 @@ class DecisionSnapshotCreatePayload(BaseModel):
     confidence_reasons: list[str] = Field(default_factory=list)
     runtime_mode_requested: Optional[str] = None
     runtime_mode_effective: Optional[str] = None
+    predictive_score: Optional[int] = Field(default=None, ge=0, le=100)
+    predictive_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    predictive_model_version: Optional[str] = None
+    predictive_feature_version: Optional[str] = None
+    predictive_label_version: Optional[str] = None
     source_refs: list[DecisionSourceRef] = Field(default_factory=list)
 
 
@@ -115,6 +120,11 @@ class DecisionSnapshotRecord(BaseModel):
     confidence_reasons: list[str] = Field(default_factory=list)
     runtime_mode_requested: Optional[str] = None
     runtime_mode_effective: Optional[str] = None
+    predictive_score: Optional[int] = Field(default=None, ge=0, le=100)
+    predictive_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    predictive_model_version: Optional[str] = None
+    predictive_feature_version: Optional[str] = None
+    predictive_label_version: Optional[str] = None
     source_refs: list[DecisionSourceRef] = Field(default_factory=list)
     created_at: datetime
 

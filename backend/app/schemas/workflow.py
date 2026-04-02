@@ -8,6 +8,7 @@ from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.debate import DebateReviewReport, SingleStockResearchInputs
+from app.schemas.evaluation import ModelVersionRecommendation
 from app.schemas.factor import FactorSnapshot
 from app.schemas.review import StockReviewReport
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
@@ -199,6 +200,8 @@ class WorkflowRunResponse(BaseModel):
     runtime_mode_effective: Optional[str] = None
     warning_messages: list[str] = Field(default_factory=list)
     failed_symbols: list[str] = Field(default_factory=list)
+    model_recommendation: Optional[ModelVersionRecommendation] = None
+    version_recommendation_alert: Optional[str] = None
 
 
 class WorkflowRunDetailResponse(WorkflowRunResponse):

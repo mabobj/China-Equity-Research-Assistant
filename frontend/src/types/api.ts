@@ -290,6 +290,9 @@ export type ScreenerCandidate = {
   announcement_quality?: DataQualityStatus | null;
   quality_penalty_applied?: boolean;
   quality_note?: string | null;
+  predictive_score?: number | null;
+  predictive_confidence?: number | null;
+  predictive_model_version?: string | null;
   fail_reason?: string | null;
 };
 
@@ -352,6 +355,9 @@ export type ScreenerSymbolResult = {
   announcement_quality?: DataQualityStatus | null;
   quality_penalty_applied?: boolean;
   quality_note?: string | null;
+  predictive_score?: number | null;
+  predictive_confidence?: number | null;
+  predictive_model_version?: string | null;
 };
 
 export type ScreenerLatestBatchResponse = {
@@ -399,6 +405,9 @@ export type DeepScreenerCandidate = {
   thesis: string;
   short_reason: string;
   priority_score: number;
+  predictive_score?: number | null;
+  predictive_confidence?: number | null;
+  predictive_model_version?: string | null;
 };
 
 export type DeepScreenerRunResponse = {
@@ -509,6 +518,61 @@ export type DecisionBrief = {
   evidence_manifest_refs: EvidenceRef[];
 };
 
+export type PredictionSnapshot = {
+  symbol: string;
+  as_of_date: string;
+  model_version: string;
+  feature_version: string;
+  label_version: string;
+  predictive_score: number;
+  upside_probability: number;
+  expected_excess_return: number;
+  model_confidence: number;
+  runtime_mode: "baseline";
+  warning_messages: string[];
+  generated_at: string;
+};
+
+export type EvaluationBacktestReference = {
+  backtest_type: string;
+  run_id: string;
+  window_start: string;
+  window_end: string;
+  metrics: Record<string, number>;
+  summary: string;
+};
+
+export type ModelEvaluationComparison = {
+  baseline_model_version: string;
+  compared_model_version: string;
+  metric_deltas: Record<string, number>;
+  summary: string;
+};
+
+export type ModelVersionRecommendation = {
+  recommendation: "promote_candidate" | "keep_baseline" | "observe";
+  recommended_model_version: string;
+  reason: string;
+  supporting_metrics: Record<string, number>;
+  guardrails: string[];
+};
+
+export type ModelEvaluationResponse = {
+  model_version: string;
+  feature_version: string;
+  label_version: string;
+  evaluated_at: string;
+  window_start: string;
+  window_end: string;
+  metrics: Record<string, number>;
+  strengths: string[];
+  risks: string[];
+  warning_messages: string[];
+  backtest_references: EvaluationBacktestReference[];
+  comparison: ModelEvaluationComparison | null;
+  recommendation: ModelVersionRecommendation | null;
+};
+
 export type EvidenceRef = {
   dataset:
     | "daily_bars_daily"
@@ -585,6 +649,7 @@ export type WorkspaceBundleResponse = {
   strategy_plan: StrategyPlan | null;
   trigger_snapshot: TriggerSnapshot | null;
   decision_brief: DecisionBrief | null;
+  predictive_snapshot: PredictionSnapshot | null;
   module_status_summary: WorkspaceModuleStatus[];
   evidence_manifest: EvidenceManifest | null;
   freshness_summary: FreshnessSummary;
@@ -659,6 +724,8 @@ export type WorkflowRunResponse = {
   runtime_mode_effective: string | null;
   warning_messages: string[];
   failed_symbols: string[];
+  model_recommendation: ModelVersionRecommendation | null;
+  version_recommendation_alert: string | null;
 };
 
 export type WorkflowRunDetailResponse = WorkflowRunResponse & {
@@ -726,6 +793,11 @@ export type DecisionSnapshot = {
   confidence_reasons: string[];
   runtime_mode_requested: string | null;
   runtime_mode_effective: string | null;
+  predictive_score?: number | null;
+  predictive_confidence?: number | null;
+  predictive_model_version?: string | null;
+  predictive_feature_version?: string | null;
+  predictive_label_version?: string | null;
   source_refs: DecisionSourceRef[];
   created_at: string;
 };
@@ -847,6 +919,11 @@ export type CreateDecisionSnapshotRequest = {
     confidence_reasons?: string[];
     runtime_mode_requested?: string;
     runtime_mode_effective?: string;
+    predictive_score?: number;
+    predictive_confidence?: number;
+    predictive_model_version?: string;
+    predictive_feature_version?: string;
+    predictive_label_version?: string;
     source_refs?: DecisionSourceRef[];
   };
 };

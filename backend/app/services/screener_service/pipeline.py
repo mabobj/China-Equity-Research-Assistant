@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )
+    from app.services.prediction_service.prediction_service import PredictionService
 
 logger = logging.getLogger(__name__)
 _RULE_VERSION = "screener_workflow_v1"
@@ -52,6 +53,7 @@ class ScreenerPipeline:
         market_data_service: MarketDataService,
         technical_analysis_service: TechnicalAnalysisService,
         factor_snapshot_service: Optional[FactorSnapshotService] = None,
+        prediction_service: Optional["PredictionService"] = None,
         lookback_days: int = 400,
         progress_log_interval: int = 100,
         batch_daily_bar_provider_priority: tuple[str, ...] = (
@@ -63,6 +65,7 @@ class ScreenerPipeline:
         self._market_data_service = market_data_service
         self._technical_analysis_service = technical_analysis_service
         self._factor_snapshot_service = factor_snapshot_service
+        self._prediction_service = prediction_service
         self._lookback_days = max(lookback_days, 180)
         self._progress_log_interval = max(progress_log_interval, 1)
         self._batch_daily_bar_provider_priority = batch_daily_bar_provider_priority
@@ -292,6 +295,12 @@ class ScreenerPipeline:
                 item=item,
                 technical_snapshot=technical_snapshot,
                 score_result=score_result,
+                prediction_snapshot=(
+                    self._try_get_prediction_snapshot(
+                        symbol=item.symbol,
+                        as_of_date=technical_snapshot.as_of_date,
+                    )
+                ),
                 target_v2_list_type=quality_gate.target_v2_list_type,
                 target_screener_score=quality_gate.target_screener_score,
                 bars_quality=bars_quality,
@@ -302,6 +311,18 @@ class ScreenerPipeline:
             ),
             failed_placeholder=None,
         )
+
+    def _try_get_prediction_snapshot(self, *, symbol: str, as_of_date: date):
+        if self._prediction_service is None:
+            return None
+        try:
+            return self._prediction_service.get_symbol_prediction(
+                symbol=symbol,
+                as_of_date=as_of_date,
+                build_feature_dataset=False,
+            )
+        except Exception:
+            return None
 
     def _load_daily_bars_for_scan(
         self,
@@ -315,13 +336,22 @@ class ScreenerPipeline:
                 symbol,
                 start_date=start_date,
                 force_refresh=force_refresh,
+                allow_remote_sync=False,
                 provider_names=self._batch_daily_bar_provider_priority,
             )
         except TypeError:
-            return self._market_data_service.get_daily_bars(
-                symbol,
-                start_date=start_date,
-            )
+            try:
+                return self._market_data_service.get_daily_bars(
+                    symbol,
+                    start_date=start_date,
+                    force_refresh=force_refresh,
+                    provider_names=self._batch_daily_bar_provider_priority,
+                )
+            except TypeError:
+                return self._market_data_service.get_daily_bars(
+                    symbol,
+                    start_date=start_date,
+                )
 
     def _log_progress(
         self,
@@ -375,6 +405,7 @@ def _rank_candidates(
         candidates,
         key=lambda item: (
             item.screener_score,
+            item.predictive_score or -1,
             item.alpha_score,
             -item.risk_score,
             item.trend_score,
@@ -396,6 +427,7 @@ def _build_candidate(
     item: UniverseItem,
     technical_snapshot,
     score_result,
+    prediction_snapshot,
     target_v2_list_type: str,
     target_screener_score: int,
     bars_quality: _QUALITY_STATUS,
@@ -452,6 +484,15 @@ def _build_candidate(
         announcement_quality=announcement_quality,
         quality_penalty_applied=quality_penalty_applied,
         quality_note=quality_note,
+        predictive_score=(
+            prediction_snapshot.predictive_score if prediction_snapshot is not None else None
+        ),
+        predictive_confidence=(
+            prediction_snapshot.model_confidence if prediction_snapshot is not None else None
+        ),
+        predictive_model_version=(
+            prediction_snapshot.model_version if prediction_snapshot is not None else None
+        ),
         fail_reason=None,
     )
 
@@ -537,6 +578,9 @@ def _build_failed_placeholder_for_bars(
         announcement_quality=None,
         quality_penalty_applied=True,
         quality_note=quality_note,
+        predictive_score=None,
+        predictive_confidence=None,
+        predictive_model_version=None,
         fail_reason=fail_reason,
     )
 

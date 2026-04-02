@@ -38,6 +38,9 @@ class FakeScreenerPipeline:
                     support_level=1620.0,
                     resistance_level=1700.0,
                     short_reason="趋势延续，量价结构稳定。",
+                    predictive_score=73,
+                    predictive_confidence=0.69,
+                    predictive_model_version="baseline-v1",
                 ),
                 ScreenerCandidate(
                     symbol="300750.SZ",
@@ -51,6 +54,9 @@ class FakeScreenerPipeline:
                     support_level=198.0,
                     resistance_level=210.0,
                     short_reason="趋势向上，但仍需观察确认。",
+                    predictive_score=66,
+                    predictive_confidence=0.62,
+                    predictive_model_version="baseline-v1",
                 ),
             ],
             watch_candidates=[
@@ -66,6 +72,9 @@ class FakeScreenerPipeline:
                     support_level=10.8,
                     resistance_level=11.8,
                     short_reason="通过初筛，等待方向更清晰。",
+                    predictive_score=58,
+                    predictive_confidence=0.57,
+                    predictive_model_version="baseline-v1",
                 )
             ],
             avoid_candidates=[],
@@ -182,5 +191,7 @@ def test_run_deep_screener_returns_ranked_candidates_and_skips_failures() -> Non
     assert len(response.deep_candidates) == 2
     assert response.deep_candidates[0].symbol == "600519.SH"
     assert response.deep_candidates[0].strategy_type == "pullback"
+    assert response.deep_candidates[0].predictive_score == 73
+    assert response.deep_candidates[0].predictive_model_version == "baseline-v1"
     assert response.deep_candidates[0].priority_score >= response.deep_candidates[1].priority_score
     assert response.deep_candidates[1].symbol == "000001.SZ"

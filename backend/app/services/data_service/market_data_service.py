@@ -73,6 +73,7 @@ class MarketDataService:
         else:
             self._provider_registry = ProviderRegistry(providers)
         self._local_store = local_store
+        self._preferred_unavailable_logged: set[tuple[str, tuple[str, ...]]] = set()
         self._run_local_migrations()
 
     def _run_local_migrations(self) -> None:
@@ -158,6 +159,7 @@ class MarketDataService:
         end_date: Optional[str] = None,
         *,
         force_refresh: bool = False,
+        allow_remote_sync: bool = True,
         provider_names: Optional[Sequence[str]] = None,
     ) -> DailyBarResponse:
         canonical_symbol = normalize_symbol(symbol)
@@ -209,6 +211,32 @@ class MarketDataService:
             normalized_start_date,
             normalized_end_date,
         )
+
+        if not allow_remote_sync:
+            if cached_bars:
+                logger.debug(
+                    "market_data.daily_bars.skip_remote symbol=%s reason=allow_remote_sync_disabled_use_cache count=%s",
+                    canonical_symbol,
+                    len(cached_bars),
+                )
+                return _build_daily_bar_response(
+                    canonical_symbol,
+                    normalized_start_date,
+                    normalized_end_date,
+                    cached_bars,
+                    additional_warnings=["remote_sync_skipped_use_cache"],
+                )
+            logger.debug(
+                "market_data.daily_bars.skip_remote symbol=%s reason=allow_remote_sync_disabled_no_cache",
+                canonical_symbol,
+            )
+            return _build_daily_bar_response(
+                canonical_symbol,
+                normalized_start_date,
+                normalized_end_date,
+                [],
+                additional_warnings=["remote_sync_skipped_no_cache"],
+            )
 
         if (
             not force_refresh
@@ -1172,6 +1200,24 @@ class MarketDataService:
             preferred = {
                 name: index for index, name in enumerate(effective_provider_names)
             }
+            available_provider_names = {provider.name for provider in providers}
+            preferred_missing = [
+                name for name in effective_provider_names if name not in available_provider_names
+            ]
+            if preferred_missing:
+                all_providers = self._provider_registry.get_providers(
+                    capability,
+                    available_only=False,
+                )
+                provider_reason_map = {
+                    provider.name: provider.get_unavailable_reason()
+                    for provider in all_providers
+                }
+                self._log_preferred_unavailable(
+                    capability=capability,
+                    preferred_missing=preferred_missing,
+                    provider_reason_map=provider_reason_map,
+                )
             providers = sorted(
                 providers,
                 key=lambda provider: preferred.get(
@@ -1185,6 +1231,28 @@ class MarketDataService:
             [provider.name for provider in providers],
         )
         return providers
+
+    def _log_preferred_unavailable(
+        self,
+        *,
+        capability: str,
+        preferred_missing: Sequence[str],
+        provider_reason_map: dict[str, str | None],
+    ) -> None:
+        normalized_missing = tuple(sorted(preferred_missing))
+        log_key = (capability, normalized_missing)
+        if log_key in self._preferred_unavailable_logged:
+            return
+        self._preferred_unavailable_logged.add(log_key)
+        missing_reasons = {
+            name: provider_reason_map.get(name) for name in normalized_missing
+        }
+        logger.debug(
+            "market_data.providers.preferred_unavailable capability=%s missing=%s reasons=%s",
+            capability,
+            list(normalized_missing),
+            missing_reasons,
+        )
 
 
 def _build_daily_bar_response(

@@ -43,6 +43,9 @@ class StubDeepScreenerPipeline:
                     thesis="技术和研究结果同步偏积极。",
                     short_reason="初筛强度较高，研究与策略同时支持继续跟踪买点。",
                     priority_score=84,
+                    predictive_score=72,
+                    predictive_confidence=0.68,
+                    predictive_model_version="baseline-v1",
                 )
             ],
         )
@@ -65,5 +68,7 @@ def test_run_deep_screener_route_returns_structured_payload() -> None:
     assert payload["deep_candidates"][0]["symbol"] == "600519.SH"
     assert payload["deep_candidates"][0]["strategy_type"] == "pullback"
     assert payload["deep_candidates"][0]["priority_score"] == 84
+    assert payload["deep_candidates"][0]["predictive_score"] == 72
+    assert payload["deep_candidates"][0]["predictive_model_version"] == "baseline-v1"
 
     app.dependency_overrides.clear()

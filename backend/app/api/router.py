@@ -4,9 +4,13 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     admin_db,
+    backtests,
     data,
+    datasets,
     decision_snapshots,
+    evaluations,
     health,
+    predictions,
     research,
     reviews,
     screener,
@@ -20,6 +24,10 @@ api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(data.router)
 api_router.include_router(admin_db.router)
+api_router.include_router(datasets.router)
+api_router.include_router(predictions.router)
+api_router.include_router(backtests.router)
+api_router.include_router(evaluations.router)
 api_router.include_router(decision_snapshots.router)
 api_router.include_router(stocks.router)
 api_router.include_router(research.router)

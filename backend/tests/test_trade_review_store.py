@@ -34,6 +34,11 @@ def test_trade_review_store_crud_and_filters(tmp_path) -> None:
         "confidence_reasons": ["财务字段存在缺失，置信度下调。"],
         "runtime_mode_requested": "rule_based",
         "runtime_mode_effective": "rule_based",
+        "predictive_score": 62,
+        "predictive_confidence": 0.68,
+        "predictive_model_version": "baseline-v1",
+        "predictive_feature_version": "features-daily-v1",
+        "predictive_label_version": "labels-fwd-v1",
         "source_refs": [],
         "created_at": utc_now_iso(),
     }
@@ -80,6 +85,8 @@ def test_trade_review_store_crud_and_filters(tmp_path) -> None:
     assert snapshot is not None
     assert snapshot["symbol"] == "600519.SH"
     assert snapshot["confidence_reasons"] == ["财务字段存在缺失，置信度下调。"]
+    assert snapshot["predictive_score"] == 62
+    assert snapshot["predictive_model_version"] == "baseline-v1"
 
     trades = store.list_trade_records(symbol="600519.SH", limit=20)
     assert len(trades) == 1

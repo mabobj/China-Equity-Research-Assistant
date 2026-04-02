@@ -9,6 +9,7 @@ import type {
   StrategyAlignment,
   TradeReasonType,
   TradeSide,
+  ModelVersionRecommendation,
   WorkflowStepStatus,
 } from "@/types/api";
 
@@ -118,6 +119,15 @@ const GENERIC_LABELS: Record<string, string> = {
   degraded: "降级",
 };
 
+const MODEL_RECOMMENDATION_LABELS: Record<
+  ModelVersionRecommendation["recommendation"],
+  string
+> = {
+  promote_candidate: "可升级为默认版本",
+  keep_baseline: "继续使用基线版本",
+  observe: "继续观察",
+};
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return "-";
@@ -178,6 +188,13 @@ export function formatPercent(value: number | null | undefined): string {
   return `${percentFormatter.format(value)}%`;
 }
 
+export function formatRatioPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  return `${percentFormatter.format(value * 100)}%`;
+}
+
 export function formatLabel(value: string | null | undefined): string {
   if (!value) {
     return "-";
@@ -226,6 +243,36 @@ export function formatReviewOutcome(value: ReviewOutcomeLabel): string {
 
 export function formatDidFollowPlan(value: DidFollowPlan): string {
   return DID_FOLLOW_PLAN_LABELS[value];
+}
+
+export function formatPredictiveScoreLevel(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  if (value >= 80) return "高强度信号";
+  if (value >= 65) return "中等偏强";
+  if (value >= 50) return "中性观察";
+  return "偏弱信号";
+}
+
+export function formatPredictiveConfidenceLevel(
+  value: number | null | undefined,
+): string {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  if (value >= 0.8) return "高";
+  if (value >= 0.65) return "中";
+  return "低";
+}
+
+export function formatModelRecommendation(
+  value: ModelVersionRecommendation["recommendation"] | null | undefined,
+): string {
+  if (!value) {
+    return "-";
+  }
+  return MODEL_RECOMMENDATION_LABELS[value] ?? value;
 }
 
 export function formatUnknownValue(value: unknown): string {

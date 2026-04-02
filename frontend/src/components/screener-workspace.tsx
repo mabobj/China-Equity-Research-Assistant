@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import {
   getLatestScreenerBatch,
+  getModelEvaluation,
   getWorkflowRunDetail,
   resetScreenerCursor,
   runDeepReviewWorkflow,
@@ -17,12 +18,17 @@ import {
   formatDecisionBriefAction,
   formatLabel,
   formatListType,
+  formatModelRecommendation,
   formatPrice,
+  formatPredictiveConfidenceLevel,
+  formatPredictiveScoreLevel,
+  formatRatioPercent,
   formatRange,
   formatScore,
 } from "@/lib/format";
 import type {
   DeepScreenerRunResponse,
+  ModelEvaluationResponse,
   ScreenerListType,
   ScreenerLatestBatchResponse,
   ScreenerSymbolResult,
@@ -34,6 +40,7 @@ import { StatusBlock } from "./status-block";
 import { WorkflowRunSummary } from "./workflow-run-summary";
 
 const POLL_MS = 1500;
+const PAGE_SIZE_OPTIONS = [20, 50, 100, 200] as const;
 
 type ResultFilters = {
   symbolQuery: string;
@@ -73,7 +80,14 @@ export function ScreenerWorkspace() {
   const [latestBatch, setLatestBatch] = useState<ScreenerLatestBatchResponse | null>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [filters, setFilters] = useState<ResultFilters>(INITIAL_FILTERS);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(50);
   const [reloadToken, setReloadToken] = useState(0);
+  const [evaluationByVersion, setEvaluationByVersion] = useState<
+    Record<string, ModelEvaluationResponse>
+  >({});
+  const [evaluationLoadingVersion, setEvaluationLoadingVersion] = useState<string | null>(null);
+  const [evaluationError, setEvaluationError] = useState<string | null>(null);
 
   const runningRunId = screenerRun?.status === "running" ? screenerRun.run_id : null;
   useWorkflowPolling(runningRunId, setScreenerRun);
@@ -180,8 +194,81 @@ export function ScreenerWorkspace() {
         allResults.find((item) => item.symbol === selectedSymbol) ??
         null;
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, pageSize, latestBatch?.batch?.batch_id]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredResults.length / pageSize)),
+    [filteredResults.length, pageSize],
+  );
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const pagedResults = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredResults.slice(start, start + pageSize);
+  }, [currentPage, filteredResults, pageSize]);
+
+  useEffect(() => {
+    const modelVersion = selectedResult?.predictive_model_version;
+    if (!modelVersion) {
+      setEvaluationLoadingVersion(null);
+      setEvaluationError(null);
+      return;
+    }
+    if (evaluationByVersion[modelVersion]) {
+      setEvaluationLoadingVersion(null);
+      setEvaluationError(null);
+      return;
+    }
+
+    let active = true;
+    setEvaluationLoadingVersion(modelVersion);
+    setEvaluationError(null);
+    void getModelEvaluation(modelVersion)
+      .then((value) => {
+        if (!active) return;
+        setEvaluationByVersion((previous) => ({
+          ...previous,
+          [modelVersion]: value,
+        }));
+      })
+      .catch((cause) => {
+        if (!active) return;
+        setEvaluationError(
+          cause instanceof Error ? cause.message : "模型评估建议加载失败，请稍后重试。",
+        );
+      })
+      .finally(() => {
+        if (!active) return;
+        setEvaluationLoadingVersion(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [evaluationByVersion, selectedResult?.predictive_model_version]);
+
   const ruleVersions = useMemo(() => {
     return [...new Set(allResults.map((item) => item.rule_version).filter(Boolean))];
+  }, [allResults]);
+  const bucketSummary = useMemo(() => {
+    const summary: Record<ScreenerListType, number> = {
+      READY_TO_BUY: 0,
+      WATCH_PULLBACK: 0,
+      WATCH_BREAKOUT: 0,
+      RESEARCH_ONLY: 0,
+      AVOID: 0,
+    };
+    for (const item of allResults) {
+      summary[item.list_type] += 1;
+    }
+    return summary;
   }, [allResults]);
 
   const handleRunScreener = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -237,56 +324,15 @@ export function ScreenerWorkspace() {
     }
   };
 
+  const handleSelectSymbol = (symbol: string) => {
+    setSelectedSymbol((previous) => (previous === symbol ? null : symbol));
+  };
+
   return (
     <div className="space-y-6">
       <SectionCard
-        title="初筛工作流"
-        description="按游标分批运行初筛。输入本批次计算股票数量，系统会自动从当前游标继续。"
-      >
-        <form className="grid gap-4 md:grid-cols-3" onSubmit={handleRunScreener}>
-          <Field
-            label="本批次计算股票数量（batch_size）"
-            value={batchSize}
-            onChange={setBatchSize}
-            placeholder="例如 50"
-          />
-          <div className="flex items-end gap-3">
-            <button
-              type="submit"
-              disabled={isScreenerRunning}
-              className="min-h-11 rounded-2xl bg-emerald-700 px-5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:bg-emerald-300"
-            >
-              {isScreenerRunning ? "已有运行中的初筛任务" : "运行初筛工作流"}
-            </button>
-            <button
-              type="button"
-              onClick={handleResetCursor}
-              disabled={resetLoading || isScreenerRunning}
-              className="min-h-11 rounded-2xl border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:text-slate-400"
-            >
-              {resetLoading ? "重置中..." : "重置游标"}
-            </button>
-          </div>
-        </form>
-        <div className="mt-5 space-y-4">
-          {resetMessage ? <StatusBlock title="游标重置" description={resetMessage} /> : null}
-          {screenerError ? (
-            <StatusBlock title="初筛工作流提示" description={screenerError} tone="error" />
-          ) : null}
-          {screenerRun ? (
-            <WorkflowRunSummary run={screenerRun} />
-          ) : (
-            <StatusBlock
-              title="等待执行"
-              description="提交后会立即返回 run_id，并持续轮询工作流运行状态。"
-            />
-          )}
-        </div>
-      </SectionCard>
-
-      <SectionCard
         title="当前展示窗口"
-        description="17:00 前展示前一日 17:00 后完成结果；17:00 后展示当日 17:00 后完成结果。"
+        description="先看结果再做动作。17:00 前展示前一日 17:00 后完成结果；17:00 后展示当日 17:00 后完成结果。"
       >
         <div className="space-y-4">
           {batchLoading ? (
@@ -301,6 +347,7 @@ export function ScreenerWorkspace() {
                 <Metric label="窗口开始" value={formatDateTime(latestBatch.window_start)} />
                 <Metric label="窗口结束" value={formatDateTime(latestBatch.window_end)} />
                 <Metric label="窗口股票数" value={String(latestBatch.total_results)} />
+                <Metric label="筛选后股票数" value={String(filteredResults.length)} />
                 <Metric
                   label="最新批次"
                   value={latestBatch.batch ? latestBatch.batch.batch_id : "暂无"}
@@ -330,6 +377,28 @@ export function ScreenerWorkspace() {
                   }
                 />
               </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">分桶分布概览（当前窗口）</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  <Metric
+                    label={formatListType("READY_TO_BUY")}
+                    value={String(bucketSummary.READY_TO_BUY)}
+                  />
+                  <Metric
+                    label={formatListType("WATCH_PULLBACK")}
+                    value={String(bucketSummary.WATCH_PULLBACK)}
+                  />
+                  <Metric
+                    label={formatListType("WATCH_BREAKOUT")}
+                    value={String(bucketSummary.WATCH_BREAKOUT)}
+                  />
+                  <Metric
+                    label={formatListType("RESEARCH_ONLY")}
+                    value={String(bucketSummary.RESEARCH_ONLY)}
+                  />
+                  <Metric label={formatListType("AVOID")} value={String(bucketSummary.AVOID)} />
+                </div>
+              </div>
               {latestBatch.batch?.warning_messages.length ? (
                 <StatusBlock
                   title="批次提示"
@@ -349,12 +418,25 @@ export function ScreenerWorkspace() {
                 setFilters={setFilters}
                 ruleVersions={ruleVersions}
               />
-              <BatchResultTable
-                results={filteredResults}
-                selectedSymbol={selectedSymbol}
-                onSelectSymbol={setSelectedSymbol}
+              <BatchPagination
+                totalResults={filteredResults.length}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                pageSize={pageSize}
+                onPageChange={setCurrentPage}
+                onPageSizeChange={(value) => {
+                  setPageSize(value);
+                  setCurrentPage(1);
+                }}
               />
-              {selectedResult ? <BatchResultDetail result={selectedResult} /> : null}
+              <BatchResultTable
+                results={pagedResults}
+                selectedSymbol={selectedSymbol}
+                onSelectSymbol={handleSelectSymbol}
+                evaluationByVersion={evaluationByVersion}
+                evaluationLoadingVersion={evaluationLoadingVersion}
+                evaluationError={evaluationError}
+              />
             </>
           ) : null}
           {!batchLoading && !batchError && latestBatch && latestBatch.total_results === 0 ? (
@@ -367,37 +449,104 @@ export function ScreenerWorkspace() {
       </SectionCard>
 
       <SectionCard
-        title="深筛工作流（保持兼容）"
-        description="深筛流程本轮不改逻辑，仍保持现有工作流入口。"
+        title="运行初筛（快速入口）"
+        description="输入本批次计算股票数量后即可启动。系统会自动按游标继续，避免重复扫描。"
       >
-        <form className="grid gap-4 md:grid-cols-4" onSubmit={handleRunDeep}>
-          <Field label="最大股票数（max_symbols）" value={deepMaxSymbols} onChange={setDeepMaxSymbols} />
-          <Field label="候选上限（top_n）" value={deepTopN} onChange={setDeepTopN} />
-          <Field label="深筛数量（deep_top_k）" value={deepTopK} onChange={setDeepTopK} />
+        <form className="grid gap-4 md:grid-cols-[1fr_auto]" onSubmit={handleRunScreener}>
+          <Field
+            label="本批次计算股票数量（batch_size）"
+            value={batchSize}
+            onChange={setBatchSize}
+            placeholder="例如 50"
+          />
           <div className="flex items-end">
             <button
               type="submit"
-              className="min-h-11 rounded-2xl bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
+              disabled={isScreenerRunning}
+              className="min-h-11 rounded-2xl bg-emerald-700 px-5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:bg-emerald-300"
             >
-              运行深筛工作流
+              {isScreenerRunning ? "已有运行中的初筛任务" : "运行初筛工作流"}
             </button>
           </div>
         </form>
         <div className="mt-5 space-y-4">
-          {deepError ? (
-            <StatusBlock title="深筛工作流启动失败" description={deepError} tone="error" />
+          {screenerError ? (
+            <StatusBlock title="初筛工作流提示" description={screenerError} tone="error" />
           ) : null}
-          {deepRun ? (
-            <WorkflowRunSummary run={deepRun} />
+          {screenerRun ? (
+            <WorkflowRunSummary run={screenerRun} />
           ) : (
             <StatusBlock
               title="等待执行"
-              description="提交深筛后会返回 run_id 和步骤摘要。"
+              description="提交后会立即返回 run_id，并持续轮询工作流运行状态。"
             />
           )}
-          {renderDeepFinalOutput(deepRun)}
         </div>
       </SectionCard>
+
+      <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-950">
+          高级操作（游标管理与深筛工作流）
+        </summary>
+        <div className="mt-4 space-y-6">
+          <SectionCard
+            title="游标管理"
+            description="当你需要从股票池起点重新分批计算时，再使用该操作。"
+          >
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleResetCursor}
+                disabled={resetLoading || isScreenerRunning}
+                className="min-h-11 rounded-2xl border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:text-slate-400"
+              >
+                {resetLoading ? "重置中..." : "重置游标"}
+              </button>
+              <p className="text-sm text-slate-600">
+                仅影响后续初筛扫描起点，不会删除历史批次记录。
+              </p>
+            </div>
+            {resetMessage ? (
+              <div className="mt-4">
+                <StatusBlock title="游标重置" description={resetMessage} />
+              </div>
+            ) : null}
+          </SectionCard>
+
+          <SectionCard
+            title="深筛工作流（保持兼容）"
+            description="深筛属于二次筛选，建议先完成初筛并确认候选后再运行。"
+          >
+            <form className="grid gap-4 md:grid-cols-4" onSubmit={handleRunDeep}>
+              <Field label="最大股票数（max_symbols）" value={deepMaxSymbols} onChange={setDeepMaxSymbols} />
+              <Field label="候选上限（top_n）" value={deepTopN} onChange={setDeepTopN} />
+              <Field label="深筛数量（deep_top_k）" value={deepTopK} onChange={setDeepTopK} />
+              <div className="flex items-end">
+                <button
+                  type="submit"
+                  className="min-h-11 rounded-2xl bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                >
+                  运行深筛工作流
+                </button>
+              </div>
+            </form>
+            <div className="mt-5 space-y-4">
+              {deepError ? (
+                <StatusBlock title="深筛工作流启动失败" description={deepError} tone="error" />
+              ) : null}
+              {deepRun ? (
+                <WorkflowRunSummary run={deepRun} />
+              ) : (
+                <StatusBlock
+                  title="等待执行"
+                  description="提交深筛后会返回 run_id 和步骤摘要。"
+                />
+              )}
+              {renderDeepFinalOutput(deepRun)}
+            </div>
+          </SectionCard>
+        </div>
+      </details>
     </div>
   );
 }
@@ -517,14 +666,84 @@ function BatchFilterPanel({
   );
 }
 
+function BatchPagination({
+  totalResults,
+  currentPage,
+  totalPages,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  totalResults: number;
+  currentPage: number;
+  totalPages: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (size: number) => void;
+}) {
+  const start = totalResults === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const end = Math.min(currentPage * pageSize, totalResults);
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-700">
+          显示第 {start}-{end} 条，共 {totalResults} 条
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            每页
+            <select
+              value={String(pageSize)}
+              onChange={(event) => onPageSizeChange(Number.parseInt(event.target.value, 10))}
+              className="min-h-9 rounded-xl border border-slate-300 bg-white px-2 text-sm text-slate-900"
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            条
+          </label>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            disabled={currentPage <= 1}
+            className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+          >
+            上一页
+          </button>
+          <span className="text-sm text-slate-700">
+            第 {currentPage}/{totalPages} 页
+          </span>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage >= totalPages}
+            className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+          >
+            下一页
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BatchResultTable({
   results,
   selectedSymbol,
   onSelectSymbol,
+  evaluationByVersion,
+  evaluationLoadingVersion,
+  evaluationError,
 }: {
   results: ScreenerSymbolResult[];
   selectedSymbol: string | null;
   onSelectSymbol: (symbol: string) => void;
+  evaluationByVersion: Record<string, ModelEvaluationResponse>;
+  evaluationLoadingVersion: string | null;
+  evaluationError: string | null;
 }) {
   if (!results.length) {
     return <StatusBlock title="没有匹配结果" description="请调整筛选条件后重试。" />;
@@ -538,45 +757,84 @@ function BatchResultTable({
             <th className="px-4 py-3">股票</th>
             <th className="px-4 py-3">分桶</th>
             <th className="px-4 py-3">评分</th>
+            <th className="px-4 py-3">预测分</th>
             <th className="px-4 py-3">简述</th>
             <th className="px-4 py-3">计算时间</th>
             <th className="px-4 py-3">规则版本</th>
           </tr>
         </thead>
         <tbody>
-          {results.map((item) => (
-            <tr
-              key={`${item.symbol}-${item.calculated_at}`}
-              className={
-                item.symbol === selectedSymbol
-                  ? "border-t border-slate-200 bg-emerald-50"
-                  : "border-t border-slate-200"
-              }
-            >
-              <td className="px-4 py-3">
-                <button
-                  type="button"
+          {results.map((item) => {
+            const isSelected = item.symbol === selectedSymbol;
+            const modelVersion = item.predictive_model_version ?? null;
+            const evaluation = modelVersion ? evaluationByVersion[modelVersion] ?? null : null;
+            const evaluationLoading =
+              modelVersion !== null && evaluationLoadingVersion === modelVersion;
+            return (
+              <Fragment key={`${item.symbol}-${item.calculated_at}`}>
+                <tr
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onSelectSymbol(item.symbol)}
-                  className="text-left font-semibold text-emerald-700 transition hover:text-emerald-800"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onSelectSymbol(item.symbol);
+                    }
+                  }}
+                  className={
+                    isSelected
+                      ? "cursor-pointer border-t border-slate-200 bg-emerald-50"
+                      : "cursor-pointer border-t border-slate-200 hover:bg-slate-50"
+                  }
                 >
-                  {item.symbol}
-                  <span className="ml-2 text-slate-900">{item.name}</span>
-                </button>
-              </td>
-              <td className="px-4 py-3">{formatListType(item.list_type)}</td>
-              <td className="px-4 py-3">{formatScore(item.screener_score)}</td>
-              <td className="px-4 py-3">{item.short_reason}</td>
-              <td className="px-4 py-3">{formatDateTime(item.calculated_at)}</td>
-              <td className="px-4 py-3">{item.rule_version}</td>
-            </tr>
-          ))}
+                  <td className="px-4 py-3 font-semibold text-emerald-700">
+                    {item.symbol}
+                    <span className="ml-2 text-slate-900">{item.name}</span>
+                  </td>
+                  <td className="px-4 py-3">{formatListType(item.list_type)}</td>
+                  <td className="px-4 py-3">{formatScore(item.screener_score)}</td>
+                  <td className="px-4 py-3">
+                    {item.predictive_score === null || item.predictive_score === undefined
+                      ? "-"
+                      : formatScore(item.predictive_score)}
+                  </td>
+                  <td className="px-4 py-3">{item.short_reason}</td>
+                  <td className="px-4 py-3">{formatDateTime(item.calculated_at)}</td>
+                  <td className="px-4 py-3">{item.rule_version}</td>
+                </tr>
+                {isSelected ? (
+                  <tr className="border-t border-slate-200 bg-white">
+                    <td className="px-4 py-4" colSpan={7}>
+                      <BatchResultDetail
+                        result={item}
+                        evaluation={evaluation}
+                        evaluationLoading={evaluationLoading}
+                        evaluationError={evaluationError}
+                      />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
 }
 
-function BatchResultDetail({ result }: { result: ScreenerSymbolResult }) {
+function BatchResultDetail({
+  result,
+  evaluation,
+  evaluationLoading,
+  evaluationError,
+}: {
+  result: ScreenerSymbolResult;
+  evaluation: ModelEvaluationResponse | null;
+  evaluationLoading: boolean;
+  evaluationError: string | null;
+}) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -615,6 +873,69 @@ function BatchResultDetail({ result }: { result: ScreenerSymbolResult }) {
           value={result.quality_penalty_applied ? "已应用" : "未应用"}
         />
       </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Metric
+          label="预测分"
+          value={
+            result.predictive_score === null || result.predictive_score === undefined
+              ? "-"
+              : formatScore(result.predictive_score)
+          }
+        />
+        <Metric
+          label="预测分解释"
+          value={formatPredictiveScoreLevel(result.predictive_score)}
+        />
+        <Metric
+          label="预测置信度"
+          value={formatRatioPercent(result.predictive_confidence)}
+        />
+        <Metric
+          label="置信度等级"
+          value={formatPredictiveConfidenceLevel(result.predictive_confidence)}
+        />
+        <Metric
+          label="预测模型版本"
+          value={result.predictive_model_version ?? "-"}
+        />
+      </div>
+      {evaluationLoading ? (
+        <StatusBlock
+          title="模型版本建议"
+          description="正在加载该模型版本的评估建议..."
+        />
+      ) : null}
+      {evaluation ? (
+        <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="text-sm font-semibold text-slate-900">模型版本建议</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Metric
+              label="建议动作"
+              value={formatModelRecommendation(evaluation.recommendation?.recommendation)}
+            />
+            <Metric
+              label="建议版本"
+              value={evaluation.recommendation?.recommended_model_version ?? "-"}
+            />
+            <Metric
+              label="评估质量分"
+              value={formatRatioPercent(evaluation.metrics.quality_score)}
+            />
+            <Metric
+              label="回测胜率"
+              value={formatRatioPercent(evaluation.metrics.screener_win_rate)}
+            />
+          </div>
+          {evaluation.recommendation ? (
+            <p className="mt-3 text-sm leading-6 text-slate-700">
+              {evaluation.recommendation.reason}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {evaluationError ? (
+        <StatusBlock title="模型评估建议加载失败" description={evaluationError} tone="error" />
+      ) : null}
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Metric label="支撑位" value={formatPrice(result.support_level)} />
         <Metric label="压力位" value={formatPrice(result.resistance_level)} />
@@ -676,6 +997,24 @@ function renderDeepFinalOutput(run: WorkflowRunDetailResponse | null) {
               <Metric label="策略类型" value={candidate.strategy_type} />
               <Metric label="理想入场区间" value={formatRange(candidate.ideal_entry_range)} />
               <Metric label="止损位" value={formatPrice(candidate.stop_loss_price)} />
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <Metric
+                label="预测分"
+                value={
+                  candidate.predictive_score === null || candidate.predictive_score === undefined
+                    ? "-"
+                    : formatScore(candidate.predictive_score)
+                }
+              />
+              <Metric
+                label="预测置信度"
+                value={formatRatioPercent(candidate.predictive_confidence)}
+              />
+              <Metric
+                label="预测模型版本"
+                value={candidate.predictive_model_version ?? "-"}
+              />
             </div>
           </article>
         ))

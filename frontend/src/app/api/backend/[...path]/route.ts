@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 const DEFAULT_BACKEND_API_BASE_URL = "http://127.0.0.1:8000";
 const STOCK_PAGE_TIMEOUT_MS = 90_000;
 const DEBATE_REVIEW_TIMEOUT_MS = 240_000;
+const MODEL_EVALUATION_TIMEOUT_MS = 300_000;
 const DATA_REFRESH_TIMEOUT_MS = 30_000;
 const MIN_SCREENER_TIMEOUT_MS = 120_000;
 const MAX_SCREENER_TIMEOUT_MS = 1_800_000;
@@ -126,6 +127,10 @@ function getProxyTimeout(
 
   if (path[0] === "stocks" && path[2] === "debate-review") {
     return DEBATE_REVIEW_TIMEOUT_MS;
+  }
+
+  if (path[0] === "evaluations" && path[1] === "models") {
+    return MODEL_EVALUATION_TIMEOUT_MS;
   }
 
   if (path[0] === "workflows" && path[1] === "deep-review" && path[2] === "run") {

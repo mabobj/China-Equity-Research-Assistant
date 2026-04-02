@@ -46,6 +46,11 @@ class TradeReviewStore:
                     confidence_reasons_json TEXT NOT NULL,
                     runtime_mode_requested TEXT,
                     runtime_mode_effective TEXT,
+                    predictive_score INTEGER,
+                    predictive_confidence REAL,
+                    predictive_model_version TEXT,
+                    predictive_feature_version TEXT,
+                    predictive_label_version TEXT,
                     source_refs_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 )
@@ -110,6 +115,36 @@ class TradeReviewStore:
             )
             self._ensure_column(
                 connection,
+                table_name="decision_snapshots",
+                column_name="predictive_score",
+                definition="INTEGER",
+            )
+            self._ensure_column(
+                connection,
+                table_name="decision_snapshots",
+                column_name="predictive_confidence",
+                definition="REAL",
+            )
+            self._ensure_column(
+                connection,
+                table_name="decision_snapshots",
+                column_name="predictive_model_version",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="decision_snapshots",
+                column_name="predictive_feature_version",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="decision_snapshots",
+                column_name="predictive_label_version",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
                 table_name="trade_records",
                 column_name="alignment_override_reason",
                 definition="TEXT",
@@ -143,9 +178,12 @@ class TradeReviewStore:
                     technical_score, fundamental_score, event_score, overall_score,
                     thesis, risks_json, triggers_json, invalidations_json,
                     data_quality_summary_json, confidence_reasons_json,
-                    runtime_mode_requested, runtime_mode_effective, source_refs_json,
+                    runtime_mode_requested, runtime_mode_effective,
+                    predictive_score, predictive_confidence, predictive_model_version,
+                    predictive_feature_version, predictive_label_version,
+                    source_refs_json,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["snapshot_id"],
@@ -165,6 +203,11 @@ class TradeReviewStore:
                     _dumps(payload["confidence_reasons"]),
                     payload.get("runtime_mode_requested"),
                     payload.get("runtime_mode_effective"),
+                    payload.get("predictive_score"),
+                    payload.get("predictive_confidence"),
+                    payload.get("predictive_model_version"),
+                    payload.get("predictive_feature_version"),
+                    payload.get("predictive_label_version"),
                     _dumps(payload["source_refs"]),
                     payload["created_at"],
                 ),
@@ -392,6 +435,11 @@ class TradeReviewStore:
             "confidence_reasons": _loads_list(row["confidence_reasons_json"]),
             "runtime_mode_requested": row["runtime_mode_requested"],
             "runtime_mode_effective": row["runtime_mode_effective"],
+            "predictive_score": row["predictive_score"],
+            "predictive_confidence": row["predictive_confidence"],
+            "predictive_model_version": row["predictive_model_version"],
+            "predictive_feature_version": row["predictive_feature_version"],
+            "predictive_label_version": row["predictive_label_version"],
             "source_refs": _loads_list(row["source_refs_json"]),
             "created_at": row["created_at"],
         }
