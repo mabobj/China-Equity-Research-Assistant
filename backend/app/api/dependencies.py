@@ -25,6 +25,9 @@ if TYPE_CHECKING:
         AnnouncementsDailyDataset,
     )
     from app.services.data_products.datasets.daily_bars_daily import DailyBarsDailyDataset
+    from app.services.data_products.datasets.benchmark_catalog_daily import (
+        BenchmarkCatalogDailyDataset,
+    )
     from app.services.data_products.datasets.debate_review_daily import (
         DebateReviewDailyDataset,
     )
@@ -36,6 +39,15 @@ if TYPE_CHECKING:
     )
     from app.services.data_products.datasets.financial_summary_daily import (
         FinancialSummaryDailyDataset,
+    )
+    from app.services.data_products.datasets.industry_classification_daily import (
+        IndustryClassificationDailyDataset,
+    )
+    from app.services.data_products.datasets.market_breadth_daily import (
+        MarketBreadthDailyDataset,
+    )
+    from app.services.data_products.datasets.risk_proxy_daily import (
+        RiskProxyDailyDataset,
     )
     from app.services.data_products.datasets.review_report_daily import (
         ReviewReportDailyDataset,
@@ -49,6 +61,7 @@ if TYPE_CHECKING:
     from app.services.data_products.repository import DataProductRepository
     from app.services.data_service.db_inspector_service import DbInspectorService
     from app.services.data_service.intraday_service import IntradayService
+    from app.services.data_service.market_context_service import MarketContextService
     from app.services.data_service.refresh_service import DataRefreshService
     from app.services.debate_service.debate_orchestrator import DebateOrchestrator
     from app.services.dataset_service.dataset_service import DatasetService
@@ -378,6 +391,15 @@ def get_daily_bars_daily_dataset() -> "DailyBarsDailyDataset":
 
 
 @lru_cache
+def get_benchmark_catalog_daily_dataset() -> "BenchmarkCatalogDailyDataset":
+    from app.services.data_products.datasets.benchmark_catalog_daily import (
+        BenchmarkCatalogDailyDataset,
+    )
+
+    return BenchmarkCatalogDailyDataset()
+
+
+@lru_cache
 def get_announcements_daily_dataset() -> "AnnouncementsDailyDataset":
     from app.services.data_products.datasets.announcements_daily import (
         AnnouncementsDailyDataset,
@@ -393,6 +415,55 @@ def get_financial_summary_daily_dataset() -> "FinancialSummaryDailyDataset":
     )
 
     return FinancialSummaryDailyDataset(market_data_service=get_market_data_service())
+
+
+@lru_cache
+def get_industry_classification_daily_dataset() -> "IndustryClassificationDailyDataset":
+    from app.services.data_products.datasets.industry_classification_daily import (
+        IndustryClassificationDailyDataset,
+    )
+
+    return IndustryClassificationDailyDataset(
+        repository=get_data_product_repository(),
+        market_data_service=get_market_data_service(),
+    )
+
+
+@lru_cache
+def get_market_breadth_daily_dataset() -> "MarketBreadthDailyDataset":
+    from app.services.data_products.datasets.market_breadth_daily import (
+        MarketBreadthDailyDataset,
+    )
+
+    return MarketBreadthDailyDataset(
+        repository=get_data_product_repository(),
+        market_data_service=get_market_data_service(),
+        local_store=get_local_market_data_store(),
+    )
+
+
+@lru_cache
+def get_risk_proxy_daily_dataset() -> "RiskProxyDailyDataset":
+    from app.services.data_products.datasets.risk_proxy_daily import (
+        RiskProxyDailyDataset,
+    )
+
+    return RiskProxyDailyDataset(
+        repository=get_data_product_repository(),
+        market_breadth_daily=get_market_breadth_daily_dataset(),
+    )
+
+
+@lru_cache
+def get_market_context_service() -> "MarketContextService":
+    from app.services.data_service.market_context_service import MarketContextService
+
+    return MarketContextService(
+        benchmark_catalog_daily=get_benchmark_catalog_daily_dataset(),
+        industry_classification_daily=get_industry_classification_daily_dataset(),
+        market_breadth_daily=get_market_breadth_daily_dataset(),
+        risk_proxy_daily=get_risk_proxy_daily_dataset(),
+    )
 
 
 @lru_cache

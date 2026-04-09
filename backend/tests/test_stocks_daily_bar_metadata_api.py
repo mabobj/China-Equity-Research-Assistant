@@ -10,7 +10,14 @@ from app.schemas.market_data import DailyBar, DailyBarResponse
 
 
 class StubDailyBarMetadataService:
-    def get_daily_bars(self, symbol: str, start_date=None, end_date=None, **kwargs) -> DailyBarResponse:
+    def get_daily_bars(
+        self,
+        symbol: str,
+        start_date=None,
+        end_date=None,
+        adjustment_mode: str = "raw",
+        **kwargs,
+    ) -> DailyBarResponse:
         return DailyBarResponse(
             symbol="600519.SH",
             start_date=date(2024, 1, 1),

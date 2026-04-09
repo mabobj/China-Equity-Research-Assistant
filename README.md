@@ -71,6 +71,13 @@
 - `POST /workflows/deep-review/run`
 - `GET /workflows/runs/{run_id}`
 
+### 关键市场数据域入口
+
+- `GET /market/benchmarks`
+- `GET /market/breadth`
+- `GET /market/risk-proxies`
+- `GET /stocks/{symbol}/classification`
+
 ### 交易与复盘主入口
 
 - `POST /decision-snapshots`
@@ -112,15 +119,16 @@
    长期因子验证要求所有特征与标签都能严格按 `as_of_date` 重建，避免未来函数与回看污染。
 
 2. 数据域还不够完整  
-   目前主链路已收口在 `bars / financial_summary / announcements`，但长期因子系统还需要指数、行业、板块、市场广度、基准与风险暴露等标准化输入。
+   当前已经完成第一阶段补齐：`基准目录 / 行业与板块分类 / 市场广度 / 基础风险代理` 已有标准 schema、日级数据产品与只读接口；但真实指数行情链路、更多风格代理变量与更丰富的风险暴露输入仍需后续继续补齐。
 
 3. 复权与公司行为口径需要继续集中化  
    长期回测和因子验证要求明确区分原始价、前复权价、后复权价，以及停牌、ST、退市、分红送转等事件处理口径。
 
-当前已经完成第一阶段收口：
+当前已经完成前两阶段收口：
 
 - 日线 schema 与响应层已显式暴露 `adjustment_mode`
-- `daily_bars` 本地存储已保留公司行为元数据承载位
+- `/stocks/{symbol}/daily-bars` 已支持显式 `adjustment_mode=raw/qfq/hfq`
+- `daily_bars` 本地存储已按 `symbol + trade_date + adjustment_mode` 区分保存
 - 日线响应已统一暴露 `corporate_action_mode / corporate_action_warnings`
 
 4. 数据血缘与重建能力仍需加强  

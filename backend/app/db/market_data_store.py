@@ -17,6 +17,7 @@ from app.schemas.research_inputs import AnnouncementItem, FinancialSummary
 DATASET_DAILY_BARS = "daily_bars"
 DATASET_ANNOUNCEMENTS = "announcements"
 DATASET_UNIVERSE = "universe"
+_DAILY_BARS_STORAGE_TABLE = "daily_bars_v2"
 
 _UNKNOWN_REPORT_PERIOD = date(1900, 1, 1)
 
@@ -100,6 +101,7 @@ class LocalMarketDataStore:
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         """读取本地日线数据。"""
         query = """
@@ -116,10 +118,11 @@ class LocalMarketDataStore:
                 trading_status,
                 corporate_action_flags_json,
                 source
-            FROM daily_bars
+            FROM daily_bars_v2
             WHERE symbol = ?
+              AND adjustment_mode = ?
         """
-        params: list[object] = [symbol]
+        params: list[object] = [symbol, adjustment_mode]
 
         if start_date is not None:
             query += " AND trade_date >= ?"
@@ -150,15 +153,20 @@ class LocalMarketDataStore:
             for row in rows
         ]
 
-    def get_latest_daily_bar_date(self, symbol: str) -> Optional[date]:
+    def get_latest_daily_bar_date(
+        self,
+        symbol: str,
+        *,
+        adjustment_mode: str = "raw",
+    ) -> Optional[date]:
         """读取本地最新一根日线日期。"""
         row = self._fetchone(
             """
             SELECT MAX(trade_date) AS latest_trade_date
-            FROM daily_bars
-            WHERE symbol = ?
+            FROM daily_bars_v2
+            WHERE symbol = ? AND adjustment_mode = ?
             """,
-            [symbol],
+            [symbol, adjustment_mode],
         )
         if row is None:
             return None
@@ -182,7 +190,7 @@ class LocalMarketDataStore:
 
         self._executemany(
             """
-            INSERT OR REPLACE INTO daily_bars (
+            INSERT OR REPLACE INTO daily_bars_v2 (
                 symbol, trade_date, open, high, low, close, volume, amount,
                 adjustment_mode, trading_status, corporate_action_flags_json, source, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -236,6 +244,69 @@ class LocalMarketDataStore:
             )
             for row in rows
         ]
+
+    def get_daily_bars_for_symbols(
+        self,
+        symbols: list[str],
+        *,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
+    ) -> dict[str, list[DailyBar]]:
+        """批量读取多只股票的日线窗口。"""
+        if not symbols:
+            return {}
+
+        placeholders = ", ".join(["?"] * len(symbols))
+        query = """
+            SELECT
+                symbol,
+                trade_date,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                amount,
+                adjustment_mode,
+                trading_status,
+                corporate_action_flags_json,
+                source
+            FROM daily_bars_v2
+            WHERE adjustment_mode = ?
+              AND symbol IN ({placeholders})
+        """.format(placeholders=placeholders)
+        params: list[object] = [adjustment_mode, *symbols]
+        if start_date is not None:
+            query += " AND trade_date >= ?"
+            params.append(start_date)
+        if end_date is not None:
+            query += " AND trade_date <= ?"
+            params.append(end_date)
+        query += " ORDER BY symbol, trade_date"
+
+        rows = self._fetchall(query, params)
+        grouped: dict[str, list[DailyBar]] = {symbol: [] for symbol in symbols}
+        for row in rows:
+            grouped.setdefault(row["symbol"], []).append(
+                DailyBar(
+                    symbol=row["symbol"],
+                    trade_date=row["trade_date"],
+                    open=row["open"],
+                    high=row["high"],
+                    low=row["low"],
+                    close=row["close"],
+                    volume=row["volume"],
+                    amount=row["amount"],
+                    adjustment_mode=row["adjustment_mode"] or "raw",
+                    trading_status=row["trading_status"],
+                    corporate_action_flags=_load_json_text_list(
+                        row["corporate_action_flags_json"],
+                    ),
+                    source=row["source"],
+                )
+            )
+        return grouped
 
     def replace_stock_universe(self, items: list[UniverseItem]) -> None:
         """整体刷新本地股票池成员关系。"""
@@ -724,6 +795,27 @@ class LocalMarketDataStore:
             self._ensure_daily_bar_columns(connection)
             connection.execute(
                 """
+                CREATE TABLE IF NOT EXISTS daily_bars_v2 (
+                    symbol TEXT NOT NULL,
+                    trade_date DATE NOT NULL,
+                    adjustment_mode TEXT NOT NULL,
+                    open DOUBLE,
+                    high DOUBLE,
+                    low DOUBLE,
+                    close DOUBLE,
+                    volume DOUBLE,
+                    amount DOUBLE,
+                    trading_status TEXT,
+                    corporate_action_flags_json TEXT,
+                    source TEXT NOT NULL,
+                    updated_at TIMESTAMP NOT NULL,
+                    PRIMARY KEY(symbol, trade_date, adjustment_mode)
+                )
+                """
+            )
+            self._migrate_daily_bars_to_v2(connection)
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS announcement_events (
                     provider TEXT NOT NULL,
                     external_id TEXT NOT NULL,
@@ -865,6 +957,49 @@ class LocalMarketDataStore:
                     column_type=column_type,
                 ),
             )
+
+    def _migrate_daily_bars_to_v2(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+    ) -> None:
+        """把旧版 daily_bars 数据迁移到支持复权口径区分的新表。"""
+        if not self._table_exists(connection, "daily_bars"):
+            return
+        if self._table_has_rows(connection, _DAILY_BARS_STORAGE_TABLE):
+            return
+
+        rows = connection.execute(
+            """
+            SELECT
+                symbol,
+                trade_date,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                amount,
+                COALESCE(adjustment_mode, 'raw') AS adjustment_mode,
+                trading_status,
+                corporate_action_flags_json,
+                source,
+                updated_at
+            FROM daily_bars
+            """
+        ).fetchall()
+        if not rows:
+            return
+
+        connection.executemany(
+            """
+            INSERT OR REPLACE INTO daily_bars_v2 (
+                symbol, trade_date, open, high, low, close, volume, amount,
+                adjustment_mode, trading_status, corporate_action_flags_json,
+                source, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
 
     def _migrate_legacy_stock_profiles(
         self,
@@ -1174,7 +1309,7 @@ class LocalMarketDataStore:
             row = connection.execute(
                 """
                 SELECT COUNT(*) AS row_count
-                FROM daily_bars
+                FROM daily_bars_v2
                 WHERE source = ? AND volume IS NOT NULL
                 """,
                 [source],
@@ -1185,7 +1320,7 @@ class LocalMarketDataStore:
 
             connection.execute(
                 """
-                UPDATE daily_bars
+                UPDATE daily_bars_v2
                 SET volume = volume * ?, updated_at = ?
                 WHERE source = ? AND volume IS NOT NULL
                 """,

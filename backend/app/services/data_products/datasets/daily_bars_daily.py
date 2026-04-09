@@ -22,6 +22,7 @@ class DailyBarsDailyDataset:
         symbol: str,
         *,
         as_of_date: date | None = None,
+        adjustment_mode: str = "raw",
         force_refresh: bool = False,
         provider_priority: tuple[str, ...] | None = None,
     ) -> DataProductResult[DailyBarResponse]:
@@ -29,6 +30,7 @@ class DailyBarsDailyDataset:
         response = self._market_data_service.get_daily_bars(
             symbol=symbol,
             end_date=resolved_as_of_date.isoformat(),
+            adjustment_mode=adjustment_mode,
             force_refresh=force_refresh,
             provider_names=provider_priority,
         )

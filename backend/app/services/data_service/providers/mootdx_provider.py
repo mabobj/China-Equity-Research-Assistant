@@ -56,7 +56,12 @@ class MootdxProvider:
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
+        if adjustment_mode != "raw":
+            raise ProviderError(
+                "mootdx currently supports only raw daily bars.",
+            )
         parts = self._parse_supported_symbol(symbol)
         self._ensure_local_file(parts, dataset="daily_bars")
         reader = self._get_reader()
@@ -89,6 +94,7 @@ class MootdxProvider:
                     close=_pick_float(row, ("close", "CLOSE")),
                     volume=_pick_float(row, ("volume", "vol", "VOLUME")),
                     amount=_pick_float(row, ("amount", "amt", "AMOUNT")),
+                    adjustment_mode="raw",
                     source=self.name,
                 ),
             )

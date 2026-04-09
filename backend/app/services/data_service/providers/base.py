@@ -63,6 +63,7 @@ class DailyBarProvider(ProviderBase, Protocol):
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         """获取单只股票日线。"""
 

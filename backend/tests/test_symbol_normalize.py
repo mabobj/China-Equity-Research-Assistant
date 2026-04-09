@@ -6,6 +6,7 @@ from app.services.data_service.exceptions import InvalidSymbolError
 from app.services.data_service.normalize import (
     canonical_symbol_from_provider_symbol,
     convert_symbol_for_provider,
+    infer_board_from_symbol,
     normalize_adjustment_mode,
     normalize_corporate_action_flags,
     normalize_amount_to_yuan,
@@ -61,8 +62,8 @@ def test_provider_date_and_unit_normalization_are_centralized() -> None:
 
 def test_adjustment_and_corporate_action_normalization_are_centralized() -> None:
     assert normalize_adjustment_mode("3", source="baostock") == "raw"
-    assert normalize_adjustment_mode("1", source="baostock") == "qfq"
-    assert normalize_adjustment_mode("2", source="baostock") == "hfq"
+    assert normalize_adjustment_mode("1", source="baostock") == "hfq"
+    assert normalize_adjustment_mode("2", source="baostock") == "qfq"
     assert normalize_adjustment_mode("", source="akshare") == "raw"
     assert normalize_trading_status("trading") == "normal"
     assert normalize_trading_status("halt") == "suspended"
@@ -70,6 +71,12 @@ def test_adjustment_and_corporate_action_normalization_are_centralized() -> None
         "dividend",
         "split",
     ]
+
+
+def test_board_inference_is_centralized() -> None:
+    assert infer_board_from_symbol("600519.SH") == "main_board"
+    assert infer_board_from_symbol("300750.SZ") == "chinext"
+    assert infer_board_from_symbol("688981.SH") == "star_market"
 
 
 @pytest.mark.parametrize("raw_symbol", ["", "abc", "600519.XY", "12345"])

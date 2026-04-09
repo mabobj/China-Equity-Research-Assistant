@@ -93,6 +93,20 @@
 
 在不无边界扩源的前提下，补齐长期因子主线最需要的基础数据域。
 
+### 当前进度
+
+- 已完成第一阶段：
+  - 新增静态且可复用的标准基准目录，当前内置 `上证指数 / 深证成指 / 沪深300 / 中证500 / 中证1000 / 创业板指 / 科创50`；
+  - 新增 `industry_classification_daily`，把单票 `行业 + 板块 + 主基准映射` 固化为可按日读取的标准快照；
+  - 新增 `market_breadth_daily`，基于现有 `universe + daily_bars(raw)` 计算 `上涨/下跌/平盘家数、MA20/MA60 之上比例、20 日新高/新低、breadth_score`；
+  - 新增 `risk_proxy_daily`，在市场广度基础上生成最小可用的基础风险代理快照；
+  - 新增只读接口：
+    - `GET /market/benchmarks`
+    - `GET /market/breadth`
+    - `GET /market/risk-proxies`
+    - `GET /stocks/{symbol}/classification`
+  - 已补 service 与 API 测试，确认上述数据域已经可读、可算、可缓存、可回归。
+
 ### 优先数据域
 
 - 指数 / 基准
@@ -126,6 +140,12 @@
   - `daily_bars` 本地存储已增量补齐 `adjustment_mode / trading_status / corporate_action_flags_json` 列，并保持旧库自动兼容；
   - `market_data_service` 已在日线响应层输出统一的 `adjustment_mode / corporate_action_mode / corporate_action_warnings`；
   - 已补 store / service / API 契约测试，确保价格口径与公司行为元数据不丢失。
+- 已完成第二阶段：
+  - `/stocks/{symbol}/daily-bars` 已支持显式 `adjustment_mode=raw/qfq/hfq` 请求参数，默认仍保持 `raw` 兼容；
+  - `market_data_service.get_daily_bars()` 已把复权口径贯通到 route / service / provider / local store，不再只停留在响应元数据层；
+  - `daily_bars` 本地存储已升级为按 `symbol + trade_date + adjustment_mode` 区分保存，不同复权模式不会互相覆盖；
+  - `tdx-api / mootdx` 当前仍只稳定支持 `raw` 日线，请求 `qfq/hfq` 时会受控降级到后续 provider；
+  - 已补 provider 透传、store 分口径回读与 API 契约测试，确保复权模式可请求、可存储、可稳定回读。
 
 ### 关键任务
 

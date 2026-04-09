@@ -108,6 +108,7 @@ class BaostockProvider:
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         """获取单只股票日线行情。"""
         self._ensure_available()
@@ -123,7 +124,7 @@ class BaostockProvider:
                     start_date=_format_baostock_date(start_date),
                     end_date=_format_baostock_date(end_date),
                     frequency="d",
-                    adjustflag="3",
+                    adjustflag=_format_baostock_adjustflag(adjustment_mode),
                 )
                 rows = _result_to_rows(result)
         except Exception as exc:  # pragma: no cover - network/runtime dependent
@@ -148,7 +149,7 @@ class BaostockProvider:
                     close=_as_optional_float(row.get("close")),
                     volume=_as_optional_float(row.get("volume")),
                     amount=_as_optional_float(row.get("amount")),
-                    adjustment_mode="raw",
+                    adjustment_mode=adjustment_mode,
                     source=self.name,
                 ),
             )
@@ -269,6 +270,22 @@ def _format_baostock_date(value: Optional[date]) -> str:
     if value is None:
         return ""
     return value.strftime("%Y-%m-%d")
+
+
+def _format_baostock_adjustflag(value: str) -> str:
+    """把内部复权口径映射为 BaoStock adjustflag。"""
+    normalized = value.strip().lower()
+    mapping = {
+        "raw": "3",
+        "qfq": "2",
+        "hfq": "1",
+    }
+    mapped = mapping.get(normalized)
+    if mapped is None:
+        raise ProviderError(
+            "Unsupported adjustment mode for BaoStock: {value}".format(value=value),
+        )
+    return mapped
 
 
 def _parse_iso_date(value: Any) -> Optional[date]:

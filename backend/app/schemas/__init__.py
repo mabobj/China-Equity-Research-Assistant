@@ -11,6 +11,13 @@ from app.schemas.market_data import (
     UniverseItem,
     UniverseResponse,
 )
+from app.schemas.market_context import (
+    BenchmarkCatalogResponse,
+    BenchmarkDefinition,
+    MarketBreadthSnapshot,
+    RiskProxySnapshot,
+    StockClassificationSnapshot,
+)
 from app.schemas.intraday import IntradaySnapshot, TriggerSnapshot
 from app.schemas.data_refresh import DataRefreshRequest, DataRefreshStatus
 from app.schemas.db_admin import (
@@ -104,6 +111,8 @@ __all__ = [
     "AnalystViewsBuild",
     "AnalystViewsBundle",
     "BollingerSnapshot",
+    "BenchmarkCatalogResponse",
+    "BenchmarkDefinition",
     "AlphaScore",
     "BearCase",
     "BullBearCase",
@@ -136,6 +145,7 @@ __all__ = [
     "IntradayBarResponse",
     "IntradaySnapshot",
     "MacdSnapshot",
+    "MarketBreadthSnapshot",
     "MovingAverageSnapshot",
     "PriceRange",
     "ProviderCapabilityReport",
@@ -143,12 +153,14 @@ __all__ = [
     "CapabilityPolicyReport",
     "ProviderHealthReport",
     "ResearchReport",
+    "RiskProxySnapshot",
     "RiskReview",
     "ScreenerCandidate",
     "ScreenerRunResponse",
     "SentimentView",
     "SingleStockResearchInputs",
     "StockProfile",
+    "StockClassificationSnapshot",
     "StockReviewReport",
     "StrategyFinalize",
     "StrategyPlan",

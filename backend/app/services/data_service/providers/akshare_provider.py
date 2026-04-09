@@ -90,6 +90,7 @@ class AkshareProvider:
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         """获取单只股票日线行情。"""
         self._ensure_available()
@@ -102,6 +103,7 @@ class AkshareProvider:
             ak_symbol=ak_symbol,
             start_date=start_date,
             end_date=end_date,
+            adjustment_mode=adjustment_mode,
         )
 
         if frame is None or frame.empty:
@@ -123,7 +125,7 @@ class AkshareProvider:
                     close=_as_optional_float(row.get("收盘")),
                     volume=_as_optional_float(row.get("成交量")),
                     amount=_as_optional_float(row.get("成交额")),
-                    adjustment_mode="raw",
+                    adjustment_mode=adjustment_mode,
                     source=self.name,
                 ),
             )
@@ -136,6 +138,7 @@ class AkshareProvider:
         ak_symbol: str,
         start_date: Optional[date],
         end_date: Optional[date],
+        adjustment_mode: str,
     ) -> Any:
         """日线查询在网络抖动时执行重试。"""
         last_error: Optional[Exception] = None
@@ -149,7 +152,7 @@ class AkshareProvider:
                     period="daily",
                     start_date=_format_akshare_date(start_date),
                     end_date=_format_akshare_date(end_date),
-                    adjust="",
+                    adjust=_format_akshare_adjustment_mode(adjustment_mode),
                 )
             except Exception as exc:  # pragma: no cover - network/runtime dependent
                 last_error = exc
@@ -436,6 +439,18 @@ def _format_akshare_date(value: Optional[date]) -> str:
     if value is None:
         return ""
     return value.strftime("%Y%m%d")
+
+
+def _format_akshare_adjustment_mode(value: str) -> str:
+    """把内部复权口径映射为 AKShare 参数。"""
+    normalized = value.strip().lower()
+    if normalized == "raw":
+        return ""
+    if normalized in {"qfq", "hfq"}:
+        return normalized
+    raise ProviderError(
+        "Unsupported adjustment mode for AKShare: {value}".format(value=value),
+    )
 
 
 def _parse_compact_date(value: Any) -> Optional[date]:

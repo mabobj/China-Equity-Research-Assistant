@@ -13,6 +13,7 @@ from app.services.data_service.exceptions import InvalidSymbolError
 
 ProviderName = Literal["akshare", "baostock", "cninfo", "mootdx", "tdx_api"]
 Exchange = Literal["SH", "SZ"]
+BoardType = Literal["main_board", "chinext", "star_market", "unknown"]
 
 _CANONICAL_PATTERN = re.compile(r"^(?P<code>\d{6})\.(?P<exchange>SH|SZ)$")
 _PREFIX_PATTERN = re.compile(r"^(?P<exchange>sh|sz)(?P<code>\d{6})$", re.IGNORECASE)
@@ -121,6 +122,18 @@ def convert_symbol_for_provider(symbol: str, provider: ProviderName) -> str:
     raise InvalidSymbolError(
         "Unsupported provider symbol conversion: {provider}".format(provider=provider),
     )
+
+
+def infer_board_from_symbol(symbol: str) -> BoardType:
+    """根据 canonical symbol 推断上市板块。"""
+    parts = parse_symbol(symbol)
+    if parts.exchange == "SH" and parts.code.startswith("688"):
+        return "star_market"
+    if parts.exchange == "SZ" and parts.code.startswith(("300", "301")):
+        return "chinext"
+    if parts.exchange in {"SH", "SZ"}:
+        return "main_board"
+    return "unknown"
 
 
 def canonical_symbol_from_provider_symbol(symbol: str) -> str:
@@ -233,9 +246,9 @@ def normalize_adjustment_mode(
     raw_value = (value or "").strip().lower()
     if raw_value in {"", "raw", "none", "3"}:
         return "raw"
-    if raw_value in {"qfq", "forward", "1"}:
+    if raw_value in {"qfq", "forward", "2"}:
         return "qfq"
-    if raw_value in {"hfq", "backward", "2"}:
+    if raw_value in {"hfq", "backward", "1"}:
         return "hfq"
     if normalized_source in {"tdx_api", "mootdx", "akshare", "baostock"}:
         return "raw"

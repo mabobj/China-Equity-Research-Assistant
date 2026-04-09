@@ -15,7 +15,13 @@ class RawDailyProvider:
     def is_available(self) -> bool:
         return True
 
-    def get_daily_bars(self, symbol: str, start_date=None, end_date=None) -> list[DailyBar]:
+    def get_daily_bars(
+        self,
+        symbol: str,
+        start_date=None,
+        end_date=None,
+        adjustment_mode: str = "raw",
+    ) -> list[DailyBar]:
         return [
             DailyBar(
                 symbol=symbol,

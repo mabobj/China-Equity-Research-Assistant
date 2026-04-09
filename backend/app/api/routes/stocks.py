@@ -12,6 +12,7 @@ from app.api.dependencies import (
     get_debate_runtime_service,
     get_decision_brief_service,
     get_factor_snapshot_service,
+    get_market_context_service,
     get_market_data_service,
     get_review_report_daily_dataset,
     get_stock_review_service,
@@ -30,6 +31,7 @@ from app.schemas.market_data import (
     TimelineResponse,
     UniverseResponse,
 )
+from app.schemas.market_context import StockClassificationSnapshot
 from app.schemas.research_inputs import AnnouncementListResponse, FinancialSummary
 from app.schemas.review import StockReviewReport
 from app.schemas.technical import TechnicalSnapshot
@@ -55,17 +57,33 @@ def get_stock_profile(
     return service.get_stock_profile(symbol)
 
 
+@router.get("/{symbol}/classification", response_model=StockClassificationSnapshot)
+def get_stock_classification(
+    symbol: str,
+    as_of_date: Optional[str] = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    service: Any = Depends(get_market_context_service),
+) -> StockClassificationSnapshot:
+    return service.get_stock_classification(
+        symbol=symbol,
+        as_of_date=as_of_date,
+        force_refresh=force_refresh,
+    )
+
+
 @router.get("/{symbol}/daily-bars", response_model=DailyBarResponse)
 def get_daily_bars(
     symbol: str,
     start_date: Optional[str] = Query(default=None),
     end_date: Optional[str] = Query(default=None),
+    adjustment_mode: str = Query(default="raw"),
     service: MarketDataService = Depends(get_market_data_service),
 ) -> DailyBarResponse:
     return service.get_daily_bars(
         symbol=symbol,
         start_date=start_date,
         end_date=end_date,
+        adjustment_mode=adjustment_mode,
     )
 
 

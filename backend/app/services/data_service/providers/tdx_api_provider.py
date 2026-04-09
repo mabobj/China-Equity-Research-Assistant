@@ -114,7 +114,12 @@ class TdxApiProvider:
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
+        if adjustment_mode != "raw":
+            raise ProviderError(
+                "tdx-api currently supports only raw daily bars.",
+            )
         canonical_symbol = normalize_symbol(symbol)
         payload = self._request_json(
             "GET",
@@ -144,6 +149,7 @@ class TdxApiProvider:
                     close=self._pick_float(row, "close", "c"),
                     volume=self._pick_float(row, "volume", "vol"),
                     amount=self._pick_float(row, "amount", "amt"),
+                    adjustment_mode="raw",
                     source=self.name,
                 )
             )

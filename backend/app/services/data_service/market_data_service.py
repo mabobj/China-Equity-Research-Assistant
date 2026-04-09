@@ -47,8 +47,8 @@ from app.services.data_service.exceptions import (
     InvalidRequestError,
     ProviderError,
 )
-from app.services.data_service.normalize import normalize_symbol
 from app.services.data_service.normalize import normalize_daily_bar_rows
+from app.services.data_service.normalize import normalize_symbol
 from app.services.data_service.provider_policy import (
     build_capability_policy_reports,
     get_capability_policy,
@@ -167,18 +167,23 @@ class MarketDataService:
         symbol: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        adjustment_mode: str = "raw",
         *,
         force_refresh: bool = False,
         allow_remote_sync: bool = True,
         provider_names: Optional[Sequence[str]] = None,
     ) -> DailyBarResponse:
         canonical_symbol = normalize_symbol(symbol)
+        normalized_adjustment_mode = _normalize_requested_adjustment_mode(
+            adjustment_mode,
+        )
         logger.debug(
-            "market_data.daily_bars.start symbol=%s canonical_symbol=%s start_date=%s end_date=%s",
+            "market_data.daily_bars.start symbol=%s canonical_symbol=%s start_date=%s end_date=%s adjustment_mode=%s",
             symbol,
             canonical_symbol,
             start_date,
             end_date,
+            normalized_adjustment_mode,
         )
         request_uses_default_range = (
             (start_date is None or start_date.strip() == "")
@@ -201,6 +206,7 @@ class MarketDataService:
                 canonical_symbol,
                 normalized_start_date,
                 normalized_end_date,
+                adjustment_mode=normalized_adjustment_mode,
                 provider_names=provider_names,
             )
             logger.debug(
@@ -213,6 +219,7 @@ class MarketDataService:
                 normalized_start_date,
                 normalized_end_date,
                 remote_result.bars,
+                requested_adjustment_mode=normalized_adjustment_mode,
                 cleaning_summary=remote_result.cleaning_summary,
             )
 
@@ -220,6 +227,7 @@ class MarketDataService:
             canonical_symbol,
             normalized_start_date,
             normalized_end_date,
+            adjustment_mode=normalized_adjustment_mode,
         )
 
         if not allow_remote_sync:
@@ -234,6 +242,7 @@ class MarketDataService:
                     normalized_start_date,
                     normalized_end_date,
                     cached_bars,
+                    requested_adjustment_mode=normalized_adjustment_mode,
                     additional_warnings=["remote_sync_skipped_use_cache"],
                 )
             logger.debug(
@@ -245,6 +254,7 @@ class MarketDataService:
                 normalized_start_date,
                 normalized_end_date,
                 [],
+                requested_adjustment_mode=normalized_adjustment_mode,
                 additional_warnings=["remote_sync_skipped_no_cache"],
             )
 
@@ -254,7 +264,7 @@ class MarketDataService:
             normalized_start_date is not None
             and normalized_end_date is not None
             and self._local_store.is_range_covered(
-                DATASET_DAILY_BARS,
+                _daily_bars_dataset_type(normalized_adjustment_mode),
                 canonical_symbol,
                 normalized_start_date,
                 normalized_end_date,
@@ -272,6 +282,7 @@ class MarketDataService:
                 normalized_start_date,
                 normalized_end_date,
                 cached_bars,
+                requested_adjustment_mode=normalized_adjustment_mode,
             )
 
         sync_start_date = normalized_start_date
@@ -291,6 +302,7 @@ class MarketDataService:
                     normalized_start_date,
                     normalized_end_date,
                     cached_bars,
+                    requested_adjustment_mode=normalized_adjustment_mode,
                 )
 
         if (
@@ -307,6 +319,7 @@ class MarketDataService:
         if force_refresh and sync_start_date is None:
             latest_local_trade_date = self._local_store.get_latest_daily_bar_date(
                 canonical_symbol,
+                adjustment_mode=normalized_adjustment_mode,
             )
             if latest_local_trade_date is not None:
                 sync_start_date = latest_local_trade_date + timedelta(days=1)
@@ -323,6 +336,7 @@ class MarketDataService:
                     normalized_start_date,
                     normalized_end_date,
                     cached_bars,
+                    requested_adjustment_mode=normalized_adjustment_mode,
                 )
 
         try:
@@ -330,6 +344,7 @@ class MarketDataService:
                 canonical_symbol,
                 sync_start_date,
                 sync_end_date,
+                adjustment_mode=normalized_adjustment_mode,
                 provider_names=provider_names,
             )
         except ProviderError:
@@ -350,6 +365,7 @@ class MarketDataService:
                     normalized_start_date,
                     normalized_end_date,
                     cached_bars,
+                    requested_adjustment_mode=normalized_adjustment_mode,
                     additional_warnings=["remote_failed_use_cache"],
                 )
             raise
@@ -357,7 +373,7 @@ class MarketDataService:
 
         if sync_start_date is not None and sync_end_date is not None:
             self._local_store.mark_range_covered(
-                DATASET_DAILY_BARS,
+                _daily_bars_dataset_type(normalized_adjustment_mode),
                 canonical_symbol,
                 sync_start_date,
                 sync_end_date,
@@ -367,6 +383,7 @@ class MarketDataService:
             canonical_symbol,
             normalized_start_date,
             normalized_end_date,
+            adjustment_mode=normalized_adjustment_mode,
         )
         if merged_bars:
             logger.debug(
@@ -379,6 +396,7 @@ class MarketDataService:
                 normalized_start_date,
                 normalized_end_date,
                 merged_bars,
+                requested_adjustment_mode=normalized_adjustment_mode,
                 cleaning_summary=remote_result.cleaning_summary,
             )
         if cached_bars:
@@ -392,6 +410,7 @@ class MarketDataService:
                 normalized_start_date,
                 normalized_end_date,
                 cached_bars,
+                requested_adjustment_mode=normalized_adjustment_mode,
                 additional_warnings=["cache_fallback_use_existing_snapshot"],
             )
 
@@ -715,12 +734,14 @@ class MarketDataService:
             raise InvalidRequestError("lookback_days must be greater than 0.")
 
         canonical_symbol = normalize_symbol(symbol)
+        adjustment_mode = "raw"
         sync_end_date = resolve_daily_analysis_as_of_date()
         sync_start_date = sync_end_date - timedelta(days=lookback_days - 1)
 
         if self._local_store is not None:
             latest_local_trade_date = self._local_store.get_latest_daily_bar_date(
                 canonical_symbol,
+                adjustment_mode=adjustment_mode,
             )
             if latest_local_trade_date is not None:
                 if latest_local_trade_date >= sync_end_date:
@@ -734,6 +755,7 @@ class MarketDataService:
             canonical_symbol,
             sync_start_date,
             sync_end_date,
+            adjustment_mode=adjustment_mode,
         )
 
         if self._local_store is not None and remote_result.bars:
@@ -741,7 +763,7 @@ class MarketDataService:
             latest_synced_trade_date = max(bar.trade_date for bar in remote_result.bars)
             if latest_synced_trade_date >= sync_start_date:
                 self._local_store.mark_range_covered(
-                    DATASET_DAILY_BARS,
+                    _daily_bars_dataset_type(adjustment_mode),
                     canonical_symbol,
                     sync_start_date,
                     latest_synced_trade_date,
@@ -977,6 +999,7 @@ class MarketDataService:
         start_date: Optional[date],
         end_date: Optional[date],
         *,
+        adjustment_mode: str = "raw",
         provider_names: Optional[Sequence[str]] = None,
     ) -> "_DailyBarsFetchResult":
         providers = self._iter_available_providers(
@@ -988,17 +1011,19 @@ class MarketDataService:
 
         for provider in providers:
             logger.debug(
-                "market_data.daily_bars.provider_try symbol=%s provider=%s start_date=%s end_date=%s",
+                "market_data.daily_bars.provider_try symbol=%s provider=%s start_date=%s end_date=%s adjustment_mode=%s",
                 symbol,
                 provider.name,
                 start_date,
                 end_date,
+                adjustment_mode,
             )
             try:
                 bars = provider.get_daily_bars(
                     symbol,
                     start_date=start_date,
                     end_date=end_date,
+                    adjustment_mode=adjustment_mode,
                 )
             except ProviderError as exc:
                 logger.debug(
@@ -1407,6 +1432,7 @@ def _build_daily_bar_response(
     end_date: Optional[date],
     bars: list[DailyBar],
     *,
+    requested_adjustment_mode: str = "raw",
     cleaning_summary: DailyBarsCleaningSummary | None = None,
     additional_warnings: Sequence[str] | None = None,
 ) -> DailyBarResponse:
@@ -1428,6 +1454,7 @@ def _build_daily_bar_response(
         quality_status = "ok"
     adjustment_mode, corporate_action_mode, corporate_action_warnings = _summarize_daily_bar_metadata(
         bars,
+        requested_adjustment_mode=requested_adjustment_mode,
     )
     return DailyBarResponse(
         symbol=symbol,
@@ -1470,9 +1497,11 @@ def _assess_daily_bar_result(
 
 def _summarize_daily_bar_metadata(
     bars: Sequence[DailyBar],
+    *,
+    requested_adjustment_mode: str,
 ) -> tuple[str, str, list[str]]:
     if not bars:
-        return "raw", "unmodeled", []
+        return requested_adjustment_mode, "unmodeled", []
 
     adjustment_modes = {
         (item.adjustment_mode or "raw")
@@ -1506,6 +1535,15 @@ def _summarize_daily_bar_metadata(
 
     warnings.append("corporate_action_flags_present_without_adjustment_engine")
     return adjustment_mode, "flags_only", warnings
+
+
+def _daily_bars_dataset_type(adjustment_mode: str) -> str:
+    if adjustment_mode == "raw":
+        return DATASET_DAILY_BARS
+    return "{dataset}:{adjustment_mode}".format(
+        dataset=DATASET_DAILY_BARS,
+        adjustment_mode=adjustment_mode,
+    )
 
 
 @dataclass(frozen=True)
@@ -1696,6 +1734,17 @@ def _parse_optional_date(value: Optional[str], field_name: str) -> Optional[date
         raise InvalidDateError(
             "{field_name} must use YYYY-MM-DD format.".format(field_name=field_name),
         ) from exc
+
+
+def _normalize_requested_adjustment_mode(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"raw", "qfq", "hfq"}:
+        return normalized
+    raise InvalidRequestError(
+        "Unsupported adjustment_mode '{value}'. Supported values: raw, qfq, hfq.".format(
+            value=value,
+        ),
+    )
 
 
 def _parse_optional_datetime(

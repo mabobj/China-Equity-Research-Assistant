@@ -10,6 +10,7 @@ from app.api.routes import (
     decision_snapshots,
     evaluations,
     health,
+    market,
     providers,
     predictions,
     research,
@@ -24,6 +25,7 @@ from app.api.routes import (
 api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(providers.router)
+api_router.include_router(market.router)
 api_router.include_router(data.router)
 api_router.include_router(admin_db.router)
 api_router.include_router(datasets.router)

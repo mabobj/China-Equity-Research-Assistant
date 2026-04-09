@@ -217,6 +217,20 @@
 
 不是立刻全做，而是要把这些列入明确的数据产品路线图。
 
+当前已经完成这一方向的第一阶段收口：
+
+- `BenchmarkCatalogResponse` 提供稳定的标准基准目录；
+- `StockClassificationSnapshot` 把单票 `行业 + 板块 + 主基准映射` 固化为按日可读快照；
+- `MarketBreadthSnapshot` 把市场广度收成统一 schema 与日级数据产品；
+- `RiskProxySnapshot` 在市场广度基础上提供最小基础风险代理；
+- 对外已提供最小只读接口：
+  - `GET /market/benchmarks`
+  - `GET /market/breadth`
+  - `GET /market/risk-proxies`
+  - `GET /stocks/{symbol}/classification`
+
+这一步仍然是“关键数据域标准层”，不是完整指数行情系统；真实指数/基准行情链路与更丰富的风格代理变量，仍属于后续包内继续补齐的范围。
+
 ### 6.3 复权、公司行为与交易状态口径仍需继续集中化
 
 长期回测与因子验证要求明确处理：
@@ -227,7 +241,13 @@
 - 分红送转
 - 缺失交易日与异常 bar
 
-当前已有部分口径，但还没有形成覆盖长期验证需求的统一标准层。
+当前已经完成两步关键收口：
+
+- `DailyBar / DailyBarResponse` 已显式暴露 `adjustment_mode`
+- `daily_bars` 本地存储已按 `symbol + trade_date + adjustment_mode` 区分保存
+- `market_data_service.get_daily_bars()` 与 `/stocks/{symbol}/daily-bars` 已支持显式 `adjustment_mode=raw/qfq/hfq`
+
+但公司行为影响仍停留在“元数据承载 + 风险提示”层，尚未形成覆盖长期验证需求的完整调整引擎。
 
 ### 6.4 数据血缘与重建能力仍偏弱
 

@@ -20,6 +20,7 @@ class FakeProvider:
         self.bar_symbol: Optional[str] = None
         self.bar_start_date: Optional[date] = None
         self.bar_end_date: Optional[date] = None
+        self.bar_adjustment_mode: Optional[str] = None
         self.intraday_symbol: Optional[str] = None
         self.intraday_frequency: Optional[str] = None
         self.intraday_start_datetime: Optional[datetime] = None
@@ -47,11 +48,13 @@ class FakeProvider:
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         self.daily_bar_call_count += 1
         self.bar_symbol = symbol
         self.bar_start_date = start_date
         self.bar_end_date = end_date
+        self.bar_adjustment_mode = adjustment_mode
         return [
             DailyBar(
                 symbol=symbol,
@@ -136,6 +139,7 @@ class BrokenDailyBarProvider(FakeProvider):
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         raise TypeError("'NoneType' object is not iterable")
 
@@ -152,6 +156,7 @@ class EmptyDailyBarProvider(FakeProvider):
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         self.daily_bar_call_count += 1
         self.bar_symbol = symbol
@@ -196,6 +201,7 @@ class DailyOnlyProvider:
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         self.called_symbol = symbol
         return [
@@ -267,6 +273,7 @@ class NamedDailyProvider:
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         self.call_count += 1
         open_price = 100.0
@@ -301,6 +308,7 @@ class BrokenNamedDailyProvider(NamedDailyProvider):
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         self.call_count += 1
         raise RuntimeError("mock provider failure")
@@ -318,6 +326,7 @@ class DirtyDailyBarProvider(FakeProvider):
         symbol: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
         self.daily_bar_call_count += 1
         return [
@@ -471,7 +480,24 @@ def test_service_parses_date_filters_for_daily_bars() -> None:
     assert provider.bar_symbol == "600519.SH"
     assert provider.bar_start_date == date(2024, 1, 1)
     assert provider.bar_end_date == date(2024, 1, 31)
+    assert provider.bar_adjustment_mode == "raw"
     assert response.count == 2
+
+
+def test_service_passes_adjustment_mode_to_provider() -> None:
+    """显式复权参数应透传到 provider 层。"""
+    provider = FakeProvider()
+    service = MarketDataService(providers=[provider])
+
+    response = service.get_daily_bars(
+        symbol="600519",
+        start_date="2024-01-01",
+        end_date="2024-01-31",
+        adjustment_mode="qfq",
+    )
+
+    assert provider.bar_adjustment_mode == "qfq"
+    assert response.adjustment_mode == "raw" or response.adjustment_mode == "qfq"
 
 
 def test_service_parses_datetime_filters_for_intraday_bars() -> None:
@@ -655,6 +681,47 @@ def test_service_merges_remote_daily_bars_into_local_store(tmp_path: Path) -> No
 
     assert provider.daily_bar_call_count == 1
     assert second_response.count == 2
+
+
+def test_local_store_keeps_daily_bars_by_adjustment_mode(tmp_path: Path) -> None:
+    """不同复权口径应分开存储和读取，不能互相覆盖。"""
+    local_store = LocalMarketDataStore(tmp_path / "market.duckdb")
+    local_store.upsert_daily_bars(
+        [
+            DailyBar(
+                symbol="600519.SH",
+                trade_date=date(2024, 1, 2),
+                close=100.0,
+                adjustment_mode="raw",
+                source="local",
+            ),
+            DailyBar(
+                symbol="600519.SH",
+                trade_date=date(2024, 1, 2),
+                close=98.5,
+                adjustment_mode="qfq",
+                source="local",
+            ),
+        ]
+    )
+
+    raw_bars = local_store.get_daily_bars(
+        "600519.SH",
+        date(2024, 1, 2),
+        date(2024, 1, 2),
+        adjustment_mode="raw",
+    )
+    qfq_bars = local_store.get_daily_bars(
+        "600519.SH",
+        date(2024, 1, 2),
+        date(2024, 1, 2),
+        adjustment_mode="qfq",
+    )
+
+    assert len(raw_bars) == 1
+    assert len(qfq_bars) == 1
+    assert raw_bars[0].close == 100.0
+    assert qfq_bars[0].close == 98.5
 
 
 def test_service_skips_remote_daily_bars_when_sync_disabled_and_cache_empty(

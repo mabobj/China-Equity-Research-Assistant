@@ -77,6 +77,9 @@ from app.services.llm_debate_service.fallback import DebateRuntimeService
 class StubMarketDataService:
     """Stub service for API route tests."""
 
+    def __init__(self) -> None:
+        self.last_adjustment_mode: Optional[str] = None
+
     def get_stock_profile(self, symbol: str) -> StockProfile:
         return StockProfile(
             symbol="600519.SH",
@@ -91,7 +94,9 @@ class StubMarketDataService:
         symbol: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        adjustment_mode: str = "raw",
     ) -> DailyBarResponse:
+        self.last_adjustment_mode = adjustment_mode
         return DailyBarResponse(
             symbol="600519.SH",
             start_date=date(2024, 1, 1),
@@ -615,6 +620,19 @@ def test_get_daily_bars_route_returns_structured_payload() -> None:
     app.dependency_overrides.clear()
 
 
+def test_get_daily_bars_route_forwards_adjustment_mode() -> None:
+    """日线接口应把复权参数透传给 service。"""
+    service = StubMarketDataService()
+    app.dependency_overrides[get_market_data_service] = lambda: service
+
+    response = client.get("/stocks/600519/daily-bars?adjustment_mode=qfq")
+
+    assert response.status_code == 200
+    assert service.last_adjustment_mode == "qfq"
+
+    app.dependency_overrides.clear()
+
+
 def test_workspace_bundle_route_returns_structured_payload() -> None:
     """Workspace bundle should expose the stock page primary payload."""
     app.dependency_overrides[get_workspace_bundle_service] = (
@@ -694,11 +712,21 @@ def test_decision_brief_route_returns_structured_payload() -> None:
 
 def test_invalid_symbol_returns_400() -> None:
     """Invalid symbols should return a clear 400 response."""
-    app.dependency_overrides.clear()
+    class SymbolValidationOnlyService:
+        def get_stock_profile(self, symbol: str):
+            from app.services.data_service.normalize import normalize_symbol
+
+            normalize_symbol(symbol)
+            raise AssertionError("invalid symbol should fail before service returns")
+
+    app.dependency_overrides[get_market_data_service] = (
+        lambda: SymbolValidationOnlyService()
+    )
     response = client.get("/stocks/not-a-symbol/profile")
 
     assert response.status_code == 400
     assert "Invalid symbol" in response.json()["detail"]
+    app.dependency_overrides.clear()
 
 
 def test_intraday_bars_route_supports_frequency_and_datetime_filters() -> None:
