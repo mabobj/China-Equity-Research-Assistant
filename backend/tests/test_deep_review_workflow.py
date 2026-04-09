@@ -164,3 +164,25 @@ def test_deep_review_workflow_can_start_from_candidate_debate(tmp_path: Path) ->
     assert result.final_output.candidate_selection is not None
     assert len(result.final_output.candidates) == 1
     assert len(result.final_output.failures) == 1
+
+
+def test_deep_review_workflow_rejects_historical_recompute_request(
+    tmp_path: Path,
+) -> None:
+    definition = _build_definition()
+    executor = WorkflowExecutor(FileWorkflowArtifactStore(tmp_path))
+
+    result = executor.execute(
+        definition,
+        DeepReviewWorkflowRunRequest(
+            max_symbols=20,
+            top_n=5,
+            deep_top_k=2,
+            as_of_date="2024-01-05",
+            use_llm=False,
+        ),
+    )
+
+    assert result.status == "failed"
+    assert result.error_message is not None
+    assert "as_of_date" in result.error_message

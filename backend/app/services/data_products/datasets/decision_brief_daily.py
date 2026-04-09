@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.schemas.decision_brief import DecisionBrief
 from app.services.data_products.base import DataProductResult
 from app.services.data_products.catalog import DECISION_BRIEF_DAILY
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.data_products.repository import DataProductRepository
 
 
@@ -48,11 +49,12 @@ class DecisionBriefDailyDataset:
         *,
         variant: str = "rule_based",
     ) -> DataProductResult[DecisionBrief]:
+        as_of_date = resolve_daily_analysis_as_of_date(payload.as_of_date)
         params_hash = self._repository.build_params_hash({"variant": variant})
         entry = self._repository.create_entry(
             dataset=DECISION_BRIEF_DAILY,
             symbol=symbol,
-            as_of_date=payload.as_of_date,
+            as_of_date=as_of_date,
             params_hash=params_hash,
             freshness_mode="computed",
             source_mode="snapshot",
@@ -62,7 +64,7 @@ class DecisionBriefDailyDataset:
         return DataProductResult(
             dataset=DECISION_BRIEF_DAILY,
             symbol=symbol,
-            as_of_date=payload.as_of_date,
+            as_of_date=as_of_date,
             payload=payload,
             freshness_mode="computed",
             source_mode="snapshot",

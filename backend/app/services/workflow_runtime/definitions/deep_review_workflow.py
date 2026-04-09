@@ -22,7 +22,7 @@ from app.services.data_products.datasets.review_report_daily import (
 from app.services.data_products.datasets.strategy_plan_daily import (
     StrategyPlanDailyDataset,
 )
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.llm_debate_service.fallback import DebateRuntimeService
 from app.services.screener_service.pipeline import ScreenerPipeline
 from app.services.workflow_runtime.base import WorkflowDefinition, WorkflowNode
@@ -109,6 +109,10 @@ class DeepReviewWorkflowDefinitionBuilder:
 
     def _run_screener(self, context: WorkflowContext) -> ScreenerRunResponse:
         request = self._get_request(context)
+        if request.as_of_date is not None:
+            raise ValueError(
+                "指定 as_of_date 时，当前 deep_review workflow 暂不支持历史 screener 重算。"
+            )
         try:
             output = self._screener_pipeline.run_screener(
                 max_symbols=request.max_symbols,
@@ -141,7 +145,8 @@ class DeepReviewWorkflowDefinitionBuilder:
         selection = self._ensure_selection(context)
         items: list[CandidateWorkflowItem] = []
         failures: list[WorkflowSymbolFailure] = []
-        as_of_date = resolve_last_closed_trading_day()
+        request = self._get_request(context)
+        as_of_date = resolve_daily_analysis_as_of_date(request.as_of_date)
 
         for candidate in selection.selected_candidates:
             try:
@@ -157,6 +162,10 @@ class DeepReviewWorkflowDefinitionBuilder:
                         }
                     )
                 else:
+                    if request.as_of_date is not None:
+                        raise ValueError(
+                            "指定 as_of_date 时未找到对应 review-report 日级快照，当前 deep_review workflow 暂不支持历史重算。"
+                        )
                     computed = self._stock_review_service.get_stock_review_report(
                         candidate.symbol
                     )
@@ -194,7 +203,8 @@ class DeepReviewWorkflowDefinitionBuilder:
         review_batch = self._ensure_review_batch(context)
         items: list[CandidateWorkflowItem] = []
         failures = list(review_batch.failures)
-        as_of_date = resolve_last_closed_trading_day()
+        request = self._get_request(context)
+        as_of_date = resolve_daily_analysis_as_of_date(request.as_of_date)
         variant = "llm" if bool(context.use_llm) else "rule_based"
 
         for item in review_batch.items:
@@ -212,6 +222,10 @@ class DeepReviewWorkflowDefinitionBuilder:
                         }
                     )
                 else:
+                    if request.as_of_date is not None:
+                        raise ValueError(
+                            "指定 as_of_date 时未找到对应 debate-review 日级快照，当前 deep_review workflow 暂不支持历史重算。"
+                        )
                     computed = self._debate_runtime_service.get_debate_review_report(
                         item.symbol,
                         use_llm=context.use_llm,
@@ -262,7 +276,8 @@ class DeepReviewWorkflowDefinitionBuilder:
         debate_batch = self._ensure_debate_batch(context)
         items: list[CandidateWorkflowItem] = []
         failures = list(debate_batch.failures)
-        as_of_date = resolve_last_closed_trading_day()
+        request = self._get_request(context)
+        as_of_date = resolve_daily_analysis_as_of_date(request.as_of_date)
 
         for item in debate_batch.items:
             try:
@@ -278,6 +293,10 @@ class DeepReviewWorkflowDefinitionBuilder:
                         }
                     )
                 else:
+                    if request.as_of_date is not None:
+                        raise ValueError(
+                            "指定 as_of_date 时未找到对应 strategy_plan 日级快照，当前 deep_review workflow 暂不支持历史重算。"
+                        )
                     computed = self._strategy_planner.get_strategy_plan(item.symbol)
                     saved = self._strategy_plan_daily.save(item.symbol, computed)
                     strategy_plan = saved.payload.model_copy(
@@ -321,6 +340,9 @@ class DeepReviewWorkflowDefinitionBuilder:
             "start_from": request.start_from,
             "stop_after": request.stop_after,
             "use_llm": request.use_llm,
+            "as_of_date": (
+                request.as_of_date.isoformat() if request.as_of_date is not None else None
+            ),
         }
 
     def _build_request_input_summary(self, context: WorkflowContext) -> dict[str, Any]:
@@ -331,6 +353,9 @@ class DeepReviewWorkflowDefinitionBuilder:
             "deep_top_k": request.deep_top_k,
             "force_refresh": request.force_refresh,
             "use_llm": context.use_llm,
+            "as_of_date": (
+                request.as_of_date.isoformat() if request.as_of_date is not None else None
+            ),
         }
 
     def _build_selection_input_summary(self, context: WorkflowContext) -> dict[str, Any]:

@@ -6,7 +6,7 @@ from datetime import date
 from typing import Any, Mapping, Optional, Sequence
 
 from app.schemas.research_inputs import FinancialSummary
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.data_service.cleaning.field_maps import map_financial_summary_row
 from app.services.data_service.cleaning.quality import (
     aggregate_financial_cleaning_summary,
@@ -47,7 +47,7 @@ def clean_financial_summary(
     freshness_mode: Optional[str] = None,
 ) -> CleanFinancialSummaryResult:
     """清洗并标准化财务摘要。"""
-    normalized_as_of_date = as_of_date or resolve_last_closed_trading_day()
+    normalized_as_of_date = resolve_daily_analysis_as_of_date(as_of_date)
     cleaned_rows: dict[tuple[str, Optional[date], str], CleanFinancialSummary] = {}
     statuses: list[str] = []
     warning_messages: list[str] = []

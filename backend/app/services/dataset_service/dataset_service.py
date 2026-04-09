@@ -15,7 +15,7 @@ from app.schemas.dataset import (
     FeatureDatasetResponse,
     FeatureDatasetSummary,
 )
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.data_service.market_data_service import MarketDataService
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ class DatasetService:
         self,
         request: FeatureDatasetBuildRequest,
     ) -> FeatureDatasetResponse:
-        as_of_date = request.as_of_date or resolve_last_closed_trading_day()
+        as_of_date = self.resolve_as_of_date(request.as_of_date)
         dataset_version = f"features-{as_of_date.isoformat()}-v1"
         feature_path = self._features_dir / f"{dataset_version}.json"
 
@@ -209,7 +209,7 @@ class DatasetService:
             json.dump(manifest, file, ensure_ascii=False, indent=2)
 
     def _build_default_manifest(self) -> dict[str, Any]:
-        today = date.today().isoformat()
+        today = resolve_daily_analysis_as_of_date().isoformat()
         return {
             "latest_version": self._default_feature_version,
             "datasets": {
@@ -224,6 +224,9 @@ class DatasetService:
                 }
             },
         }
+
+    def resolve_as_of_date(self, as_of_date: date | None) -> date:
+        return resolve_daily_analysis_as_of_date(as_of_date)
 
     def _get_daily_bars_for_dataset(self, *, symbol: str, end_date: str):
         try:

@@ -21,7 +21,7 @@ from app.services.data_products.datasets.review_report_daily import (
 from app.services.data_products.datasets.strategy_plan_daily import (
     StrategyPlanDailyDataset,
 )
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.debate_service.debate_orchestrator import DebateOrchestrator
 from app.services.factor_service.factor_snapshot_service import FactorSnapshotService
 from app.services.llm_debate_service.fallback import DebateRuntimeService
@@ -109,19 +109,27 @@ class SingleStockWorkflowDefinitionBuilder:
 
     def _build_research_inputs(self, context: WorkflowContext) -> SingleStockResearchInputs:
         request = self._get_request(context)
+        if request.as_of_date is not None:
+            raise ValueError(
+                "指定 as_of_date 时，当前 single_stock workflow 暂不支持历史 research_inputs 重算。"
+            )
         output = self._debate_orchestrator.build_inputs(request.symbol)
         context.set_output("SingleStockResearchInputs", output)
         return output
 
     def _build_factor_snapshot(self, context: WorkflowContext) -> FactorSnapshot:
         request = self._get_request(context)
+        if request.as_of_date is not None:
+            raise ValueError(
+                "指定 as_of_date 时，当前 single_stock workflow 暂不支持历史 factor_snapshot 重算。"
+            )
         output = self._factor_snapshot_service.get_factor_snapshot(request.symbol)
         context.set_output("FactorSnapshotBuild", output)
         return output
 
     def _build_review_report(self, context: WorkflowContext) -> StockReviewReport:
         request = self._get_request(context)
-        as_of_date = resolve_last_closed_trading_day()
+        as_of_date = resolve_daily_analysis_as_of_date(request.as_of_date)
         cached = self._review_report_daily.load(request.symbol, as_of_date=as_of_date)
         if cached is not None:
             output = cached.payload.model_copy(
@@ -132,6 +140,10 @@ class SingleStockWorkflowDefinitionBuilder:
             )
             context.set_output("ReviewReportBuild", output)
             return output
+        if request.as_of_date is not None:
+            raise ValueError(
+                "指定 as_of_date 时未找到对应 review-report 日级快照，当前 single_stock workflow 暂不支持历史重算。"
+            )
 
         computed = self._stock_review_service.get_stock_review_report(request.symbol)
         saved = self._review_report_daily.save(request.symbol, computed)
@@ -146,7 +158,7 @@ class SingleStockWorkflowDefinitionBuilder:
 
     def _build_debate_review(self, context: WorkflowContext) -> DebateReviewReport:
         request = self._get_request(context)
-        as_of_date = resolve_last_closed_trading_day()
+        as_of_date = resolve_daily_analysis_as_of_date(request.as_of_date)
         variant = "llm" if bool(context.use_llm) else "rule_based"
         cached = self._debate_review_daily.load(
             request.symbol,
@@ -162,6 +174,10 @@ class SingleStockWorkflowDefinitionBuilder:
             )
             context.set_output("DebateReviewBuild", output)
             return output
+        if request.as_of_date is not None:
+            raise ValueError(
+                "指定 as_of_date 时未找到对应 debate-review 日级快照，当前 single_stock workflow 暂不支持历史重算。"
+            )
 
         computed = self._debate_runtime_service.get_debate_review_report(
             request.symbol,
@@ -191,7 +207,7 @@ class SingleStockWorkflowDefinitionBuilder:
 
     def _build_strategy_plan(self, context: WorkflowContext) -> StrategyPlan:
         request = self._get_request(context)
-        as_of_date = resolve_last_closed_trading_day()
+        as_of_date = resolve_daily_analysis_as_of_date(request.as_of_date)
         cached = self._strategy_plan_daily.load(request.symbol, as_of_date=as_of_date)
         if cached is not None:
             output = cached.payload.model_copy(
@@ -202,6 +218,10 @@ class SingleStockWorkflowDefinitionBuilder:
             )
             context.set_output("StrategyPlanBuild", output)
             return output
+        if request.as_of_date is not None:
+            raise ValueError(
+                "指定 as_of_date 时未找到对应 strategy_plan 日级快照，当前 single_stock workflow 暂不支持历史重算。"
+            )
 
         computed = self._strategy_planner.get_strategy_plan(request.symbol)
         saved = self._strategy_plan_daily.save(request.symbol, computed)
@@ -223,11 +243,20 @@ class SingleStockWorkflowDefinitionBuilder:
             "start_from": request.start_from,
             "stop_after": request.stop_after,
             "use_llm": request.use_llm,
+            "as_of_date": (
+                request.as_of_date.isoformat() if request.as_of_date is not None else None
+            ),
         }
 
     def _build_symbol_only_summary(self, context: WorkflowContext) -> dict[str, Any]:
         request = self._get_request(context)
-        return {"symbol": request.symbol, "use_llm": context.use_llm}
+        return {
+            "symbol": request.symbol,
+            "use_llm": context.use_llm,
+            "as_of_date": (
+                request.as_of_date.isoformat() if request.as_of_date is not None else None
+            ),
+        }
 
     def _build_research_inputs_summary(
         self,

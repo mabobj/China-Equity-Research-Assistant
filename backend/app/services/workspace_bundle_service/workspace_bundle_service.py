@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -24,7 +25,7 @@ from app.services.data_products.datasets.factor_snapshot_daily import FactorSnap
 from app.services.data_products.datasets.financial_summary_daily import FinancialSummaryDailyDataset
 from app.services.data_products.datasets.review_report_daily import ReviewReportDailyDataset
 from app.services.data_products.datasets.strategy_plan_daily import StrategyPlanDailyDataset
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.decision_brief_service.brief_builder import build_decision_brief
 from app.services.decision_brief_service.evidence_builder import build_evidence_manifest
 from app.services.factor_service.base import FactorBuildInputs
@@ -109,12 +110,13 @@ class WorkspaceBundleService:
         use_llm: bool | None = None,
         force_refresh: bool = False,
         request_id: str | None = None,
+        as_of_date: date | None = None,
     ) -> WorkspaceBundleResponse:
         statuses: list[WorkspaceModuleStatus] = []
         freshness_items: list[WorkspaceFreshnessItem] = []
         warning_messages: list[str] = []
         state = _WorkspaceState()
-        as_of_date = resolve_last_closed_trading_day()
+        resolved_as_of_date = resolve_daily_analysis_as_of_date(as_of_date)
         brief_variant = "llm" if bool(use_llm) else "rule_based"
         runtime_mode_requested = "llm" if bool(use_llm) else "rule_based"
 
@@ -129,6 +131,7 @@ class WorkspaceBundleService:
             statuses=statuses,
             fn=lambda: self._daily_bars_daily.get(
                 symbol,
+                as_of_date=resolved_as_of_date,
                 force_refresh=force_refresh,
             ),
         )
@@ -151,6 +154,7 @@ class WorkspaceBundleService:
             statuses=statuses,
             fn=lambda: self._announcements_daily.get(
                 symbol,
+                as_of_date=resolved_as_of_date,
                 force_refresh=force_refresh,
             ),
         )
@@ -169,6 +173,7 @@ class WorkspaceBundleService:
             statuses=statuses,
             fn=lambda: self._financial_summary_daily.get(
                 symbol,
+                as_of_date=resolved_as_of_date,
                 force_refresh=force_refresh,
             ),
         )
@@ -205,7 +210,7 @@ class WorkspaceBundleService:
 
         factor_cached = None if force_refresh else self._factor_snapshot_daily.load(
             symbol,
-            as_of_date=as_of_date,
+            as_of_date=resolved_as_of_date,
         )
         if factor_cached is not None:
             state.factor_snapshot = factor_cached.payload.model_copy(
@@ -270,7 +275,7 @@ class WorkspaceBundleService:
 
         strategy_cached = None if force_refresh else self._strategy_plan_daily.load(
             symbol,
-            as_of_date=as_of_date,
+            as_of_date=resolved_as_of_date,
         )
         if strategy_cached is not None:
             state.strategy_plan = strategy_cached.payload.model_copy(
@@ -358,7 +363,7 @@ class WorkspaceBundleService:
 
         review_cached = None if force_refresh else self._review_report_daily.load(
             symbol,
-            as_of_date=as_of_date,
+            as_of_date=resolved_as_of_date,
         )
         if review_cached is not None:
             state.review_report = review_cached.payload.model_copy(
@@ -432,7 +437,7 @@ class WorkspaceBundleService:
         debate_variant = "llm" if bool(use_llm) else "rule_based"
         debate_cached = None if force_refresh else self._debate_review_daily.load(
             symbol,
-            as_of_date=as_of_date,
+            as_of_date=resolved_as_of_date,
             variant=debate_variant,
         )
         if debate_cached is not None and bool(use_llm):
@@ -515,7 +520,7 @@ class WorkspaceBundleService:
 
         brief_cached = None if force_refresh else self._decision_brief_daily.load(
             symbol,
-            as_of_date=as_of_date,
+            as_of_date=resolved_as_of_date,
             variant=brief_variant,
         )
         if brief_cached is not None:
@@ -592,7 +597,7 @@ class WorkspaceBundleService:
                 statuses=statuses,
                 fn=lambda: self._get_prediction_snapshot(
                     symbol=symbol,
-                    as_of_date=as_of_date,
+                    as_of_date=resolved_as_of_date,
                 ),
                 skip_message="Predictive snapshot is not ready yet. Continue with research modules.",
                 fallback_reason="Predictive assets are not ready; module was skipped.",
@@ -652,7 +657,7 @@ class WorkspaceBundleService:
             module_status_summary=statuses,
             evidence_manifest=state.evidence_manifest,
             freshness_summary=FreshnessSummary(
-                default_as_of_date=as_of_date,
+                default_as_of_date=resolved_as_of_date,
                 items=freshness_items,
             ),
             debate_progress=debate_progress,

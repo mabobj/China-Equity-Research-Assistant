@@ -131,17 +131,18 @@ class _StubTriggerSnapshotService:
 
 
 class _StubDailyBarsDaily:
-    def get(self, symbol: str, force_refresh: bool = False):
+    def get(self, symbol: str, *, as_of_date=None, force_refresh: bool = False):
+        resolved_as_of_date = as_of_date or date(2024, 1, 2)
         return DataProductResult(
             dataset="daily_bars_daily",
             symbol=symbol,
-            as_of_date=date(2024, 1, 2),
+            as_of_date=resolved_as_of_date,
             payload=DailyBarResponse(
                 symbol=symbol,
                 start_date=date(2024, 1, 1),
-                end_date=date(2024, 1, 2),
+                end_date=resolved_as_of_date,
                 count=1,
-                bars=[DailyBar(symbol=symbol, trade_date=date(2024, 1, 2), close=101.2, source="stub")],
+                bars=[DailyBar(symbol=symbol, trade_date=resolved_as_of_date, close=101.2, source="stub")],
             ),
             freshness_mode="cache_hit",
             source_mode="snapshot",
@@ -150,11 +151,12 @@ class _StubDailyBarsDaily:
 
 
 class _StubAnnouncementsDaily:
-    def get(self, symbol: str, force_refresh: bool = False):
+    def get(self, symbol: str, *, as_of_date=None, force_refresh: bool = False):
+        resolved_as_of_date = as_of_date or date(2024, 1, 2)
         return DataProductResult(
             dataset="announcements_daily",
             symbol=symbol,
-            as_of_date=date(2024, 1, 2),
+            as_of_date=resolved_as_of_date,
             payload=AnnouncementListResponse(symbol=symbol, count=0, items=[]),
             freshness_mode="cache_hit",
             source_mode="snapshot",
@@ -163,11 +165,12 @@ class _StubAnnouncementsDaily:
 
 
 class _StubFinancialSummaryDaily:
-    def get(self, symbol: str, force_refresh: bool = False):
+    def get(self, symbol: str, *, as_of_date=None, force_refresh: bool = False):
+        resolved_as_of_date = as_of_date or date(2024, 1, 2)
         return DataProductResult(
             dataset="financial_summary_daily",
             symbol=symbol,
-            as_of_date=date(2024, 1, 2),
+            as_of_date=resolved_as_of_date,
             payload=FinancialSummary(
                 symbol=symbol,
                 name="Kweichow Moutai",
@@ -282,6 +285,24 @@ class _StubPredictionService:
             warning_messages=[],
             generated_at=datetime.now(),
         )
+
+
+class _TrackingDailyBarsDaily(_StubDailyBarsDaily):
+    def __init__(self) -> None:
+        self.as_of_dates: list[date | None] = []
+
+    def get(self, symbol: str, *, as_of_date=None, force_refresh: bool = False):
+        self.as_of_dates.append(as_of_date)
+        return super().get(symbol, as_of_date=as_of_date, force_refresh=force_refresh)
+
+
+class _TrackingPredictionService(_StubPredictionService):
+    def __init__(self) -> None:
+        self.as_of_dates: list[date] = []
+
+    def get_symbol_prediction(self, symbol: str, as_of_date):
+        self.as_of_dates.append(as_of_date)
+        return super().get_symbol_prediction(symbol, as_of_date)
 
 
 class _FailingPredictionService:
@@ -564,3 +585,38 @@ def test_workspace_bundle_service_skips_predictive_snapshot_when_assets_missing(
     )
     assert predictive_status.status == "skipped"
     assert bundle.fallback_applied is False
+
+
+def test_workspace_bundle_service_uses_explicit_as_of_date() -> None:
+    tracking_daily_bars = _TrackingDailyBarsDaily()
+    tracking_prediction_service = _TrackingPredictionService()
+    service = WorkspaceBundleService(
+        market_data_service=_StubMarketDataService(),
+        technical_analysis_service=_StubTechnicalAnalysisService(),
+        research_manager=_StubResearchManager(),
+        factor_snapshot_service=_StubFactorSnapshotService(),
+        stock_review_service=_StubStockReviewService(),
+        debate_orchestrator=_StubDebateOrchestrator(),
+        debate_runtime_service=_StubDebateRuntimeService(),
+        strategy_planner=_StubStrategyPlanner(),
+        trigger_snapshot_service=_StubTriggerSnapshotService(),
+        daily_bars_daily=tracking_daily_bars,
+        announcements_daily=_StubAnnouncementsDaily(),
+        financial_summary_daily=_StubFinancialSummaryDaily(),
+        factor_snapshot_daily=_StubFactorSnapshotDaily(),
+        review_report_daily=_StubReviewReportDaily(),
+        strategy_plan_daily=_StubStrategyPlanDaily(),
+        debate_review_daily=_StubDebateReviewDaily(),
+        decision_brief_daily=_StubDecisionBriefDaily(),
+        prediction_service=tracking_prediction_service,
+    )
+
+    bundle = service.get_workspace_bundle(
+        "600519.SH",
+        use_llm=False,
+        as_of_date=date(2024, 1, 5),
+    )
+
+    assert tracking_daily_bars.as_of_dates == [date(2024, 1, 5)]
+    assert tracking_prediction_service.as_of_dates == [date(2024, 1, 5)]
+    assert bundle.freshness_summary.default_as_of_date == date(2024, 1, 5)

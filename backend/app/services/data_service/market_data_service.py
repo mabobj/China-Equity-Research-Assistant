@@ -54,7 +54,7 @@ from app.services.data_service.providers.base import (
     TIMELINE_CAPABILITY,
     UNIVERSE_CAPABILITY,
 )
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 
 logger = logging.getLogger(__name__)
 _CAPABILITY_PROVIDER_PRIORITY: dict[str, tuple[str, ...]] = {
@@ -184,7 +184,7 @@ class MarketDataService:
         normalized_start_date = _parse_optional_date(start_date, "start_date")
         normalized_end_date = _parse_optional_date(end_date, "end_date")
         if normalized_end_date is None:
-            normalized_end_date = resolve_last_closed_trading_day()
+            normalized_end_date = resolve_daily_analysis_as_of_date()
 
         if (
             normalized_start_date is not None
@@ -519,7 +519,7 @@ class MarketDataService:
             start_date=start_date,
             end_date=end_date,
         )
-        as_of_date = resolve_last_closed_trading_day()
+        as_of_date = resolve_daily_analysis_as_of_date()
 
         if (
             not force_refresh
@@ -642,7 +642,7 @@ class MarketDataService:
                     source_mode=cached_summary.source_mode or "local",
                     freshness_mode=cached_summary.freshness_mode or "cache_preferred",
                     provider_used=cached_summary.provider_used or cached_summary.source,
-                    as_of_date=cached_summary.as_of_date or resolve_last_closed_trading_day(),
+                as_of_date=cached_summary.as_of_date or resolve_daily_analysis_as_of_date(),
                 )
                 logger.debug(
                     "market_data.financial_summary.cache_hit symbol=%s source=%s",
@@ -655,7 +655,7 @@ class MarketDataService:
         cleaned = clean_financial_summary(
             symbol=canonical_symbol,
             rows=[fetched.summary],
-            as_of_date=resolve_last_closed_trading_day(),
+                as_of_date=resolve_daily_analysis_as_of_date(),
             default_source=fetched.provider_name,
             provider_used=fetched.provider_name,
             fallback_applied=False,
@@ -706,7 +706,7 @@ class MarketDataService:
             raise InvalidRequestError("lookback_days must be greater than 0.")
 
         canonical_symbol = normalize_symbol(symbol)
-        sync_end_date = resolve_last_closed_trading_day()
+        sync_end_date = resolve_daily_analysis_as_of_date()
         sync_start_date = sync_end_date - timedelta(days=lookback_days - 1)
 
         if self._local_store is not None:
@@ -1415,7 +1415,7 @@ def _normalize_financial_summary_response(
             "provider_used": provider_used or summary.provider_used or summary.source,
             "source_mode": source_mode or summary.source_mode,
             "freshness_mode": freshness_mode or summary.freshness_mode,
-            "as_of_date": as_of_date or summary.as_of_date or resolve_last_closed_trading_day(),
+            "as_of_date": as_of_date or summary.as_of_date or resolve_daily_analysis_as_of_date(),
         }
     )
 

@@ -7,7 +7,7 @@ from datetime import date
 from app.schemas.market_data import DailyBarResponse
 from app.services.data_products.base import DataProductResult
 from app.services.data_products.catalog import DAILY_BARS_DAILY
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.data_service.market_data_service import MarketDataService
 
 
@@ -21,13 +21,14 @@ class DailyBarsDailyDataset:
         self,
         symbol: str,
         *,
+        as_of_date: date | None = None,
         force_refresh: bool = False,
         provider_priority: tuple[str, ...] | None = None,
     ) -> DataProductResult[DailyBarResponse]:
-        as_of_date = resolve_last_closed_trading_day()
+        resolved_as_of_date = resolve_daily_analysis_as_of_date(as_of_date)
         response = self._market_data_service.get_daily_bars(
             symbol=symbol,
-            end_date=as_of_date.isoformat(),
+            end_date=resolved_as_of_date.isoformat(),
             force_refresh=force_refresh,
             provider_names=provider_priority,
         )
@@ -36,7 +37,7 @@ class DailyBarsDailyDataset:
         return DataProductResult(
             dataset=DAILY_BARS_DAILY,
             symbol=response.symbol,
-            as_of_date=as_of_date,
+            as_of_date=resolved_as_of_date,
             payload=response,
             freshness_mode=freshness_mode,
             source_mode=source_mode,

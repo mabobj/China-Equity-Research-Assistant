@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -69,6 +69,7 @@ class WorkflowRunRequest(BaseModel):
     start_from: Optional[str] = None
     stop_after: Optional[str] = None
     use_llm: Optional[bool] = None
+    as_of_date: Optional[date] = None
 
 
 class SingleStockWorkflowRunRequest(WorkflowRunRequest):

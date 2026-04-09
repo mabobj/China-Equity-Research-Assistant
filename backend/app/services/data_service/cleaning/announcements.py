@@ -6,7 +6,7 @@ from datetime import date
 from typing import Any, Mapping, Optional, Sequence
 
 from app.schemas.research_inputs import AnnouncementItem
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.data_service.cleaning.field_maps import map_announcement_row
 from app.services.data_service.cleaning.quality import (
     aggregate_announcement_cleaning_summary,
@@ -51,7 +51,7 @@ def clean_announcements(
 ) -> CleanAnnouncementListResult:
     """清洗公告索引列表并输出结构化结果。"""
     canonical_symbol = normalize_symbol(symbol)
-    normalized_as_of_date = as_of_date or resolve_last_closed_trading_day()
+    normalized_as_of_date = resolve_daily_analysis_as_of_date(as_of_date)
     deduped: dict[str, CleanAnnouncementItem] = {}
     statuses: list[str] = []
     warning_messages: list[str] = []

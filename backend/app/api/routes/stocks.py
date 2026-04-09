@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -33,7 +34,7 @@ from app.schemas.research_inputs import AnnouncementListResponse, FinancialSumma
 from app.schemas.review import StockReviewReport
 from app.schemas.technical import TechnicalSnapshot
 from app.schemas.workspace import WorkspaceBundleResponse
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.data_service.market_data_service import MarketDataService
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -161,12 +162,13 @@ def get_technical_snapshot(
 def get_stock_review_report(
     symbol: str,
     force_refresh: bool = Query(default=False),
+    as_of_date: Optional[date] = Query(default=None),
     service: Any = Depends(get_stock_review_service),
     review_report_daily: Any = Depends(get_review_report_daily_dataset),
 ) -> StockReviewReport:
-    as_of_date = resolve_last_closed_trading_day()
+    resolved_as_of_date = resolve_daily_analysis_as_of_date(as_of_date)
     if not force_refresh:
-        cached = review_report_daily.load(symbol, as_of_date=as_of_date)
+        cached = review_report_daily.load(symbol, as_of_date=resolved_as_of_date)
         if cached is not None:
             return cached.payload.model_copy(
                 update={
@@ -174,6 +176,11 @@ def get_stock_review_report(
                     "source_mode": cached.source_mode,
                 }
             )
+    if as_of_date is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="指定 as_of_date 时，当前 review-report 仅支持读取已有日级快照，暂不支持历史重算。",
+        )
     computed = service.get_stock_review_report(symbol)
     saved = review_report_daily.save(symbol, computed)
     return saved.payload.model_copy(
@@ -199,15 +206,16 @@ def get_debate_review_report(
     use_llm: Optional[bool] = Query(default=None),
     force_refresh: bool = Query(default=False),
     request_id: Optional[str] = Query(default=None),
+    as_of_date: Optional[date] = Query(default=None),
     service: Any = Depends(get_debate_runtime_service),
     debate_review_daily: Any = Depends(get_debate_review_daily_dataset),
 ) -> DebateReviewReport:
-    as_of_date = resolve_last_closed_trading_day()
+    resolved_as_of_date = resolve_daily_analysis_as_of_date(as_of_date)
     requested_variant = "llm" if bool(use_llm) else "rule_based"
     if not force_refresh:
         cached = debate_review_daily.load(
             symbol,
-            as_of_date=as_of_date,
+            as_of_date=resolved_as_of_date,
             variant=requested_variant,
         )
         if cached is not None:
@@ -217,6 +225,11 @@ def get_debate_review_report(
                     "source_mode": cached.source_mode,
                 }
             )
+    if as_of_date is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="指定 as_of_date 时，当前 debate-review 仅支持读取已有日级快照，暂不支持历史重算。",
+        )
     try:
         report = service.get_debate_review_report(
             symbol,
@@ -271,6 +284,7 @@ def get_workspace_bundle(
     use_llm: Optional[bool] = Query(default=None),
     force_refresh: bool = Query(default=False),
     request_id: Optional[str] = Query(default=None),
+    as_of_date: Optional[date] = Query(default=None),
     service: Any = Depends(get_workspace_bundle_service),
 ) -> WorkspaceBundleResponse:
     try:
@@ -279,6 +293,7 @@ def get_workspace_bundle(
             use_llm=use_llm,
             force_refresh=force_refresh,
             request_id=request_id,
+            as_of_date=as_of_date,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

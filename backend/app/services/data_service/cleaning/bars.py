@@ -6,7 +6,7 @@ from datetime import date
 from typing import Any, Mapping, Sequence
 
 from app.schemas.market_data import DailyBar
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.data_service.cleaning.field_maps import map_daily_bar_row
 from app.services.data_service.cleaning.quality import aggregate_cleaning_summary
 from app.services.data_service.cleaning.rules import validate_bar_row
@@ -34,7 +34,7 @@ def clean_daily_bars(
     default_source: str | None = None,
 ) -> CleanDailyBarsResult:
     """清洗并标准化日线数据。"""
-    normalized_as_of_date = as_of_date or resolve_last_closed_trading_day()
+    normalized_as_of_date = resolve_daily_analysis_as_of_date(as_of_date)
     normalized_items: dict[tuple[str, date], CleanDailyBar] = {}
     status_bucket: list[str] = []
     warnings: list[str] = []

@@ -14,7 +14,7 @@ from app.schemas.prediction import (
     CrossSectionPredictionRunResponse,
     PredictionSnapshotResponse,
 )
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.data_service.normalize import normalize_symbol
 from app.services.dataset_service.dataset_service import DatasetService
 from app.services.experiment_service.experiment_service import ExperimentService
@@ -46,7 +46,7 @@ class PredictionService:
         build_feature_dataset: bool = True,
     ) -> PredictionSnapshotResponse:
         normalized_symbol = normalize_symbol(symbol)
-        resolved_as_of_date = as_of_date or resolve_last_closed_trading_day()
+        resolved_as_of_date = resolve_daily_analysis_as_of_date(as_of_date)
         resolved_model_version = (
             model_version or self._experiment_service.get_default_model_version()
         )
@@ -136,7 +136,7 @@ class PredictionService:
         model_version = (
             request.model_version or self._experiment_service.get_default_model_version()
         )
-        as_of_date = request.as_of_date or resolve_last_closed_trading_day()
+        as_of_date = resolve_daily_analysis_as_of_date(request.as_of_date)
         feature_version = self._ensure_feature_dataset(
             as_of_date=as_of_date,
             max_symbols=request.max_symbols,
@@ -293,4 +293,3 @@ def _build_fallback_snapshot(
 def _build_run_id(*, prefix: str) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     return f"{prefix}-{timestamp}"
-

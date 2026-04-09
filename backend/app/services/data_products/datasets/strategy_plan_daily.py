@@ -7,7 +7,7 @@ from datetime import date
 from app.schemas.strategy import StrategyPlan
 from app.services.data_products.base import DataProductResult
 from app.services.data_products.catalog import STRATEGY_PLAN_DAILY
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.data_products.repository import DataProductRepository
 
 
@@ -48,7 +48,7 @@ class StrategyPlanDailyDataset:
         symbol: str,
         payload: StrategyPlan,
     ) -> DataProductResult[StrategyPlan]:
-        as_of_date = payload.as_of_date or resolve_last_closed_trading_day()
+        as_of_date = resolve_daily_analysis_as_of_date(payload.as_of_date)
         params_hash = self._repository.build_params_hash({})
         entry = self._repository.create_entry(
             dataset=STRATEGY_PLAN_DAILY,

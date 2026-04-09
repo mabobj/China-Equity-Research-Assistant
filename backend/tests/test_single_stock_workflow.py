@@ -304,3 +304,52 @@ def test_single_stock_workflow_prefers_review_debate_strategy_snapshots(
     assert result.final_output.strategy_plan.freshness_mode == "cache_hit"
     assert result.final_output.debate_review.freshness_mode == "cache_hit"
     assert result.final_output.review_report.as_of_date == resolve_last_closed_trading_day()
+
+
+def test_single_stock_workflow_uses_explicit_as_of_date_with_cached_snapshots(
+    tmp_path: Path,
+) -> None:
+    definition = _build_definition(
+        stock_review_service=FailingStockReviewService(),
+        debate_runtime_service=FailingDebateRuntimeService(),
+        strategy_planner=FailingStrategyPlanner(),
+        review_report_daily=CachedReviewReportDaily(),
+        strategy_plan_daily=CachedStrategyPlanDaily(),
+        debate_review_daily=CachedDebateReviewDaily(),
+    )
+    executor = WorkflowExecutor(FileWorkflowArtifactStore(tmp_path))
+
+    result = executor.execute(
+        definition,
+        SingleStockWorkflowRunRequest(
+            symbol="600519.SH",
+            as_of_date="2024-01-05",
+            start_from="ReviewReportBuild",
+            use_llm=False,
+        ),
+    )
+
+    assert result.status == "completed"
+    assert result.final_output is not None
+    assert result.final_output.review_report is not None
+    assert result.final_output.review_report.as_of_date.isoformat() == "2024-01-05"
+    assert result.final_output.debate_review is not None
+    assert result.final_output.debate_review.as_of_date.isoformat() == "2024-01-05"
+    assert result.final_output.strategy_plan is not None
+    assert result.final_output.strategy_plan.as_of_date.isoformat() == "2024-01-05"
+
+
+def test_single_stock_workflow_rejects_historical_recompute_without_snapshot(
+    tmp_path: Path,
+) -> None:
+    definition = _build_definition()
+    executor = WorkflowExecutor(FileWorkflowArtifactStore(tmp_path))
+
+    result = executor.execute(
+        definition,
+        SingleStockWorkflowRunRequest(symbol="600519.SH", as_of_date="2024-01-05"),
+    )
+
+    assert result.status == "failed"
+    assert result.error_message is not None
+    assert "as_of_date" in result.error_message

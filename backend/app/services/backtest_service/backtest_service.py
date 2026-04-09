@@ -13,7 +13,7 @@ from app.schemas.backtest import (
 )
 from app.schemas.dataset import LabelDatasetBuildRequest
 from app.schemas.prediction import CrossSectionPredictionRunRequest
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_label_analysis_as_of_date
 from app.services.experiment_service.experiment_service import ExperimentService
 from app.services.label_service.label_service import LabelService
 from app.services.prediction_service.prediction_service import PredictionService
@@ -225,7 +225,4 @@ def _build_run_id(*, prefix: str) -> str:
 
 
 def _default_backtest_as_of_date() -> date:
-    candidate = resolve_last_closed_trading_day() - timedelta(days=14)
-    while candidate.weekday() >= 5:
-        candidate -= timedelta(days=1)
-    return candidate
+    return resolve_label_analysis_as_of_date()

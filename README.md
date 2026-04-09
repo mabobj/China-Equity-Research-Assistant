@@ -188,6 +188,7 @@ npm.cmd run test:smoke
 - [路线图](docs/roadmap.md)
 - [当前阶段](docs/current_phase.md)
 - [项目任务书（v2.1，产品化增强版）](docs/taskbook-v2.1.md)
+- [项目任务书（v2.2，数据底座与点时特征版）](docs/taskbook-v2.2.md)
 
 ### 数据底座
 

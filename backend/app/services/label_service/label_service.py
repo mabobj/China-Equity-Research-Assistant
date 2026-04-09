@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from datetime import date, timedelta
+from datetime import date
 import json
 import logging
 from pathlib import Path
@@ -15,7 +15,7 @@ from app.schemas.dataset import (
     LabelDatasetResponse,
     LabelDatasetSummary,
 )
-from app.services.data_products.freshness import resolve_last_closed_trading_day
+from app.services.data_products.freshness import resolve_label_analysis_as_of_date
 from app.services.data_service.market_data_service import MarketDataService
 from app.services.dataset_service.dataset_service import DatasetService
 
@@ -50,13 +50,13 @@ class LabelService:
         return (5, 10)
 
     def resolve_as_of_date(self, as_of_date: date | None) -> date:
-        return as_of_date or resolve_last_closed_trading_day()
+        return resolve_label_analysis_as_of_date(as_of_date)
 
     def build_label_dataset(
         self,
         request: LabelDatasetBuildRequest,
     ) -> LabelDatasetResponse:
-        as_of_date = request.as_of_date or _default_label_as_of_date()
+        as_of_date = self.resolve_as_of_date(request.as_of_date)
         label_version = f"labels-{as_of_date.isoformat()}-v1"
         label_path = self._labels_dir / f"{label_version}.json"
 
@@ -197,7 +197,7 @@ class LabelService:
             json.dump(manifest, file, ensure_ascii=False, indent=2)
 
     def _build_default_manifest(self) -> dict[str, Any]:
-        today = date.today().isoformat()
+        today = self.resolve_as_of_date(None).isoformat()
         return {
             "latest_version": self._default_label_version,
             "datasets": {
