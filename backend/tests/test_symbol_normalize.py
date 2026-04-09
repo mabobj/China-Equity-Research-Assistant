@@ -6,7 +6,11 @@ from app.services.data_service.exceptions import InvalidSymbolError
 from app.services.data_service.normalize import (
     canonical_symbol_from_provider_symbol,
     convert_symbol_for_provider,
+    normalize_amount_to_yuan,
+    normalize_price_to_yuan,
+    normalize_volume_to_shares,
     normalize_symbol,
+    parse_provider_date,
 )
 
 
@@ -35,7 +39,21 @@ def test_convert_symbol_for_provider_is_centralized() -> None:
     assert convert_symbol_for_provider("600519.SH", "akshare") == "600519"
     assert convert_symbol_for_provider("600519.SH", "baostock") == "sh.600519"
     assert convert_symbol_for_provider("600519.SH", "cninfo") == "600519"
+    assert convert_symbol_for_provider("600519.SH", "mootdx") == "600519"
+    assert convert_symbol_for_provider("600519.SH", "tdx_api") == "sh600519"
     assert canonical_symbol_from_provider_symbol("sz.000001") == "000001.SZ"
+    assert canonical_symbol_from_provider_symbol("sh600519") == "600519.SH"
+
+
+def test_provider_date_and_unit_normalization_are_centralized() -> None:
+    """日期与单位标准化应集中在 normalize 层处理。"""
+    assert parse_provider_date("20260409").isoformat() == "2026-04-09"
+    assert parse_provider_date("2026/04/09").isoformat() == "2026-04-09"
+    assert normalize_price_to_yuan(12345.0, source="tdx_api") == 12.345
+    assert normalize_volume_to_shares(123.0, source="tdx_api") == 12300.0
+    assert normalize_volume_to_shares(123.0, source="akshare") == 12300.0
+    assert normalize_volume_to_shares(123.0, source="mootdx") == 12300.0
+    assert normalize_amount_to_yuan(12345.0, source="tdx_api") == 12.345
 
 
 @pytest.mark.parametrize("raw_symbol", ["", "abc", "600519.XY", "12345"])

@@ -269,19 +269,41 @@ class NamedDailyProvider:
         end_date: Optional[date] = None,
     ) -> list[DailyBar]:
         self.call_count += 1
+        open_price = 100.0
+        high_price = 102.0
+        low_price = 99.0
+        amount = 1000.0
+        if self.name == "tdx_api":
+            open_price = 100000.0
+            high_price = 102000.0
+            low_price = 99000.0
+            amount = 1000000.0
         return [
             DailyBar(
                 symbol=symbol,
                 trade_date=date(2024, 1, 2),
-                open=100.0,
-                high=102.0,
-                low=99.0,
+                open=open_price,
+                high=high_price,
+                low=low_price,
                 close=self.close,
                 volume=10.0,
-                amount=1000.0,
+                amount=amount,
                 source=self.name,
             )
         ]
+
+
+class BrokenNamedDailyProvider(NamedDailyProvider):
+    """用于验证 provider 失败后的 fallback。"""
+
+    def get_daily_bars(
+        self,
+        symbol: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> list[DailyBar]:
+        self.call_count += 1
+        raise RuntimeError("mock provider failure")
 
 
 class DirtyDailyBarProvider(FakeProvider):
@@ -829,23 +851,71 @@ def test_service_supports_split_intraday_provider() -> None:
     assert response.count == 1
 
 
-def test_service_daily_bars_prefers_mootdx_by_default() -> None:
+def test_service_daily_bars_prefers_tdx_api_by_default() -> None:
     """未显式指定时，日线默认优先 mootdx。"""
     akshare_provider = NamedDailyProvider(name="akshare", close=100.5)
     baostock_provider = NamedDailyProvider(name="baostock", close=100.6)
     mootdx_provider = NamedDailyProvider(name="mootdx", close=100.7)
+    tdx_provider = NamedDailyProvider(name="tdx_api", close=100800.0)
     service = MarketDataService(
-        providers=[akshare_provider, baostock_provider, mootdx_provider],
+        providers=[akshare_provider, baostock_provider, mootdx_provider, tdx_provider],
     )
 
-    response = service.get_daily_bars("600519.SH", start_date="2024-01-01")
+    response = service.get_daily_bars(
+        "600519.SH",
+        start_date="2024-01-01",
+        end_date="2024-01-02",
+    )
+
+    assert response.count == 1
+    assert response.bars[0].source == "tdx_api"
+    assert response.bars[0].close == 100.8
+    assert tdx_provider.call_count == 1
+    assert mootdx_provider.call_count == 0
+    assert baostock_provider.call_count == 0
+    assert akshare_provider.call_count == 0
+
+
+def test_service_daily_bars_falls_back_when_mootdx_is_stale() -> None:
+    """mootdx 最新 bar 过旧时应自动降级到后续 provider。"""
+    mootdx_provider = NamedDailyProvider(name="mootdx", close=100.7)
+    akshare_provider = NamedDailyProvider(name="akshare", close=100.5)
+    service = MarketDataService(
+        providers=[mootdx_provider, akshare_provider],
+    )
+
+    response = service.get_daily_bars(
+        "600519.SH",
+        start_date="2024-01-01",
+        end_date="2024-01-03",
+    )
+
+    assert response.count == 1
+    assert response.bars[0].source == "akshare"
+    assert response.bars[0].close == 100.5
+    assert mootdx_provider.call_count == 1
+    assert akshare_provider.call_count == 1
+
+
+def test_service_daily_bars_falls_back_from_tdx_api_to_mootdx() -> None:
+    """tdx-api 失败时应自动回退到 mootdx。"""
+    tdx_provider = BrokenNamedDailyProvider(name="tdx_api", close=100.0)
+    mootdx_provider = NamedDailyProvider(name="mootdx", close=100.7)
+    service = MarketDataService(
+        providers=[tdx_provider, mootdx_provider],
+    )
+
+    response = service.get_daily_bars(
+        "600519.SH",
+        start_date="2024-01-01",
+        end_date="2024-01-02",
+    )
 
     assert response.count == 1
     assert response.bars[0].source == "mootdx"
     assert response.bars[0].close == 100.7
+    assert tdx_provider.call_count == 1
     assert mootdx_provider.call_count == 1
-    assert baostock_provider.call_count == 0
-    assert akshare_provider.call_count == 0
 
 
 def test_service_daily_bars_exposes_cleaning_summary() -> None:

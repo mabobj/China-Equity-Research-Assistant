@@ -43,6 +43,7 @@ from app.services.data_service.exceptions import (
     ProviderError,
 )
 from app.services.data_service.normalize import normalize_symbol
+from app.services.data_service.normalize import normalize_daily_bar_rows
 from app.services.data_service.provider_registry import ProviderRegistry
 from app.services.data_service.providers.base import (
     ANNOUNCEMENT_CAPABILITY,
@@ -56,7 +57,13 @@ from app.services.data_service.providers.base import (
 from app.services.data_products.freshness import resolve_last_closed_trading_day
 
 logger = logging.getLogger(__name__)
-_BAR_PROVIDER_PRIORITY = ("mootdx", "baostock", "akshare")
+_CAPABILITY_PROVIDER_PRIORITY: dict[str, tuple[str, ...]] = {
+    DAILY_BAR_CAPABILITY: ("tdx_api", "mootdx", "akshare", "baostock"),
+    INTRADAY_BAR_CAPABILITY: ("tdx_api", "mootdx", "akshare", "baostock"),
+    TIMELINE_CAPABILITY: ("tdx_api", "mootdx", "akshare", "baostock"),
+    UNIVERSE_CAPABILITY: ("tdx_api", "akshare", "baostock"),
+    PROFILE_CAPABILITY: ("tdx_api", "akshare", "baostock", "cninfo"),
+}
 _MOOTDX_VOLUME_MIGRATION_CURSOR = "migration:mootdx_volume_to_share:v1"
 
 
@@ -905,9 +912,34 @@ class MarketDataService:
                 )
                 continue
             if bars:
+                normalized_bars = normalize_daily_bar_rows(
+                    bars,
+                    symbol=symbol,
+                    default_source=provider.name,
+                )
+                daily_bar_issue = _assess_daily_bar_result(
+                    provider_name=provider.name,
+                    bars=normalized_bars,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                if daily_bar_issue is not None:
+                    logger.debug(
+                        "market_data.daily_bars.provider_fail symbol=%s provider=%s reason=%s",
+                        symbol,
+                        provider.name,
+                        daily_bar_issue,
+                    )
+                    provider_errors.append(
+                        "{provider}: {reason}".format(
+                            provider=provider.name,
+                            reason=daily_bar_issue,
+                        ),
+                    )
+                    continue
                 cleaned = clean_daily_bars(
                     symbol=symbol,
-                    rows=bars,
+                    rows=normalized_bars,
                     as_of_date=end_date,
                     default_source=provider.name,
                 )
@@ -1190,12 +1222,8 @@ class MarketDataService:
                 ),
             )
         effective_provider_names: Sequence[str] | None = provider_names
-        if effective_provider_names is None and capability in {
-            DAILY_BAR_CAPABILITY,
-            INTRADAY_BAR_CAPABILITY,
-            TIMELINE_CAPABILITY,
-        }:
-            effective_provider_names = _BAR_PROVIDER_PRIORITY
+        if effective_provider_names is None:
+            effective_provider_names = _CAPABILITY_PROVIDER_PRIORITY.get(capability)
         if effective_provider_names:
             preferred = {
                 name: index for index, name in enumerate(effective_provider_names)
@@ -1291,6 +1319,29 @@ def _build_daily_bar_response(
         dropped_rows=dropped_rows,
         dropped_duplicate_rows=dropped_duplicate_rows,
     )
+
+
+def _assess_daily_bar_result(
+    *,
+    provider_name: str,
+    bars: Sequence[DailyBar],
+    start_date: Optional[date],
+    end_date: Optional[date],
+) -> str | None:
+    if not bars:
+        return "empty_result"
+    if provider_name == "mootdx":
+        latest_trade_date = max(item.trade_date for item in bars)
+        if end_date is not None and latest_trade_date < end_date:
+            return "latest_bar_stale"
+        expected_start = start_date or bars[0].trade_date
+        covered_tail = [item for item in bars if item.trade_date >= expected_start]
+        if not covered_tail:
+            return "mootdx_recent_segment_missing"
+        if end_date is not None and covered_tail[-1].trade_date != end_date:
+            return "mootdx_recent_segment_incomplete"
+
+    return None
 
 
 @dataclass(frozen=True)

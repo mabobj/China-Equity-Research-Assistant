@@ -584,6 +584,34 @@ def test_get_stock_profile_route_returns_structured_payload() -> None:
     app.dependency_overrides.clear()
 
 
+def test_get_stock_universe_route_returns_structured_payload() -> None:
+    """The stock universe endpoint should remain schema compatible."""
+    app.dependency_overrides[get_market_data_service] = lambda: StubMarketDataService()
+    response = client.get("/stocks/universe")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["items"][0]["symbol"] == "600519.SH"
+    assert payload["items"][0]["name"] == "Kweichow Moutai"
+
+    app.dependency_overrides.clear()
+
+
+def test_get_daily_bars_route_returns_structured_payload() -> None:
+    """The daily bars endpoint should remain schema compatible."""
+    app.dependency_overrides[get_market_data_service] = lambda: StubMarketDataService()
+    response = client.get("/stocks/600519/daily-bars")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600519.SH"
+    assert payload["count"] == 1
+    assert payload["bars"][0]["trade_date"] == "2024-01-02"
+
+    app.dependency_overrides.clear()
+
+
 def test_workspace_bundle_route_returns_structured_payload() -> None:
     """Workspace bundle should expose the stock page primary payload."""
     app.dependency_overrides[get_workspace_bundle_service] = (

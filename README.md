@@ -114,6 +114,19 @@ powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
 - 后端文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - 前端页面：[http://127.0.0.1:3000](http://127.0.0.1:3000)
 
+## 数据源优先级
+
+当前 `data_service` 的默认优先级为：
+
+- `tdx-api > mootdx > akshare > baostock`
+
+说明：
+
+- `TDX_API_BASE_URL` 默认值为 `http://192.168.1.105:8080/`，可通过 `.env` 覆盖。
+- `tdx-api` 优先承担股票池与日线主链路。
+- `mootdx` 作为本地高速历史源，命中后仍会经过新鲜度与完整性检查；不满足要求时自动降级。
+- `akshare` 与 `baostock` 保留为后续 fallback。
+
 ## 测试命令
 
 后端关键回归：

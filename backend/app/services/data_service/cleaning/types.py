@@ -2,26 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 import math
 import re
 from typing import Any, Optional, Tuple
 
 from app.services.common.text_normalization import normalize_display_text
+from app.services.data_service.normalize import (
+    normalize_amount_to_yuan,
+    normalize_provider_name,
+    normalize_volume_to_shares,
+    parse_provider_date,
+)
 
-_MISSING_STRINGS = {"", "--", "—", "none", "null", "nan", "na", "n/a"}
-
-_VOLUME_UNIT_BY_SOURCE = {
-    "akshare": "hand",
-    "baostock": "share",
-    "mootdx": "hand",
-}
-
-_AMOUNT_UNIT_BY_SOURCE = {
-    "akshare": "yuan",
-    "baostock": "yuan",
-    "mootdx": "yuan",
-}
+_MISSING_STRINGS = {"", "--", "-", "none", "null", "nan", "na", "n/a", "—"}
 
 _SOURCE_ALIASES = {
     "akshare_api": "akshare",
@@ -31,11 +25,13 @@ _SOURCE_ALIASES = {
     "cninfo.com.cn": "cninfo",
     "eastmoney_api": "eastmoney",
     "东方财富": "eastmoney",
+    "tdx-api": "tdx_api",
+    "tdxapi": "tdx_api",
 }
 
 
 def is_missing_value(value: Any) -> bool:
-    """判断是否缺失值。"""
+    """判断是否为空值。"""
     if value is None:
         return True
     if isinstance(value, float) and math.isnan(value):
@@ -46,7 +42,7 @@ def is_missing_value(value: Any) -> bool:
 
 
 def to_optional_float(value: Any) -> Tuple[float | None, bool]:
-    """转换到浮点；返回 (值, 是否发生强制转换)。"""
+    """转换为浮点数，并返回是否发生了强制转换。"""
     if is_missing_value(value):
         return None, False
     if isinstance(value, (int, float)):
@@ -62,29 +58,17 @@ def to_optional_float(value: Any) -> Tuple[float | None, bool]:
 
 
 def normalize_volume(value: float | None, *, source: str) -> float | None:
-    """统一 volume 到“股”。"""
-    if value is None:
-        return None
-    normalized_source = _normalize_source(source)
-    unit = _VOLUME_UNIT_BY_SOURCE.get(normalized_source, "share")
-    if unit == "hand":
-        return value * 100.0
-    return value
+    """统一 volume 到股。"""
+    return normalize_volume_to_shares(value, source=_normalize_source(source))
 
 
 def normalize_amount(value: float | None, *, source: str) -> float | None:
-    """统一 amount 到“元”。"""
-    if value is None:
-        return None
-    normalized_source = _normalize_source(source)
-    unit = _AMOUNT_UNIT_BY_SOURCE.get(normalized_source, "yuan")
-    if unit == "wan_yuan":
-        return value * 10000.0
-    return value
+    """统一 amount 到元。"""
+    return normalize_amount_to_yuan(value, source=_normalize_source(source))
 
 
 def normalize_percent_value(value: float | None) -> float | None:
-    """统一百分比口径：默认输出 3.5 表示 3.5%。"""
+    """统一百分比口径，输出 3.5 表示 3.5%。"""
     if value is None:
         return None
     if value != 0 and -1.0 < value < 1.0:
@@ -93,7 +77,7 @@ def normalize_percent_value(value: float | None) -> float | None:
 
 
 def parse_financial_amount_to_yuan(value: Any) -> Tuple[float | None, bool]:
-    """把财务金额统一解析为“元”，并返回是否发生强制转换。"""
+    """把财务金额统一解析为元，并返回是否发生了强制转换。"""
     if is_missing_value(value):
         return None, False
     if isinstance(value, (int, float)):
@@ -103,10 +87,9 @@ def parse_financial_amount_to_yuan(value: Any) -> Tuple[float | None, bool]:
     if raw_text == "":
         return None, False
 
-    normalized_text = raw_text.upper()
     multiplier = 1.0
     coerced = False
-
+    normalized_text = raw_text
     if normalized_text.endswith("亿元"):
         multiplier = 100000000.0
         normalized_text = normalized_text[:-2]
@@ -138,12 +121,12 @@ def parse_financial_amount_to_yuan(value: Any) -> Tuple[float | None, bool]:
 
 
 def parse_financial_percent(value: Any) -> Tuple[float | None, bool]:
-    """把财务比率统一解析为百分数口径，并返回是否发生强制转换。"""
+    """把财务比率统一解析为百分数口径。"""
     if is_missing_value(value):
         return None, False
     if isinstance(value, (int, float)):
         normalized = normalize_percent_value(float(value))
-        return normalized, (normalized != float(value))
+        return normalized, normalized != float(value)
 
     text = str(value).strip().replace(",", "").replace("，", "")
     if text == "":
@@ -163,14 +146,50 @@ def parse_financial_percent(value: Any) -> Tuple[float | None, bool]:
     if has_percent:
         return numeric_value, True
     normalized = normalize_percent_value(numeric_value)
-    return normalized, (normalized != numeric_value)
+    return normalized, normalized != numeric_value
+
+
+def normalize_announcement_title(value: Any) -> tuple[str, bool]:
+    """统一公告标题文本，不改写语义。"""
+    if is_missing_value(value):
+        return "", False
+    raw_text = str(value)
+    normalized = normalize_display_text(raw_text).replace("\r", " ").replace("\n", " ")
+    normalized = " ".join(normalized.split())
+    return normalized, normalized != raw_text
+
+
+def parse_announcement_publish_date(value: Any) -> tuple[date | None, bool]:
+    """统一公告发布日期。"""
+    if is_missing_value(value):
+        return None, False
+    parsed = parse_provider_date(value)
+    return parsed, parsed is not None and not isinstance(value, date)
+
+
+def normalize_announcement_source(value: Any) -> tuple[str, bool]:
+    """统一公告来源值。"""
+    if is_missing_value(value):
+        return "unknown", False
+    raw_text = str(value).strip()
+    normalized = _normalize_source(raw_text)
+    return normalized, normalized != raw_text
+
+
+def normalize_announcement_url(value: Any) -> tuple[str | None, bool]:
+    """统一公告 URL，空串转 None。"""
+    if is_missing_value(value):
+        return None, False
+    raw_text = str(value).strip()
+    normalized = raw_text or None
+    return normalized, normalized != raw_text
 
 
 def parse_financial_report_period_and_type(
     period_value: Any,
     report_type_value: Any = None,
 ) -> tuple[Optional[date], str, bool]:
-    """解析报告期与报告类型，返回 (report_period, report_type, coerced)。"""
+    """解析报告期与报告类型。"""
     explicit_report_type = _normalize_report_type_text(report_type_value)
     if explicit_report_type is not None and explicit_report_type != "unknown":
         report_period = _parse_report_period_value(period_value, explicit_report_type)
@@ -210,21 +229,17 @@ def parse_financial_report_period_and_type(
             return date(year, 6, 30), "half", True
         if label == "三季报":
             return date(year, 9, 30), "q3", True
-        return None, "unknown", True
 
     period = _parse_date_text(text)
     if period is not None:
         return period, _infer_report_type_from_period(period), True
-
     return None, "unknown", False
 
 
 def _normalize_source(source: str) -> str:
-    normalized = source.strip().lower()
+    normalized = normalize_provider_name(source)
     if normalized in _SOURCE_ALIASES:
         return _SOURCE_ALIASES[normalized]
-    if source.strip() in _SOURCE_ALIASES:
-        return _SOURCE_ALIASES[source.strip()]
     if normalized.startswith("cninfo"):
         return "cninfo"
     if normalized.startswith("eastmoney"):
@@ -237,10 +252,8 @@ def _normalize_source(source: str) -> str:
 def _normalize_text_value(value: Any) -> Optional[str]:
     if is_missing_value(value):
         return None
-    text = str(value).strip()
-    if text == "":
-        return None
-    return text
+    text = normalize_display_text(str(value).strip())
+    return text or None
 
 
 def _normalize_report_type_text(value: Any) -> Optional[str]:
@@ -267,15 +280,10 @@ def _normalize_report_type_text(value: Any) -> Optional[str]:
         "中报": "half",
         "三季报": "q3",
     }
-    if normalized in mapping:
-        return mapping[normalized]
-    return None
+    return mapping.get(normalized)
 
 
-def _parse_report_period_value(
-    period_value: Any,
-    report_type: str,
-) -> Optional[date]:
+def _parse_report_period_value(period_value: Any, report_type: str) -> Optional[date]:
     text = _normalize_text_value(period_value)
     if text is None:
         return None
@@ -298,13 +306,7 @@ def _parse_report_period_value(
 
 
 def _parse_date_text(text: str) -> Optional[date]:
-    normalized = text.strip()
-    for pattern in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.strptime(normalized, pattern).date()
-        except ValueError:
-            continue
-    return None
+    return parse_provider_date(text)
 
 
 def _infer_report_type_from_period(period: date) -> str:
@@ -337,65 +339,3 @@ def _quarter_to_type(quarter: str) -> str:
     if quarter == "3":
         return "q3"
     return "annual"
-
-
-def parse_announcement_publish_date(value: Any) -> tuple[Optional[date], bool]:
-    """解析公告发布日期，返回 (日期, 是否发生强制转换)。"""
-    if is_missing_value(value):
-        return None, False
-    if isinstance(value, date) and not isinstance(value, datetime):
-        return value, False
-    if isinstance(value, datetime):
-        return value.date(), True
-
-    text = str(value).strip()
-    if text == "":
-        return None, False
-
-    normalized = (
-        text.replace("年", "-")
-        .replace("月", "-")
-        .replace("日", "")
-        .replace("/", "-")
-        .strip()
-    )
-    for pattern in (
-        "%Y-%m-%d",
-        "%Y%m%d",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d %H:%M",
-    ):
-        try:
-            return datetime.strptime(normalized, pattern).date(), True
-        except ValueError:
-            continue
-    return None, False
-
-
-def normalize_announcement_source(value: Any) -> tuple[str, bool]:
-    """归一公告来源标识。"""
-    if is_missing_value(value):
-        return "unknown", True
-    text = str(value).strip()
-    normalized = _normalize_source(text)
-    return normalized, normalized != text
-
-
-def normalize_announcement_title(value: Any) -> tuple[str, bool]:
-    """规范化公告标题文本。"""
-    if is_missing_value(value):
-        return "", False
-    text = str(value)
-    normalized_whitespace = " ".join(text.replace("\r", " ").replace("\n", " ").split())
-    normalized = normalize_display_text(normalized_whitespace)
-    return normalized, normalized != text.strip()
-
-
-def normalize_announcement_url(value: Any) -> tuple[Optional[str], bool]:
-    """规范化公告链接。"""
-    if is_missing_value(value):
-        return None, False
-    text = str(value).strip()
-    if text == "":
-        return None, True
-    return text, text != str(value)
