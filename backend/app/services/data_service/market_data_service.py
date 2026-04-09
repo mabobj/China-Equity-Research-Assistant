@@ -24,7 +24,11 @@ from app.schemas.market_data import (
     UniverseItem,
     UniverseResponse,
 )
-from app.schemas.provider import ProviderCapabilityReport, ProviderHealthReport
+from app.schemas.provider import (
+    CapabilityPolicyReport,
+    ProviderCapabilityReport,
+    ProviderHealthReport,
+)
 from app.schemas.research_inputs import (
     AnnouncementItem,
     AnnouncementListResponse,
@@ -44,6 +48,11 @@ from app.services.data_service.exceptions import (
 )
 from app.services.data_service.normalize import normalize_symbol
 from app.services.data_service.normalize import normalize_daily_bar_rows
+from app.services.data_service.provider_policy import (
+    build_capability_policy_reports,
+    get_capability_policy,
+    get_preferred_provider_order,
+)
 from app.services.data_service.provider_registry import ProviderRegistry
 from app.services.data_service.providers.base import (
     ANNOUNCEMENT_CAPABILITY,
@@ -57,13 +66,6 @@ from app.services.data_service.providers.base import (
 from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 
 logger = logging.getLogger(__name__)
-_CAPABILITY_PROVIDER_PRIORITY: dict[str, tuple[str, ...]] = {
-    DAILY_BAR_CAPABILITY: ("tdx_api", "mootdx", "akshare", "baostock"),
-    INTRADAY_BAR_CAPABILITY: ("tdx_api", "mootdx", "akshare", "baostock"),
-    TIMELINE_CAPABILITY: ("tdx_api", "mootdx", "akshare", "baostock"),
-    UNIVERSE_CAPABILITY: ("tdx_api", "akshare", "baostock"),
-    PROFILE_CAPABILITY: ("tdx_api", "akshare", "baostock", "cninfo"),
-}
 _MOOTDX_VOLUME_MIGRATION_CURSOR = "migration:mootdx_volume_to_share:v1"
 
 
@@ -330,7 +332,13 @@ class MarketDataService:
                 provider_names=provider_names,
             )
         except ProviderError:
-            if cached_bars and request_uses_default_range:
+            daily_bar_policy = get_capability_policy(DAILY_BAR_CAPABILITY)
+            allow_stale_fallback = (
+                daily_bar_policy.allow_stale_fallback
+                if daily_bar_policy is not None
+                else False
+            )
+            if cached_bars and request_uses_default_range and allow_stale_fallback:
                 logger.debug(
                     "market_data.daily_bars.remote_failed_use_cache symbol=%s cached_count=%s",
                     canonical_symbol,
@@ -804,7 +812,25 @@ class MarketDataService:
         return self._provider_registry.get_capability_reports()
 
     def get_provider_health_reports(self) -> list[ProviderHealthReport]:
-        return self._provider_registry.get_health_reports()
+        reports = self._provider_registry.get_health_reports()
+        report_by_name = {report.provider_name: report for report in reports}
+        for capability_report in self.get_provider_capability_reports():
+            report = report_by_name.get(capability_report.provider_name)
+            if report is None:
+                continue
+            warning_messages = list(report.warning_messages)
+            if capability_report.preferred_for and report.available:
+                warning_messages.append(
+                    "当前 provider 承担主用数据域：%s"
+                    % ", ".join(capability_report.preferred_for)
+                )
+            if not report.available and report.unavailable_reason is None:
+                warning_messages.append("provider 当前不可用，但未返回明确 unavailable_reason。")
+            report.warning_messages = list(dict.fromkeys(warning_messages))
+        return reports
+
+    def get_capability_policy_reports(self) -> list[CapabilityPolicyReport]:
+        return build_capability_policy_reports()
 
     @contextmanager
     def session_scope(self) -> Iterator[None]:
@@ -1223,7 +1249,7 @@ class MarketDataService:
             )
         effective_provider_names: Sequence[str] | None = provider_names
         if effective_provider_names is None:
-            effective_provider_names = _CAPABILITY_PROVIDER_PRIORITY.get(capability)
+            effective_provider_names = get_preferred_provider_order(capability)
         if effective_provider_names:
             preferred = {
                 name: index for index, name in enumerate(effective_provider_names)

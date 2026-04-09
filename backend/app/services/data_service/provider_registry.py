@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from app.schemas.provider import ProviderCapabilityReport, ProviderHealthReport
+from app.services.data_service.provider_policy import get_all_capability_policies
 from app.services.data_service.providers.base import (
     MarketDataCapability,
     SessionScopedProvider,
@@ -78,11 +79,35 @@ class ProviderRegistry:
         return [provider for provider in self._providers if provider.is_available()]
 
     def get_capability_reports(self) -> list[ProviderCapabilityReport]:
+        policies = get_all_capability_policies()
         return [
             ProviderCapabilityReport(
                 provider_name=provider.name,
                 capabilities=list(provider.capabilities),
                 session_scoped=provider.is_session_scoped(),
+                preferred_for=[
+                    policy.capability
+                    for policy in policies
+                    if provider.name in policy.preferred_providers
+                    and policy.preferred_providers[0] == provider.name
+                ],
+                fallback_for=[
+                    policy.capability
+                    for policy in policies
+                    if provider.name in policy.preferred_providers
+                    and policy.preferred_providers[0] != provider.name
+                ],
+                require_local_persistence_for=[
+                    policy.capability
+                    for policy in policies
+                    if policy.require_local_persistence
+                    and provider.name in policy.preferred_providers
+                ],
+                notes=[
+                    policy.notes
+                    for policy in policies
+                    if provider.name in policy.preferred_providers
+                ],
             )
             for provider in self._providers
         ]
@@ -93,7 +118,10 @@ class ProviderRegistry:
                 provider_name=provider.name,
                 available=provider.is_available(),
                 unavailable_reason=provider.get_unavailable_reason(),
+                capabilities=list(provider.capabilities),
+                health_status=(
+                    "ok" if provider.is_available() else "unavailable"
+                ),
             )
             for provider in self._providers
         ]
-

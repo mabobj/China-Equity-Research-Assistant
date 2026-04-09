@@ -92,6 +92,11 @@
 - `tdx-api` 已进入优先级主链路
 - `mootdx` 已纳入本地历史源路径
 - `provider_used / fallback_applied / fallback_reason` 已能向上游暴露
+- provider 能力矩阵与健康度策略已集中到独立策略层：
+  - capability 级优先顺序不再散落在 `market_data_service`
+  - 已明确哪些数据域允许 stale fallback
+  - 已明确哪些数据域要求本地持久化
+  - provider 报告已能区分“主用数据域 / fallback 数据域 / 需本地落盘数据域”
 
 ## 4. 从长期方向看，数据底座仍需补齐的有限问题
 
@@ -157,6 +162,27 @@
 - 哪些数据域允许 stale fallback
 - 哪些数据域必须本地落盘
 - 哪些数据域只能作为补充或兜底
+
+## 5. 当前已落地的制度化规则
+
+当前代码中已经把下列规则收拢为集中策略，而不是继续散落在 service 条件分支里：
+
+- `daily_bars`：`tdx-api -> mootdx -> akshare -> baostock`
+- `intraday_bars / timeline`：`tdx-api -> mootdx -> akshare -> baostock`
+- `universe`：`tdx-api -> akshare -> baostock`
+- `profile`：`tdx-api -> akshare -> baostock -> cninfo`
+- `announcements`：`cninfo -> akshare`
+- `financial_summary`：`akshare -> baostock`
+
+同时，当前已明确的健康度边界是：
+
+- `daily_bars` 允许在远端失败时回退到已落盘本地快照
+- `profile / universe` 允许使用本地缓存兜底
+- `announcements / financial_summary / intraday / timeline` 默认不接受 stale fallback
+- `daily_bars / universe / profile / announcements / financial_summary` 要求本地持久化
+- `intraday / timeline` 当前以在线可用性优先，不强制本地持久化
+
+这意味着 provider 策略现在已经从“经验写法”进入“制度化口径”，后续包 2 / 包 3 / 包 4 会在这套矩阵上继续展开，而不是重新各写一套规则。
 
 ## 5. 当前最合理的改进边界
 

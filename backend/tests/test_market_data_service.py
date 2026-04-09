@@ -1106,3 +1106,57 @@ def test_service_announcements_cache_hit_keeps_cleaning_metadata(tmp_path: Path)
     assert second_response.as_of_date is not None
     assert second_response.dropped_duplicate_rows == 0
     assert second_response.items[0].announcement_type in {"buyback", "earnings", "other"}
+
+
+def test_provider_capability_reports_include_roles_and_persistence_rules() -> None:
+    service = MarketDataService(
+        providers=[
+            NamedDailyProvider(name="tdx_api", close=100.8),
+            NamedDailyProvider(name="mootdx", close=100.7),
+            FinancialSummaryProvider(),
+            AnnouncementProvider(),
+        ]
+    )
+
+    reports = service.get_provider_capability_reports()
+    report_by_name = {report.provider_name: report for report in reports}
+
+    assert "daily_bars" in report_by_name["tdx_api"].preferred_for
+    assert "daily_bars" in report_by_name["mootdx"].fallback_for
+    assert "daily_bars" in report_by_name["tdx_api"].require_local_persistence_for
+    assert any("主链路" in note or "本地" in note for note in report_by_name["tdx_api"].notes)
+
+
+def test_capability_policy_reports_expose_provider_matrix_rules() -> None:
+    service = MarketDataService(
+        providers=[NamedDailyProvider(name="tdx_api", close=100.8)]
+    )
+
+    reports = service.get_capability_policy_reports()
+    report_by_capability = {report.capability: report for report in reports}
+
+    daily_policy = report_by_capability["daily_bars"]
+    assert daily_policy.preferred_providers == [
+        "tdx_api",
+        "mootdx",
+        "akshare",
+        "baostock",
+    ]
+    assert daily_policy.allow_stale_fallback is True
+    assert daily_policy.require_local_persistence is True
+
+
+def test_provider_health_reports_include_health_status_and_context() -> None:
+    service = MarketDataService(
+        providers=[
+            NamedDailyProvider(name="tdx_api", close=100.8),
+            FinancialSummaryProvider(),
+        ]
+    )
+
+    reports = service.get_provider_health_reports()
+    report_by_name = {report.provider_name: report for report in reports}
+
+    assert report_by_name["tdx_api"].health_status == "ok"
+    assert "daily_bars" in report_by_name["tdx_api"].capabilities
+    assert any("主用数据域" in item for item in report_by_name["tdx_api"].warning_messages)

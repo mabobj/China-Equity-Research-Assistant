@@ -64,7 +64,11 @@ from app.schemas.debate import (
     SingleStockResearchInputs,
     StrategyFinalize,
 )
-from app.schemas.provider import ProviderCapabilityReport, ProviderHealthReport
+from app.schemas.provider import (
+    CapabilityPolicyReport,
+    ProviderCapabilityReport,
+    ProviderHealthReport,
+)
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.schemas.technical import (
     BollingerSnapshot,
@@ -134,6 +138,7 @@ __all__ = [
     "MovingAverageSnapshot",
     "PriceRange",
     "ProviderCapabilityReport",
+    "CapabilityPolicyReport",
     "ProviderHealthReport",
     "ResearchReport",
     "RiskReview",

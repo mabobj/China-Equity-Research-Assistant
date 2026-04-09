@@ -167,6 +167,15 @@
 
 把当前 provider 策略从“写在代码里的经验规则”升级为“可解释的制度化规则”。
 
+### 当前进度
+
+- 已完成第一阶段：
+  - capability 级 provider 优先顺序已从 `market_data_service` 的散落常量收拢到集中策略模块；
+  - 已明确各数据域的 `preferred_providers / allow_stale_fallback / require_local_persistence`；
+  - `ProviderCapabilityReport` 与 `ProviderHealthReport` 已能表达主用数据域、fallback 数据域、需本地落盘数据域与基础健康状态；
+  - `market_data_service` 已改为通过集中策略解析 provider 顺序，并在 `daily_bars` 远端失败时按制度化规则决定是否允许退回本地快照；
+  - 已补对应单元测试，确保矩阵规则可解释、可测试、可维护。
+
 ### 关键任务
 
 - 定义每个 provider 覆盖的数据域
