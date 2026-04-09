@@ -25,6 +25,7 @@ from app.schemas.market_data import (
     UniverseResponse,
 )
 from app.schemas.provider import (
+    CapabilityHealthReport,
     CapabilityPolicyReport,
     ProviderCapabilityReport,
     ProviderHealthReport,
@@ -831,6 +832,97 @@ class MarketDataService:
 
     def get_capability_policy_reports(self) -> list[CapabilityPolicyReport]:
         return build_capability_policy_reports()
+
+    def get_capability_health_reports(self) -> list[CapabilityHealthReport]:
+        reports: list[CapabilityHealthReport] = []
+        for policy_report in self.get_capability_policy_reports():
+            reports.append(
+                self.get_capability_health_report(policy_report.capability),
+            )
+        return reports
+
+    def get_capability_health_report(self, capability: str) -> CapabilityHealthReport:
+        policy = get_capability_policy(capability)
+        if policy is None:
+            raise InvalidRequestError(
+                "Unsupported provider capability '{capability}'.".format(
+                    capability=capability,
+                ),
+            )
+
+        configured_providers = self._provider_registry.get_providers(
+            capability,
+            available_only=False,
+        )
+        available_providers = self._provider_registry.get_providers(
+            capability,
+            available_only=True,
+        )
+        configured_provider_names = [provider.name for provider in configured_providers]
+        available_provider_names = [provider.name for provider in available_providers]
+
+        selected_provider = next(
+            (
+                provider_name
+                for provider_name in policy.preferred_providers
+                if provider_name in available_provider_names
+            ),
+            None,
+        )
+        if selected_provider is None and available_provider_names:
+            selected_provider = available_provider_names[0]
+
+        warning_messages: list[str] = []
+        local_persistence_available = self._local_store is not None
+
+        if not configured_provider_names:
+            health_status = "unavailable"
+            warning_messages.append("当前 capability 未注册任何 provider。")
+        elif not available_provider_names:
+            health_status = "unavailable"
+            warning_messages.append("当前 capability 没有可用 provider。")
+        else:
+            health_status = "ok"
+            preferred_provider = (
+                policy.preferred_providers[0] if policy.preferred_providers else None
+            )
+            if preferred_provider is not None:
+                if preferred_provider not in configured_provider_names:
+                    health_status = "degraded"
+                    warning_messages.append(
+                        "主用 provider 未注册，当前将退回后续 provider 顺序。",
+                    )
+                elif preferred_provider not in available_provider_names:
+                    health_status = "degraded"
+                    warning_messages.append(
+                        "主用 provider 当前不可用，当前将使用 fallback provider。",
+                    )
+            if policy.require_local_persistence and not local_persistence_available:
+                health_status = "degraded"
+                warning_messages.append(
+                    "该 capability 要求本地持久化，但当前未挂载本地存储。",
+                )
+
+        if policy.allow_stale_fallback:
+            warning_messages.append("该 capability 允许 stale fallback 兜底。")
+        else:
+            warning_messages.append("该 capability 不允许 stale fallback。")
+
+        if policy.require_local_persistence:
+            warning_messages.append("该 capability 要求本地持久化。")
+
+        return CapabilityHealthReport(
+            capability=capability,
+            preferred_providers=list(policy.preferred_providers),
+            configured_providers=configured_provider_names,
+            available_providers=available_provider_names,
+            selected_provider=selected_provider,
+            allow_stale_fallback=policy.allow_stale_fallback,
+            require_local_persistence=policy.require_local_persistence,
+            local_persistence_available=local_persistence_available,
+            health_status=health_status,
+            warning_messages=list(dict.fromkeys(warning_messages)),
+        )
 
     @contextmanager
     def session_scope(self) -> Iterator[None]:

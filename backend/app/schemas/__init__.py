@@ -65,6 +65,7 @@ from app.schemas.debate import (
     StrategyFinalize,
 )
 from app.schemas.provider import (
+    CapabilityHealthReport,
     CapabilityPolicyReport,
     ProviderCapabilityReport,
     ProviderHealthReport,
@@ -138,6 +139,7 @@ __all__ = [
     "MovingAverageSnapshot",
     "PriceRange",
     "ProviderCapabilityReport",
+    "CapabilityHealthReport",
     "CapabilityPolicyReport",
     "ProviderHealthReport",
     "ResearchReport",

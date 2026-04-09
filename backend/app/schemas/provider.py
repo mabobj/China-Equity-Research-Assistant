@@ -42,3 +42,20 @@ class CapabilityPolicyReport(BaseModel):
     allow_stale_fallback: bool
     require_local_persistence: bool
     notes: str
+
+
+class CapabilityHealthReport(BaseModel):
+    """Capability 级别的 provider 健康与诊断摘要。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    capability: str
+    preferred_providers: list[str]
+    configured_providers: list[str] = Field(default_factory=list)
+    available_providers: list[str] = Field(default_factory=list)
+    selected_provider: Optional[str] = None
+    allow_stale_fallback: bool
+    require_local_persistence: bool
+    local_persistence_available: bool
+    health_status: str = "ok"
+    warning_messages: list[str] = Field(default_factory=list)

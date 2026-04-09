@@ -182,6 +182,14 @@
 - `daily_bars / universe / profile / announcements / financial_summary` 要求本地持久化
 - `intraday / timeline` 当前以在线可用性优先，不强制本地持久化
 
+此外，当前后端已经提供最小只读诊断接口：
+
+- `GET /providers/capabilities`：查看 capability 级策略矩阵
+- `GET /providers/health`：查看全部 capability 的健康状态
+- `GET /providers/health/{capability}`：查看单个 capability 的诊断摘要
+
+这些接口只服务于联调、排障和后续监控接入，不面向业务主链路直接消费。
+
 这意味着 provider 策略现在已经从“经验写法”进入“制度化口径”，后续包 2 / 包 3 / 包 4 会在这套矩阵上继续展开，而不是重新各写一套规则。
 
 ## 5. 当前最合理的改进边界

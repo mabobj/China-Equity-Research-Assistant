@@ -175,6 +175,11 @@
   - `ProviderCapabilityReport` 与 `ProviderHealthReport` 已能表达主用数据域、fallback 数据域、需本地落盘数据域与基础健康状态；
   - `market_data_service` 已改为通过集中策略解析 provider 顺序，并在 `daily_bars` 远端失败时按制度化规则决定是否允许退回本地快照；
   - 已补对应单元测试，确保矩阵规则可解释、可测试、可维护。
+- 已完成第二阶段：
+  - 新增 `CapabilityHealthReport`，可以从 capability 视角查看 `preferred/configured/available/selected provider`、stale fallback 边界与本地持久化要求；
+  - `market_data_service` 已提供统一的 capability 健康判定逻辑，不再让调用方自行拼装“主用 provider 是否可用、是否已降级、是否缺本地持久化”的判断；
+  - 后端已新增只读诊断接口：`GET /providers/capabilities`、`GET /providers/health`、`GET /providers/health/{capability}`；
+  - 已补对应服务测试与 API 契约测试，确保 provider 诊断输出可读、可测、可回归。
 
 ### 关键任务
 

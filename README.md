@@ -98,6 +98,12 @@
 
 详见：[Provider 使用说明](docs/provider-notes.md)
 
+当前后端还提供了最小只读 provider 诊断接口，便于联调和排障：
+
+- `GET /providers/capabilities`
+- `GET /providers/health`
+- `GET /providers/health/{capability}`
+
 ## 5. 数据底座当前结论
 
 从长期方向看，当前数据底座已经完成“多源接入”向“统一标准层”的第一步，但仍有几项需要继续补齐的关键能力：
