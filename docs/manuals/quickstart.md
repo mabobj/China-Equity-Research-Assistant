@@ -2,9 +2,22 @@
 
 这份文档面向第一次在本地跑通项目的人。
 
-如果你只想做一次最小验证，推荐目标是：启动后端和前端，然后在浏览器里完成一次 `600519.SH` 的单票分析与 workflow 执行。
+如果你只想做一次最小验证，建议目标是：
 
-## 1. 环境准备
+1. 启动后端和前端
+2. 打开单票工作台
+3. 用 `600519.SH` 跑通一次单票链路
+4. 再到选股工作台看一次 workflow 结果
+
+## 1. 你需要知道的三个入口
+
+- 单票工作台：`/stocks/[symbol]`
+- 选股工作台：`/screener`
+- 交易与复盘：`/trades`、`/reviews`
+
+当前系统的长期方向是“因子发现、验证、组合与监控系统”，但你今天本地使用的入口，仍然是上面这几个工作台页面。
+
+## 2. 环境准备
 
 建议环境：
 
@@ -13,13 +26,13 @@
 - Node.js 20+
 - npm
 
-项目根目录假定为：
+项目根目录示例：
 
 ```text
 D:\dev\project\codex\China-Equity-Research-Assistant
 ```
 
-## 2. 准备 `.env`
+## 3. 准备 `.env`
 
 先复制环境变量模板：
 
@@ -29,9 +42,7 @@ Copy-Item .env.example .env
 
 ### 最小可运行配置
 
-如果你暂时不打算启用 LLM，也不打算接入 mootdx，本地最小配置通常只需要保留默认值。
-
-重点确认：
+如果你暂时不启用 LLM，也不接本地 `mootdx`，一般保留下面这类配置即可：
 
 ```env
 APP_HOST=127.0.0.1
@@ -40,23 +51,26 @@ ENABLE_LLM_DEBATE=false
 ENABLE_MOOTDX=false
 ```
 
-### 如需启用 LLM debate
+### tdx-api 配置
 
-至少需要：
+当前数据源主优先级已经是：
+
+`tdx-api > mootdx > AKShare > BaoStock`
+
+如果你要启用本地 `tdx-api`，确认 `.env` 中有：
+
+```env
+TDX_API_BASE_URL=http://192.168.1.105:8080/
+```
+
+后续如果本地地址变化，只需要改这个配置项。
+
+### 如需启用 LLM
 
 ```env
 OPENAI_API_KEY=your_api_key
 OPENAI_MODEL=gpt-5.4
 OPENAI_BASE_URL=https://api.openai.com/v1
-LLM_PROVIDER=auto
-ENABLE_LLM_DEBATE=true
-LLM_DEBATE_TIMEOUT_SECONDS=20
-```
-
-如果你接的是火山方舟 coding/plan 套餐，建议：
-
-```env
-OPENAI_BASE_URL=https://ark.cn-beijing.volces.com/api/coding/v3
 LLM_PROVIDER=auto
 ENABLE_LLM_DEBATE=true
 LLM_DEBATE_TIMEOUT_SECONDS=60
@@ -69,9 +83,7 @@ ENABLE_MOOTDX=true
 MOOTDX_TDX_DIR=C:/new_tdx
 ```
 
-只有在本机确实存在通达信目录时才建议开启。
-
-## 3. 安装后端依赖
+## 4. 安装后端依赖
 
 ```powershell
 python -m venv .venv
@@ -79,7 +91,7 @@ python -m venv .venv
 pip install -r backend\requirements.txt
 ```
 
-## 4. 安装前端依赖
+## 5. 安装前端依赖
 
 ```powershell
 Set-Location frontend
@@ -87,24 +99,18 @@ npm install
 Set-Location ..
 ```
 
-## 5. 启动后端
+## 6. 启动后端
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_backend.ps1
 ```
 
-启动成功后，先检查：
+启动后先检查：
 
 - 健康检查：[http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
-- Swagger 文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- Swagger：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
-后端日志默认写到：
-
-```text
-logs/backend-debug.log
-```
-
-## 6. 启动前端
+## 7. 启动前端
 
 新开一个 PowerShell 窗口，执行：
 
@@ -112,37 +118,30 @@ logs/backend-debug.log
 powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
 ```
 
-前端默认地址：
+前端地址：
 
 - [http://127.0.0.1:3000](http://127.0.0.1:3000)
 
-## 7. 运行测试
+## 8. 运行测试
 
-### 后端测试
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\test_backend.ps1
-```
-
-如果你在本机遇到 `pytest` 启动卡住（插件自动加载导致），可先用：
+### 后端
 
 ```powershell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
-python -m pytest backend/tests/test_workspace_bundle_service.py backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py backend/tests/test_trade_review_api.py -q
+python -m pytest backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py backend/tests/test_trade_review_api.py -q
 ```
 
-### 前端校验
+### 前端
 
 ```powershell
 Set-Location frontend
 npm.cmd run lint
 npm.cmd run type-check
+npm.cmd run test:smoke
 Set-Location ..
 ```
 
-## 8. 最小验证：以 `600519.SH` 为例
-
-推荐按下面顺序做一次最小验证。
+## 9. 最小验证：以 `600519.SH` 为例
 
 ### A. 打开首页
 
@@ -150,83 +149,58 @@ Set-Location ..
 
 - [http://127.0.0.1:3000](http://127.0.0.1:3000)
 
-首页应该能看到：
-
-- 系统能力说明
-- 股票代码输入框
-- 单票分析、选股、workflow 的入口
-
 ### B. 进入单票工作台
 
-在首页输入：
+输入：
 
 ```text
 600519.SH
 ```
 
-进入单票页后，至少应能看到：
+进入后，优先确认这些区域能正常显示：
 
-- 股票基础信息
-- Factor Snapshot 摘要
-- Review Report v2
-- Debate Review
-- Strategy Plan
-- Trigger Snapshot
-- Decision Brief
+- 决策简报
+- 证据摘要
+- 行动建议
+- 详细模块
 
-### C. 运行单票 workflow
+### C. 运行一次单票链路
 
-在单票页找到 `单票 Workflow` 区块，点击：
+在单票页确认：
 
-- `运行 single_stock_full_review`
+- `workspace-bundle` 正常返回
+- `review / debate / strategy / decision brief` 可见
+- `predictive_snapshot` 若已命中数据，也能显示
 
-正常情况下你会看到：
-
-- `run_id`
-- 步骤摘要
-- 最终输出摘要
-
-### D. 运行选股
+### D. 去选股工作台
 
 打开：
 
 - [http://127.0.0.1:3000/screener](http://127.0.0.1:3000/screener)
 
-依次操作（最新主链路）：
+只填一个最小参数：
 
-1. 在“运行初筛工作流”里输入 `batch_size`（本批次计算股票数量）
-2. 提交 `POST /workflows/screener/run`
-3. 查看 `run_id`、步骤状态与完成摘要
-4. 查看“最新批次摘要 + 批次结果表 + 单股详情”
-5. 如需深筛，再运行 `deep_candidate_review`
+- 本批次计算股票数量 `batch_size`
 
-### E. 快速验证公告/财务清洗可见性（可选）
+运行一次初筛 workflow，确认：
 
-在浏览器或 Swagger 调用：
+- 能拿到 `run_id`
+- 页面能轮询状态
+- 批次结果能展示
 
-- `GET /stocks/600519.SH/financial-summary`
-- `GET /stocks/600519.SH/announcements`
+## 10. 如果失败，先看哪里
 
-重点看这些字段是否存在：
-- `quality_status`
-- `cleaning_warnings`
-- `provider_used`
-- `source_mode`
-- `freshness_mode`
-
-### F. 快速验证交易与复盘闭环（可选）
-
-1. 在单票页点击“保存本次判断”，确认返回 `snapshot_id`
-2. 填写最小交易表单并点击“记录交易”，确认返回 `trade_id`
-3. 打开 `/reviews`，选择该交易点击“生成复盘草稿”，确认返回 `review_id`
-4. 编辑并保存复盘，确认列表可回看且详情已更新
-
-## 9. 如果最小验证失败
-
-优先看这几个位置：
+优先看：
 
 1. 后端日志 `logs/backend-debug.log`
-2. 浏览器页面上的错误块
-3. [故障排查文档](troubleshooting.md)
+2. 浏览器页面错误提示
+3. [故障排查](troubleshooting.md)
 
-如果你是 LLM 或 provider 问题，先不要盲目改代码，先确认 `.env` 和本地数据目录配置是否正确。
+## 11. 文档阅读顺序
+
+如果你已经跑通系统，建议下一步阅读：
+
+1. [日常使用说明](daily-usage.md)
+2. [数据源与边界](data-and-limitations.md)
+3. [Data 清洗层说明](data-cleaning.md)
+4. [系统架构](../architecture.md)

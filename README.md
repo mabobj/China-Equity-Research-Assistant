@@ -1,91 +1,138 @@
-# A 股研究助手
+# A 股研究、预测与决策工作台
 
-面向中国大陆 A 股市场的单用户研究与决策工作台。当前强调“稳定、可解释、可追溯”，不做自动实盘交易。
+面向中国大陆 A 股市场的单用户研究与决策工作台。
 
-## 当前能力
+项目当前定位不是“聊天式荐股”，也不是“自动实盘机器人”，而是一个以公开信息为事实源、以结构化输出为核心、以可追溯闭环为基础的产品系统。它已经具备可用的单票工作台、选股工作台、交易记录与复盘闭环；长期主线则继续向“因子发现、验证、组合与监控系统”演进。
 
-- 单票工作台（`/stocks/[symbol]`）
-- 选股与深筛工作流（`/screener`）
-- 结构化研究输出：`review-report v2`、`debate-review`、`strategy plan`、`decision brief`
-- workflow 运行记录与轮询查看
-- 初筛批次台账与结果回看（17:00 展示窗口口径）
-- 数据清洗层（bars / financial_summary / announcements）
-- 交易与复盘最小闭环（`decision snapshot -> trade -> review`）
+## 1. 长期方向
 
-## 主入口
+项目今后的主线不是继续堆更多零散页面或报告模块，而是沿着两条并行主线持续推进：
 
-- 单票主入口：`GET /stocks/{symbol}/workspace-bundle`
-- 选股主入口：`POST /workflows/screener/run` + `GET /workflows/runs/{run_id}`
-- 深筛主入口：`POST /workflows/deep-review/run` + `GET /workflows/runs/{run_id}`
+1. 研究与决策工作台主线  
+   保留现有 `workspace-bundle + workflow + trade/review` 产品外壳，持续提升稳定性、可解释性、可操作性和消费级体验。
 
-兼容保留但非前端主路径：
-- `GET /screener/run`
-- `GET /screener/deep-run`
+2. 预测与评估主线  
+   逐步补齐点时特征、标签、回测、预测、评估、模型版本治理，并最终服务于长期目标：因子发现、验证、组合与监控系统。
 
-## 交易与复盘闭环（v0.1）
+其中，以下三份文档定义了长期方向：
 
-后端新增接口：
+- [因子系统 PRD v1](docs/a_share_factor_prd_v1.md)
+- [因子系统架构设计 v1](docs/a_share_architecture_design_spec_v1.md)
+- [因子字典 v1](docs/a_share_factor_dictionary_v1.md)
+
+## 2. 当前项目状态
+
+截至当前版本，项目已经完成的主线能力包括：
+
+- 单票工作台：`/stocks/[symbol]`
+- 选股工作台：`/screener`
+- 结构化研究输出：
+  - `review-report v2`
+  - `debate-review`
+  - `strategy plan`
+  - `decision brief`
+- workflow 运行记录、轮询与局部失败可见性
+- `bars / financial_summary / announcements` 数据清洗层
+- 交易与复盘最小闭环：
+  - `decision snapshot -> trade -> review`
+- 预测主线最小底座：
+  - dataset / label / prediction / backtest / evaluation
+  - `predictive_snapshot`
+  - 模型版本评估建议
+
+当前系统已经“可用”，但仍处于长期主线的前中期阶段，尚未进入：
+
+- 自动下单
+- 券商接入
+- 组合级归因与持仓引擎
+- 实盘执行系统
+
+## 3. 当前主入口
+
+### 单票主入口
+
+- `GET /stocks/{symbol}/workspace-bundle`
+
+前端页面：
+
+- [http://127.0.0.1:3000/stocks/600519.SH](http://127.0.0.1:3000/stocks/600519.SH)
+
+### 选股主入口
+
+- `POST /workflows/screener/run`
+- `GET /workflows/runs/{run_id}`
+
+前端页面：
+
+- [http://127.0.0.1:3000/screener](http://127.0.0.1:3000/screener)
+
+### 深筛主入口
+
+- `POST /workflows/deep-review/run`
+- `GET /workflows/runs/{run_id}`
+
+### 交易与复盘主入口
+
 - `POST /decision-snapshots`
-- `GET /decision-snapshots/{snapshot_id}`
-- `GET /decision-snapshots?symbol=...&limit=...`
 - `POST /trades`
-- `GET /trades`
-- `GET /trades/{trade_id}`
-- `PATCH /trades/{trade_id}`
-- `POST /trades/from-current-decision`
-- `POST /reviews`
-- `GET /reviews`
-- `GET /reviews/{review_id}`
-- `PATCH /reviews/{review_id}`
 - `POST /reviews/from-trade/{trade_id}`
 
-前端入口：
-- `/stocks/[symbol]`：保存本次判断、记录交易
-- `/trades`：快速记录交易（高级参数折叠）、按股票过滤、查看关联快照摘要
-- `/trades`：支持动作-原因类型智能匹配提示与人工覆盖原因模板，减少录入冲突
-- `/reviews`：待复盘交易优先、一键生成复盘草稿，并在“原判断快照 / 执行路径 / 复盘结论 / 偏差诊断摘要”对照视图中完成复盘
+前端页面：
 
-持久化：
-- SQLite：`data/trade_review.sqlite3`
-- 表：`decision_snapshots`、`trade_records`、`review_records`
+- [http://127.0.0.1:3000/trades](http://127.0.0.1:3000/trades)
+- [http://127.0.0.1:3000/reviews](http://127.0.0.1:3000/reviews)
 
-规则要点：
-- `SKIP` 允许 `price/quantity/amount` 为空
-- 复盘草稿默认自动计算 `holding_days/MFE/MAE`（行情不足时返回受控 warning）
-- 决策快照记录 `runtime_mode_requested/effective` 与数据质量摘要
-- 决策快照同步记录预测元数据（`predictive_score/predictive_confidence/model_version/feature_version/label_version`），用于后续复盘对照
+## 4. 数据源优先级
 
-## 交易一致性校验口径（2026-04）
+当前 `data_service` 的默认优先级已经收敛为：
 
-为避免“同一只股票出现两套冲突结论”导致执行混乱，当前系统对交易一致性采用以下统一口径：
+- `tdx-api > mootdx > akshare > baostock`
 
-- 方向基线（用于 `strategy_alignment` 推断）按优先级确定：
-  1. `decision_brief.action_now`（映射为 `BUY/WATCH/AVOID`）
-  2. `review_report.final_judgement.action`
-  3. `research.action`
-- 若交易动作与方向基线冲突：
-  - 系统默认判为 `not_aligned`
-  - 若仍需手动指定 `aligned/partially_aligned`，必须提供 `alignment_override_reason`
-- `reason_type` 与 `side` 必须匹配（如 `watch_only` 仅用于 `SKIP`，`stop_loss/take_profit` 仅用于 `SELL/REDUCE`）
-- 复盘 `did_follow_plan` 会与交易对齐状态联动校正，避免“交易不一致但复盘写 yes”的语义冲突
+补充说明：
 
-## 数据清洗层（v0.1）
+- `tdx-api` 是本地 HTTP 主数据源，优先承担股票池、搜索、日线、行情等稳定链路。
+- `mootdx` 是本地高速历史源，适合离线或批量历史读取，但必须经过新鲜度与完整性检查。
+- `AKShare` 主要承担补充型、结构化型、研究型数据，不适合作为高频核心链路。
+- `BaoStock` 是稳定兜底源，用于行情与证券基础数据 fallback。
+- 公告类正式披露信息以 `CNINFO` 为准。
 
-统一链路：
-`provider/local raw -> cleaning contracts -> market_data_service -> data products -> API`
+详见：[Provider 使用说明](docs/provider-notes.md)
 
-已落地对象：
-- bars 清洗
-- financial_summary 清洗
-- announcements 清洗（索引层）
+## 5. 数据底座当前结论
 
-质量字段统一口径：
-- `quality_status`: `ok | warning | degraded | failed`
-- `cleaning_warnings`
-- `missing_fields`（适用时）
-- `provider_used` / `fallback_applied` / `fallback_reason`
+从长期方向看，当前数据底座已经完成“多源接入”向“统一标准层”的第一步，但仍有几项需要继续补齐的关键能力：
 
-## 本地启动
+1. 点时一致性仍需加强  
+   长期因子验证要求所有特征与标签都能严格按 `as_of_date` 重建，避免未来函数与回看污染。
+
+2. 数据域还不够完整  
+   目前主链路已收口在 `bars / financial_summary / announcements`，但长期因子系统还需要指数、行业、板块、市场广度、基准与风险暴露等标准化输入。
+
+3. 复权与公司行为口径需要继续集中化  
+   长期回测和因子验证要求明确区分原始价、前复权价、后复权价，以及停牌、ST、退市、分红送转等事件处理口径。
+
+4. 数据血缘与重建能力仍需加强  
+   长期上要能回答“这条特征来自哪个 provider、哪次落盘、哪个版本、是否发生过 fallback”，这对因子验证和模型评估很关键。
+
+5. provider 健康度与能力矩阵还需继续收敛  
+   当前已有 fallback 和可见性，但还需要更清晰的数据域级能力表，支撑长期稳定扩展。
+
+这些问题已经在文档中收口为“长期方向下必须补齐的有限缺口”，不是无休止优化项。详见：
+
+- [系统架构](docs/architecture.md)
+- [路线图](docs/roadmap.md)
+- [当前阶段](docs/current_phase.md)
+- [Provider 使用说明](docs/provider-notes.md)
+
+## 6. 快速开始
+
+环境建议：
+
+- Windows PowerShell
+- Python 3.11+
+- Node.js 20+
+
+最小启动步骤：
 
 ```powershell
 Copy-Item .env.example .env
@@ -109,32 +156,18 @@ powershell -ExecutionPolicy Bypass -File scripts\run_backend.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
 ```
 
-默认地址：
-- 后端健康检查：[http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
-- 后端文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- 前端页面：[http://127.0.0.1:3000](http://127.0.0.1:3000)
+更多细节见：
 
-## 数据源优先级
+- [快速开始](docs/manuals/quickstart.md)
+- [日常使用说明](docs/manuals/daily-usage.md)
 
-当前 `data_service` 的默认优先级为：
-
-- `tdx-api > mootdx > akshare > baostock`
-
-说明：
-
-- `TDX_API_BASE_URL` 默认值为 `http://192.168.1.105:8080/`，可通过 `.env` 覆盖。
-- `tdx-api` 优先承担股票池与日线主链路。
-- `mootdx` 作为本地高速历史源，命中后仍会经过新鲜度与完整性检查；不满足要求时自动降级。
-- `akshare` 与 `baostock` 保留为后续 fallback。
-
-## 测试命令
+## 7. 测试命令
 
 后端关键回归：
 
 ```powershell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
 python -m pytest backend/tests/test_stocks_api.py backend/tests/test_workflow_api.py backend/tests/test_trade_review_store.py backend/tests/test_trade_review_api.py -q
-# 预测/回测/workflow 关键回归
 python -m pytest backend/tests/test_prediction_pipeline_services.py backend/tests/test_prediction_api.py backend/tests/test_workflow_runtime_service.py -q
 ```
 
@@ -147,117 +180,66 @@ npm.cmd run lint
 npm.cmd run test:smoke
 ```
 
-## 文档导航
+## 8. 文档导航
 
-- [项目任务书 v2.1（产品化增强版）](docs/taskbook-v2.1.md)
-  - 说明：v2.1 任务书交付包共 6 个；文档中的 1~10 为章节编号。
+### 当前执行基线
+
 - [系统架构](docs/architecture.md)
 - [路线图](docs/roadmap.md)
-- [稳定性审计 v1](docs/audits/stability-review-v1.md)
+- [当前阶段](docs/current_phase.md)
+- [项目任务书（v2.1，产品化增强版）](docs/taskbook-v2.1.md)
+
+### 数据底座
+
+- [Provider 使用说明](docs/provider-notes.md)
+- [Data 清洗层说明](docs/manuals/data-cleaning.md)
+- [数据源与边界](docs/manuals/data-and-limitations.md)
+
+### 使用手册
+
 - [快速开始](docs/manuals/quickstart.md)
 - [日常使用说明](docs/manuals/daily-usage.md)
-- [数据源与边界](docs/manuals/data-and-limitations.md)
-- [Data 清洗层说明](docs/manuals/data-cleaning.md)
 - [故障排查](docs/manuals/troubleshooting.md)
-## 预测底座骨架（v2.1 包 5 第一步）
 
-本轮已新增最小可用的预测主线骨架，目标是先打通“数据集/预测/回测/评估”的 typed 契约，不改变现有单票、选股、交易、复盘主链路。
+### 历史稳定化审计
 
-新增接口：
-- `GET /datasets/features/{dataset_version}`：查询特征数据集版本与字段清单（支持 `latest`）。
-- `GET /predictions/{symbol}`：获取单票预测快照（骨架分数）。
-- `POST /predictions/cross-section/run`：运行截面预测并返回候选列表（骨架版）。
-- `POST /backtests/screener/run`：运行选股回测（骨架版）。
-- `POST /backtests/strategy/run`：运行单票策略回测（骨架版）。
-- `GET /evaluations/models/{model_version}`：获取模型评估摘要（骨架版）。
+- [稳定性审计 v1](docs/audits/stability-review-v1.md)
 
-当前阶段说明：
-- 以上能力用于联调与契约验证，不代表真实实盘建议。
-- 后续会在包 5 的后续阶段接入 point-in-time 特征、真实标签与 walk-forward 回测流水线。
+### 长期北极星文档
 
-## 预测底座增强（v2.1 包 5 第二步）
+- [因子系统 PRD v1](docs/a_share_factor_prd_v1.md)
+- [因子系统架构设计 v1](docs/a_share_architecture_design_spec_v1.md)
+- [因子字典 v1](docs/a_share_factor_dictionary_v1.md)
 
-本轮已将“骨架契约”升级为“最小真实数据链路”：
+## 9. 当前边界
 
-- `dataset_service` 支持按交易日构建并落盘特征数据集（本地 JSON 台账）。
-- `label_service` 支持基于未来 5/10 交易日收益构建标签数据集。
-- `prediction_service` 优先消费真实特征记录计算 baseline 分数；未命中时才回退哈希分数。
-- `backtest_service` 优先消费预测候选与真实标签，输出可解释指标（`top_k_avg_return/win_rate/max_drawdown`）。
+当前系统适合：
 
-新增数据集接口：
+- 单票研究与结构化决策
+- 规则选股与 workflow 编排
+- 预测信号的最小接入与评估
+- 交易记录与复盘闭环
+- 为长期因子系统做工程准备
 
-- `POST /datasets/features/build`
-- `GET /datasets/labels/{label_version}`
-- `POST /datasets/labels/build`
+当前系统不适合：
 
-说明：
+- 自动实盘交易
+- 未经确认的交易执行
+- 高频交易
+- 把自由文本 LLM 结果直接当作交易指令
 
-- 当前仍为最小可用预测链路，适合联调、流程验证与后续迭代。
-- 不变更现有单票、选股、交易、复盘主链路。
+## 10. 文档状态说明
 
-预测结果接线状态（兼容增强）：
+当前文档已经按“长期方向 > 当前阶段 > 使用手册”三层收口：
 
-- `workspace-bundle` 可返回 `predictive_snapshot`（可选字段）。
-- `screener` 候选与批次结果可返回：
-  - `predictive_score`
-  - `predictive_confidence`
-  - `predictive_model_version`
-- `deep-review` 候选可透传同一组预测字段，用于深筛优先级解释与对照。
-- 前端最小展示已接线：
-  - `/stocks/[symbol]` 展示“预测快照（辅助）”卡片；
-  - `/screener` 结果表展示“预测分”，详情展示预测置信度与模型版本。
+- 长期方向：回答项目最终要走向哪里
+- 当前阶段：回答现在优先做什么、不做什么
+- 使用手册：回答今天怎么把系统用起来
 
-回测能力补充：
+如果后续代码和文档出现差异，应优先按下面顺序理解：
 
-- `backtests` 已支持简化 walk-forward 切片聚合评估（指标中包含 `slice_count`）。
-
-## 预测评估深化（v2.1 包5第三步，已完成）
-
-本轮已将模型评估从“哈希占位指标”升级为“真实回测引用指标”：
-
-- `/evaluations/models/{model_version}` 现在会引用真实回测结果，输出：
-  - `backtest_references`（评估引用的回测摘要）
-  - `metrics`（包含 `screener_win_rate`、`screener_top_k_avg_return`、`quality_score` 等）
-  - `comparison`（当请求版本不是默认模型时，自动给出与默认基线模型的同窗差异）
-- 指标兼容保留旧键位：
-  - `precision_at_20`
-  - `hit_rate_5d`
-  - `excess_return_10d`
-- 继续保持边界：
-  - 当前评估用于研究与版本对比，不作为自动交易执行信号
-  - 不包含交易成本、滑点、组合级归因
-
-## 预测接入收尾（v2.1 包6第二阶段，已完成）
-
-本轮完成“预测字段解释一致性 + 评估结果到版本建议最小联动”：
-
-- 后端 `/evaluations/models/{model_version}` 新增 `recommendation` 字段，包含：
-  - `recommendation`（`promote_candidate / keep_baseline / observe`）
-  - `recommended_model_version`
-  - `reason`
-  - `supporting_metrics`
-  - `guardrails`
-- 单票页 `/stocks/[symbol]` 的“预测快照（辅助）”新增：
-  - 预测分解释、置信度等级
-  - 模型版本建议卡片（来自 evaluation）
-- 选股页 `/screener` 的候选详情新增：
-  - 预测分解释、置信度等级
-  - 模型版本建议（按候选 `predictive_model_version` 懒加载）
-
-说明：
-- 版本建议仅用于研究与版本筛选，不作为自动交易执行信号。
-
-## 预测接入收尾（v2.1 包6第三阶段，已完成）
-
-本轮完成 workflow 运行详情的模型版本建议可见性：
-
-- `GET /workflows/runs/{run_id}` 增加可选字段：
-  - `model_recommendation`
-  - `version_recommendation_alert`
-- `workflow-run-summary` 前端面板可直接展示：
-  - 当前 run 的模型版本建议
-  - 建议版本与默认版本不一致时的变化提醒
-
-说明：
-- 变化提醒只做人工提示，不会自动切换默认模型版本。
-- 该能力用于版本治理与运行解释，不作为自动交易执行入口。
+1. `AGENTS.md`
+2. `docs/architecture.md`
+3. `docs/current_phase.md`
+4. `docs/taskbook-v2.1.md`
+5. `README.md`

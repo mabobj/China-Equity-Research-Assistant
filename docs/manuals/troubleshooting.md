@@ -1,29 +1,23 @@
 # 故障排查
 
-这份文档按“先看什么、再怎么定位”的顺序写，尽量避免你一上来就翻代码。
+这份文档按“先看什么、再怎么定位”的顺序写，尽量避免一上来就翻代码。
 
-## 1. 启动失败时先看哪里
+## 1. 先看三个地方
 
-优先检查这三处：
+遇到问题时，优先检查：
 
-1. PowerShell 启动窗口里的报错
+1. PowerShell 启动窗口的报错
 2. 后端日志 `logs/backend-debug.log`
-3. `.env` 是否和当前机器一致
+3. `.env` 配置是否和当前机器一致
 
 ## 2. 后端启动失败
 
-常见现象：
+建议顺序：
 
-- `run_backend.ps1` 直接退出
-- `uvicorn` 无法启动
-- 页面提示无法连接后端
-
-建议按顺序检查：
-
-1. 是否已经创建并激活 `.venv`
-2. 是否执行过 `pip install -r backend\requirements.txt`
-3. `APP_HOST` 和 `APP_PORT` 是否被其他进程占用
-4. `ENABLE_LLM_DEBATE=true` 时，是否真的安装了 `openai`
+1. 确认已经创建并激活 `.venv`
+2. 确认已执行 `pip install -r backend\requirements.txt`
+3. 确认 `APP_HOST` 和 `APP_PORT` 未被占用
+4. 如启用 LLM，确认相关依赖和密钥可用
 
 快速验证：
 
@@ -31,221 +25,82 @@
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-如果仍失败，优先看日志，而不是直接改业务代码。
-
 ## 3. 前端启动失败
 
-常见原因：
+建议顺序：
 
-- 没执行 `npm install`
-- Node 版本过旧
-- TypeScript 或 lint 报错
-
-建议命令：
+1. 确认已执行 `npm install`
+2. 确认 Node 版本满足要求
+3. 先跑 `lint` 和 `type-check`
 
 ```powershell
 Set-Location frontend
-npm install
 npm.cmd run lint
 npm.cmd run type-check
 ```
 
-如果前端能启动但页面提示请求失败，往往不是前端本身的问题，而是后端或代理配置问题。
+如果前端能启动但页面请求失败，通常优先排查后端或代理，不是前端页面本身。
 
-## 4. `.env` 配置问题怎么查
+## 4. `.env` 最容易出错的项
 
-最容易出错的是下面这些变量：
+重点检查：
 
+- `TDX_API_BASE_URL`
+- `ENABLE_MOOTDX`
+- `MOOTDX_TDX_DIR`
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`
 - `LLM_PROVIDER`
 - `ENABLE_LLM_DEBATE`
-- `ENABLE_MOOTDX`
-- `MOOTDX_TDX_DIR`
 
-排查思路：
+建议排查顺序：
 
 1. 先把不需要的能力关掉
-2. 先保证最小链路能跑
-3. 再逐个打开 LLM 或 mootdx
+2. 先跑通最小链路
+3. 再逐项打开 tdx-api、mootdx、LLM
 
-例如，如果你只是验证单票链路：
+## 5. provider 问题怎么判断
 
-```env
-ENABLE_LLM_DEBATE=false
-ENABLE_MOOTDX=false
-```
+先看日志里具体是哪一类问题：
 
-先这样跑通，之后再逐步加配置。
+- provider 不可用
+- capability 缺失
+- stale / invalid
+- fallback
 
-## 5. provider 不可用如何排查
+当前项目已经尽量把这些状态结构化暴露出来，所以不要只看“有没有结果”，还要看：
 
-常见现象：
+- `provider_used`
+- `fallback_applied`
+- `fallback_reason`
+- `warning_messages`
+- `quality_status`
 
-- 单票页某个模块加载失败
-- 初筛或深筛结果为空
-- 后端日志里出现 provider 不可用或 capability 缺失
+## 6. mootdx 问题怎么查
 
-排查步骤：
-
-1. 看后端日志里具体是哪一个 provider 失败
-2. 看失败的是：
-   - 网络类问题
-   - 认证类问题
-   - 本地目录类问题
-   - capability 不支持
-3. 确认系统是否已经优雅回退
-
-注意：
-
-- provider 失败不一定代表系统整体不可用
-- 当前架构允许 provider 失效后部分模块继续工作
-
-## 6. mootdx 本地目录问题怎么查
-
-如果开启：
+如果启用了：
 
 ```env
 ENABLE_MOOTDX=true
 MOOTDX_TDX_DIR=C:/new_tdx
 ```
 
-但仍无法使用，优先检查：
+但系统仍未使用 `mootdx`，优先检查：
 
-1. 路径是否真实存在
-2. 是否是通达信实际数据目录
-3. 当前目录权限是否允许进程读取
-4. 本机数据是否完整
+1. 目录是否真实存在
+2. 是否是正确的通达信数据目录
+3. 本地数据是否足够新
+4. 请求区间尾段是否完整
 
-建议做法：
+注意：
 
-- 如果你不确定目录是否正确，先把 `ENABLE_MOOTDX=false`
-- 先验证其他 provider 能否跑通
-- 再单独回头排 mootdx
+- `mootdx` 是本地高速历史源，不代表永远最新
+- freshness 或完整性不达标时，系统会自动降级
 
-## 7. LLM debate 回退机制怎么判断
+## 7. 如何判断是“无数据”还是“降级”
 
-你可以从三个位置判断是否已经回退到规则版。
+重点看这些字段：
 
-### A. 前端页面
-
-单票页 `Debate Review` 模块里会显示：
-
-- `运行模式`
-  - `LLM`
-  - `规则版`
-
-### B. API 返回字段
-
-看 `debate-review` 返回里的：
-
-- `runtime_mode`
-
-### C. 后端日志
-
-常见日志关键词：
-
-- `debate.runtime.select`
-- `llm.role.start`
-- `llm.role.done`
-- `LLM debate 执行失败，自动回退规则版`
-
-如果你明明传了 `use_llm=true`，但最终返回 `rule_based`，通常说明：
-
-- API key 不可用
-- provider 不支持当前请求形式
-- 请求超时
-- schema 校验失败
-
-## 8. workflow 运行失败怎么查
-
-优先看下面三个地方：
-
-1. 页面上的 `run_id`
-2. `GET /workflows/runs/{run_id}`
-3. 本地 run record 文件
-
-运行记录文件位置：
-
-```text
-data/workflow_runs/{run_id}.json
-```
-
-排查顺序建议：
-
-1. 先看 `status`
-2. 再看 `error_message`
-3. 再看每个 step 的 `output_summary` 和 `error_message`
-
-如果是深筛 workflow，还要看是否只是个别 symbol 失败，而不是整个 workflow 失败。
-
-## 9. 页面只显示“部分模块加载失败”怎么办
-
-先不要急着怀疑整个系统坏了。
-
-这通常意味着：
-
-- 某个 API 正常
-- 某个 API 失败
-- 前端仍把成功部分展示出来了
-
-推荐排查：
-
-1. 看页面上失败的是哪个模块
-2. 去 Swagger 或浏览器直接请求对应接口
-3. 再看后端日志
-
-## 10. 火山方舟超时问题
-
-如果你使用火山方舟 coding/plan 模型，当前建议：
-
-```env
-OPENAI_BASE_URL=https://ark.cn-beijing.volces.com/api/coding/v3
-LLM_PROVIDER=auto
-ENABLE_LLM_DEBATE=true
-LLM_DEBATE_TIMEOUT_SECONDS=60
-```
-
-原因：
-
-- 深度思考模型响应可能明显长于普通接口
-- 超时过短时，会直接触发 LLM 回退
-
-如果仍偶发超时，可以先把 `LLM_DEBATE_TIMEOUT_SECONDS` 提到 `90` 再观察。
-
-## 11. 什么时候应该直接看源码或架构文档
-
-如果你遇到的是下面这些问题，直接看文档通常更快：
-
-- 不确定 workflow 和 review / debate / strategy 的关系
-- 不知道该从哪个页面入口开始用
-- 不知道某个能力是不是已经正式上线
-
-建议顺序：
-
-1. [快速开始](quickstart.md)
-2. [日常使用说明](daily-usage.md)
-3. [数据源与边界说明](data-and-limitations.md)
-4. [Data 清洗层总结 v0.1](data-cleaning.md)
-5. [系统架构](../architecture.md)
-6. [稳定性审计 v1](../audits/stability-review-v1.md)
-
-## 12. pytest 启动卡住（插件自动加载）
-
-在部分本机环境里，`pytest` 可能在启动阶段卡住（常见于外部插件自动加载）。
-
-建议先用最小命令验证：
-
-```powershell
-$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
-python -m pytest backend/tests/test_workspace_bundle_service.py -q
-```
-
-如果这样能正常跑，再继续运行完整测试命令。
-
-## 13. 如何判断公告/财务是“无数据”还是“降级”
-
-优先看以下字段，而不是只看 `count`：
 - `quality_status`
 - `cleaning_warnings`
 - `provider_used`
@@ -255,42 +110,76 @@ python -m pytest backend/tests/test_workspace_bundle_service.py -q
 - `freshness_mode`
 
 经验判断：
-- `quality_status=ok` 且 warning 为空：通常可正常使用
-- `quality_status=warning/degraded`：需要结合 warning/缺失字段判断可信度
-- `count=0` 且有 fallback/warning：更可能是 provider 不可用或降级路径
-- `count=0` 且无异常字段：更可能是窗口内确实无数据
 
-## 14. 交易记录常见报错（405 / 422 / 冲突提示）
+- `count=0` 且有 `fallback_reason` 或 warning，通常是 provider 问题或降级
+- `count=0` 且无明显 warning，更可能是当前窗口确实没有数据
 
-### 14.1 “操作失败 请求失败（405）”
+## 8. LLM 模式为什么会回退
 
-常见原因：
-- 前端仍在调用旧方法（例如历史缓存里是 `PUT`），而后端当前是 `PATCH /reviews/{review_id}`
-- 本地前端代码已更新但浏览器缓存未更新
+你可以从三个地方判断：
 
-建议排查：
-1. 强制刷新页面（`Ctrl+F5`）后重试
-2. 在浏览器开发者工具 Network 确认实际请求方法为 `PATCH`
-3. 若仍异常，重启前端开发服务并再次验证
+1. 页面里的运行模式提示
+2. API 返回中的：
+   - `runtime_mode_requested`
+   - `runtime_mode_effective`
+3. 日志中的 fallback 说明
 
-### 14.2 “操作失败 请求失败（422）”
+如果你传了 `use_llm=true`，但最终是规则版，通常是：
 
-常见原因：
-- `BUY/SELL/ADD/REDUCE` 未填写有效 `price` 或 `quantity`
-- `reason_type` 与 `side` 不匹配（如 `watch_only` 搭配 `BUY`）
+- API key 不可用
+- 超时
+- provider 或 schema 问题
 
-建议排查：
-1. 先检查动作是否为 `SKIP`
-2. 非 `SKIP` 必填价格与数量
-3. 根据动作重新选择原因类型
+## 9. workflow 一直不出结果怎么办
 
-### 14.3 “当前交易与原判断存在冲突”
+优先看：
 
-这条提示来自一致性校验，核心含义：
-- 当前交易：你在表单里选择的 `side`（买入/卖出/加仓/减仓/跳过）
-- 原判断：系统用于校验的“方向基线”（优先 `decision_brief.action_now` 映射，回退 `review-report`）
-- 冲突：两者方向不一致（例如原判断 `AVOID`，但你选择 `BUY`）
+1. 页面里的 `run_id`
+2. `GET /workflows/runs/{run_id}`
+3. 本地 run 记录和后端日志
 
-处理方式：
-- 直接接受系统默认：`strategy_alignment=not_aligned`
-- 若仍要手动改为 `aligned/partially_aligned`，必须填写 `alignment_override_reason`
+重点检查：
+
+- `status`
+- `error_message`
+- 每个 step 的摘要
+- `failed_symbols`
+
+## 10. 单票页或选股页出现模块级失败怎么办
+
+先确认是不是“局部失败”而不是整页失败。
+
+当前系统允许：
+
+- 单个模块失败
+- 主结果继续返回
+
+所以你需要先看：
+
+1. 失败模块名
+2. 对应的 `module_status_summary`
+3. 日志里是 provider 问题、数据质量问题，还是预测 / workflow / LLM 问题
+
+## 11. pytest 启动卡住怎么办
+
+在部分本机环境里，`pytest` 可能因为插件自动加载卡住。
+
+建议先这样跑：
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+python -m pytest backend/tests/test_workspace_bundle_service.py -q
+```
+
+如果这样能正常跑，再继续执行更完整的测试命令。
+
+## 12. 文档应该按什么顺序看
+
+如果你不确定问题属于哪条主线，建议按下面顺序看文档：
+
+1. [快速开始](quickstart.md)
+2. [日常使用说明](daily-usage.md)
+3. [数据源与边界](data-and-limitations.md)
+4. [Data 清洗层说明](data-cleaning.md)
+5. [系统架构](../architecture.md)
+6. [当前阶段](../current_phase.md)
