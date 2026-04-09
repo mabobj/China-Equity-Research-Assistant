@@ -1426,6 +1426,9 @@ def _build_daily_bar_response(
     warning_messages = list(dict.fromkeys(warning_messages))
     if quality_status is None and bars:
         quality_status = "ok"
+    adjustment_mode, corporate_action_mode, corporate_action_warnings = _summarize_daily_bar_metadata(
+        bars,
+    )
     return DailyBarResponse(
         symbol=symbol,
         start_date=start_date,
@@ -1436,6 +1439,9 @@ def _build_daily_bar_response(
         cleaning_warnings=warning_messages,
         dropped_rows=dropped_rows,
         dropped_duplicate_rows=dropped_duplicate_rows,
+        adjustment_mode=adjustment_mode,
+        corporate_action_mode=corporate_action_mode,
+        corporate_action_warnings=corporate_action_warnings,
     )
 
 
@@ -1460,6 +1466,46 @@ def _assess_daily_bar_result(
             return "mootdx_recent_segment_incomplete"
 
     return None
+
+
+def _summarize_daily_bar_metadata(
+    bars: Sequence[DailyBar],
+) -> tuple[str, str, list[str]]:
+    if not bars:
+        return "raw", "unmodeled", []
+
+    adjustment_modes = {
+        (item.adjustment_mode or "raw")
+        for item in bars
+    }
+    trading_statuses = {
+        item.trading_status
+        for item in bars
+        if item.trading_status
+    }
+    corporate_action_flags = {
+        flag
+        for item in bars
+        for flag in item.corporate_action_flags
+    }
+
+    warnings: list[str] = []
+    adjustment_mode = "raw"
+    if len(adjustment_modes) == 1:
+        adjustment_mode = next(iter(adjustment_modes))
+    elif adjustment_modes:
+        warnings.append("mixed_adjustment_modes_detected")
+
+    if not corporate_action_flags:
+        warnings.append("corporate_actions_not_modeled_yet")
+        if trading_statuses:
+            warnings.append(
+                "trading_status_present_without_structured_corporate_action_mapping",
+            )
+        return adjustment_mode, "unmodeled", warnings
+
+    warnings.append("corporate_action_flags_present_without_adjustment_engine")
+    return adjustment_mode, "flags_only", warnings
 
 
 @dataclass(frozen=True)

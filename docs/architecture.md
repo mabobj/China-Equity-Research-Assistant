@@ -153,6 +153,13 @@
 
 这套体系已经支撑“本地优先、按日复用、缺啥补啥”的当前链路。
 
+当前在日线层还已进一步显式化：
+
+- `adjustment_mode`：统一表达当前价格口径，第一阶段默认收口为 `raw`
+- `trading_status`：为停牌等交易状态预留标准化承载位
+- `corporate_action_flags`：为分红送转等公司行为影响预留标准化承载位
+- `DailyBarResponse` 增加 `corporate_action_mode / corporate_action_warnings`，避免把“公司行为尚未完整建模”继续隐式化
+
 ## 5. 长期目标架构
 
 长期目标不是继续把现有研究模块无限堆高，而是把现有工作台作为产品壳层，逐步接入更完整的预测与因子系统。

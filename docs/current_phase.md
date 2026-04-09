@@ -40,6 +40,7 @@
 - 点时一致性第一阶段已完成，第二阶段已把 `workspace-bundle`、关键单票 route 与 workflow 的 `as_of_date` 读取口径收拢为“可显式指定、不可安全历史重算时受控失败”
 - 关键数据域扩展规划
 - 复权与公司行为口径
+- 复权与公司行为口径第一阶段已完成，当前已把日线价格口径与公司行为元数据显式接入 schema、normalize、local store 与 API 输出
 - 数据血缘与版本可追溯
 - provider 能力矩阵与健康度清晰化
 - provider 能力矩阵与健康度第二阶段已完成，当前已存在集中 capability 策略、主用/兜底角色说明、capability 级健康判定以及最小只读诊断 API

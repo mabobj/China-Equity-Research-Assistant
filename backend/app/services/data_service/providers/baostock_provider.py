@@ -148,6 +148,7 @@ class BaostockProvider:
                     close=_as_optional_float(row.get("close")),
                     volume=_as_optional_float(row.get("volume")),
                     amount=_as_optional_float(row.get("amount")),
+                    adjustment_mode="raw",
                     source=self.name,
                 ),
             )

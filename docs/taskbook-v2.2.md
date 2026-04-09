@@ -118,6 +118,15 @@
 
 把长期回测和因子验证绕不过去的价格口径问题集中化处理。
 
+### 当前进度
+
+- 已完成第一阶段：
+  - `DailyBar / DailyBarResponse` 已显式补齐 `adjustment_mode` 与公司行为元数据承载位，不再把“默认原始价”只放在隐式约定里；
+  - `normalize.py` 已集中承载复权口径标准化、交易状态标准化与公司行为标记标准化；
+  - `daily_bars` 本地存储已增量补齐 `adjustment_mode / trading_status / corporate_action_flags_json` 列，并保持旧库自动兼容；
+  - `market_data_service` 已在日线响应层输出统一的 `adjustment_mode / corporate_action_mode / corporate_action_warnings`；
+  - 已补 store / service / API 契约测试，确保价格口径与公司行为元数据不丢失。
+
 ### 关键任务
 
 - 明确原始价 / 前复权 / 后复权口径

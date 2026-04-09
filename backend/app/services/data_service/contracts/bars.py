@@ -40,6 +40,9 @@ class CleanDailyBar(BaseModel):
     amount: Optional[float] = None
     turnover_rate: Optional[float] = None
     pct_change: Optional[float] = None
+    adjustment_mode: Literal["raw", "qfq", "hfq"] = "raw"
+    trading_status: Optional[str] = None
+    corporate_action_flags: list[str] = Field(default_factory=list)
     source: str
     as_of_date: date
     quality_status: BarQualityStatus
@@ -58,6 +61,9 @@ class CleanDailyBar(BaseModel):
             close=self.close,
             volume=self.volume,
             amount=self.amount,
+            adjustment_mode=self.adjustment_mode,
+            trading_status=self.trading_status,
+            corporate_action_flags=self.corporate_action_flags,
             source=self.source,
         )
 

@@ -6,8 +6,11 @@ from app.services.data_service.exceptions import InvalidSymbolError
 from app.services.data_service.normalize import (
     canonical_symbol_from_provider_symbol,
     convert_symbol_for_provider,
+    normalize_adjustment_mode,
+    normalize_corporate_action_flags,
     normalize_amount_to_yuan,
     normalize_price_to_yuan,
+    normalize_trading_status,
     normalize_volume_to_shares,
     normalize_symbol,
     parse_provider_date,
@@ -54,6 +57,19 @@ def test_provider_date_and_unit_normalization_are_centralized() -> None:
     assert normalize_volume_to_shares(123.0, source="akshare") == 12300.0
     assert normalize_volume_to_shares(123.0, source="mootdx") == 12300.0
     assert normalize_amount_to_yuan(12345.0, source="tdx_api") == 12.345
+
+
+def test_adjustment_and_corporate_action_normalization_are_centralized() -> None:
+    assert normalize_adjustment_mode("3", source="baostock") == "raw"
+    assert normalize_adjustment_mode("1", source="baostock") == "qfq"
+    assert normalize_adjustment_mode("2", source="baostock") == "hfq"
+    assert normalize_adjustment_mode("", source="akshare") == "raw"
+    assert normalize_trading_status("trading") == "normal"
+    assert normalize_trading_status("halt") == "suspended"
+    assert normalize_corporate_action_flags("dividend, split , dividend") == [
+        "dividend",
+        "split",
+    ]
 
 
 @pytest.mark.parametrize("raw_symbol", ["", "abc", "600519.XY", "12345"])

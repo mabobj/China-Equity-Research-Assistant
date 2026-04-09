@@ -223,6 +223,56 @@ def normalize_amount_to_yuan(value: float | None, *, source: str) -> float | Non
     return value
 
 
+def normalize_adjustment_mode(
+    value: str | None,
+    *,
+    source: str,
+) -> Literal["raw", "qfq", "hfq"]:
+    """统一 provider 的复权口径表达。"""
+    normalized_source = normalize_provider_name(source)
+    raw_value = (value or "").strip().lower()
+    if raw_value in {"", "raw", "none", "3"}:
+        return "raw"
+    if raw_value in {"qfq", "forward", "1"}:
+        return "qfq"
+    if raw_value in {"hfq", "backward", "2"}:
+        return "hfq"
+    if normalized_source in {"tdx_api", "mootdx", "akshare", "baostock"}:
+        return "raw"
+    return "raw"
+
+
+def normalize_trading_status(value: str | None) -> str | None:
+    """统一交易状态表达。"""
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"", "unknown", "none"}:
+        return None
+    if normalized in {"active", "normal", "trading"}:
+        return "normal"
+    if normalized in {"suspend", "suspended", "halt"}:
+        return "suspended"
+    return normalized
+
+
+def normalize_corporate_action_flags(value: Any) -> list[str]:
+    """统一公司行为标记表达。"""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = [item.strip().lower() for item in re.split(r"[,;|]", value) if item.strip()]
+        return list(dict.fromkeys(parts))
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+        normalized_items = [
+            str(item).strip().lower()
+            for item in value
+            if str(item).strip()
+        ]
+        return list(dict.fromkeys(normalized_items))
+    return [str(value).strip().lower()] if str(value).strip() else []
+
+
 def normalize_daily_bar_rows(
     rows: Iterable[DailyBar],
     *,
@@ -248,6 +298,16 @@ def normalize_daily_bar_rows(
                     source=row_source,
                 ),
                 amount=normalize_amount_to_yuan(_to_optional_float(row.amount), source=row_source),
+                adjustment_mode=normalize_adjustment_mode(
+                    getattr(row, "adjustment_mode", None),
+                    source=row_source,
+                ),
+                trading_status=normalize_trading_status(
+                    getattr(row, "trading_status", None),
+                ),
+                corporate_action_flags=normalize_corporate_action_flags(
+                    getattr(row, "corporate_action_flags", None),
+                ),
                 source=row_source,
             )
         )

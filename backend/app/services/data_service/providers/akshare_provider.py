@@ -123,6 +123,7 @@ class AkshareProvider:
                     close=_as_optional_float(row.get("收盘")),
                     volume=_as_optional_float(row.get("成交量")),
                     amount=_as_optional_float(row.get("成交额")),
+                    adjustment_mode="raw",
                     source=self.name,
                 ),
             )

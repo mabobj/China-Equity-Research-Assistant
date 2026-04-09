@@ -36,6 +36,9 @@ class DailyBar(BaseModel):
     close: Optional[float] = None
     volume: Optional[float] = None
     amount: Optional[float] = None
+    adjustment_mode: Literal["raw", "qfq", "hfq"] = "raw"
+    trading_status: Optional[str] = None
+    corporate_action_flags: list[str] = Field(default_factory=list)
     source: str
 
 
@@ -53,6 +56,9 @@ class DailyBarResponse(BaseModel):
     cleaning_warnings: list[str] = Field(default_factory=list)
     dropped_rows: int = Field(default=0, ge=0)
     dropped_duplicate_rows: int = Field(default=0, ge=0)
+    adjustment_mode: Literal["raw", "qfq", "hfq"] = "raw"
+    corporate_action_mode: Literal["unmodeled", "flags_only"] = "unmodeled"
+    corporate_action_warnings: list[str] = Field(default_factory=list)
 
 
 class IntradayBar(BaseModel):

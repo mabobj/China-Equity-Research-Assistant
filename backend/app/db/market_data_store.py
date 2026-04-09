@@ -103,7 +103,19 @@ class LocalMarketDataStore:
     ) -> list[DailyBar]:
         """读取本地日线数据。"""
         query = """
-            SELECT symbol, trade_date, open, high, low, close, volume, amount, source
+            SELECT
+                symbol,
+                trade_date,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                amount,
+                adjustment_mode,
+                trading_status,
+                corporate_action_flags_json,
+                source
             FROM daily_bars
             WHERE symbol = ?
         """
@@ -128,6 +140,11 @@ class LocalMarketDataStore:
                 close=row["close"],
                 volume=row["volume"],
                 amount=row["amount"],
+                adjustment_mode=row["adjustment_mode"] or "raw",
+                trading_status=row["trading_status"],
+                corporate_action_flags=_load_json_text_list(
+                    row["corporate_action_flags_json"],
+                ),
                 source=row["source"],
             )
             for row in rows
@@ -166,8 +183,9 @@ class LocalMarketDataStore:
         self._executemany(
             """
             INSERT OR REPLACE INTO daily_bars (
-                symbol, trade_date, open, high, low, close, volume, amount, source, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                symbol, trade_date, open, high, low, close, volume, amount,
+                adjustment_mode, trading_status, corporate_action_flags_json, source, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 [
@@ -179,6 +197,9 @@ class LocalMarketDataStore:
                     bar.close,
                     bar.volume,
                     bar.amount,
+                    bar.adjustment_mode,
+                    bar.trading_status,
+                    _dump_json_text_list(bar.corporate_action_flags),
                     bar.source,
                     datetime.utcnow(),
                 ]
@@ -691,12 +712,16 @@ class LocalMarketDataStore:
                     close DOUBLE,
                     volume DOUBLE,
                     amount DOUBLE,
+                    adjustment_mode TEXT,
+                    trading_status TEXT,
+                    corporate_action_flags_json TEXT,
                     source TEXT NOT NULL,
                     updated_at TIMESTAMP NOT NULL,
                     PRIMARY KEY(symbol, trade_date)
                 )
                 """
             )
+            self._ensure_daily_bar_columns(connection)
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS announcement_events (
@@ -815,6 +840,27 @@ class LocalMarketDataStore:
                 continue
             connection.execute(
                 "ALTER TABLE financial_reports ADD COLUMN {column_name} {column_type}".format(
+                    column_name=column_name,
+                    column_type=column_type,
+                ),
+            )
+
+    def _ensure_daily_bar_columns(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+    ) -> None:
+        """确保 daily_bars 具备价格口径与公司行为元数据列。"""
+        expected_columns = {
+            "adjustment_mode": "TEXT",
+            "trading_status": "TEXT",
+            "corporate_action_flags_json": "TEXT",
+        }
+        existing_columns = self._table_columns(connection, "daily_bars")
+        for column_name, column_type in expected_columns.items():
+            if column_name in existing_columns:
+                continue
+            connection.execute(
+                "ALTER TABLE daily_bars ADD COLUMN {column_name} {column_type}".format(
                     column_name=column_name,
                     column_type=column_type,
                 ),

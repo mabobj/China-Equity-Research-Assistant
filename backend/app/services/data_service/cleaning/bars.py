@@ -126,6 +126,17 @@ def clean_daily_bars(
             amount=amount,
             turnover_rate=turnover_rate,
             pct_change=pct_change,
+            adjustment_mode=getattr(row, "adjustment_mode", "raw") if isinstance(row, DailyBar) else str(raw_item.get("adjustment_mode") or "raw"),
+            trading_status=(
+                getattr(row, "trading_status", None)
+                if isinstance(row, DailyBar)
+                else raw_item.get("trading_status")
+            ),
+            corporate_action_flags=(
+                list(getattr(row, "corporate_action_flags", []))
+                if isinstance(row, DailyBar)
+                else list(raw_item.get("corporate_action_flags") or [])
+            ),
             source=source,
             as_of_date=normalized_as_of_date,
             quality_status=row_status,  # type: ignore[arg-type]
