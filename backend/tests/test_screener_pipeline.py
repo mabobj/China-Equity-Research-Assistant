@@ -32,6 +32,8 @@ class FakeMarketDataService:
     def __init__(self) -> None:
         self.session_scope_entered = 0
         self.requested_start_dates: list[str] = []
+        self.financial_allow_remote_sync_seen: list[bool] = []
+        self.announcement_allow_remote_sync_seen: list[bool] = []
 
     @contextmanager
     def session_scope(self) -> Iterator[None]:
@@ -115,7 +117,14 @@ class FakeMarketDataService:
             quality_status="ok",
         )
 
-    def get_stock_financial_summary(self, symbol: str) -> FinancialSummary:
+    def get_stock_financial_summary(
+        self,
+        symbol: str,
+        *,
+        force_refresh: bool = False,
+        allow_remote_sync: bool = True,
+    ) -> FinancialSummary:
+        self.financial_allow_remote_sync_seen.append(allow_remote_sync)
         return FinancialSummary(
             symbol=symbol,
             name="测试股票",
@@ -136,7 +145,11 @@ class FakeMarketDataService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         limit: int = 20,
+        *,
+        force_refresh: bool = False,
+        allow_remote_sync: bool = True,
     ) -> AnnouncementListResponse:
+        self.announcement_allow_remote_sync_seen.append(allow_remote_sync)
         return AnnouncementListResponse(
             symbol=symbol,
             count=1,
@@ -159,6 +172,7 @@ class FakeMarketDataServiceWithProviderNames(FakeMarketDataService):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         force_refresh: bool = False,
+        allow_remote_sync: bool = True,
         provider_names: Optional[tuple[str, ...]] = None,
     ) -> DailyBarResponse:
         if provider_names is not None:
@@ -312,6 +326,10 @@ def test_run_screener_uses_mootdx_first_provider_priority() -> None:
         "baostock",
         "akshare",
     )
+    assert market_data_service.financial_allow_remote_sync_seen
+    assert set(market_data_service.financial_allow_remote_sync_seen) == {False}
+    assert market_data_service.announcement_allow_remote_sync_seen
+    assert set(market_data_service.announcement_allow_remote_sync_seen) == {False}
 
 
 def test_run_screener_generates_failed_placeholder_when_bars_quality_failed() -> None:
@@ -547,3 +565,21 @@ def test_run_screener_emits_structured_runtime_logs(caplog) -> None:
     assert any("event=screener.run.heartbeat" in message for message in messages)
     assert any("event=screener.pipeline.completed" in message for message in messages)
     assert any("run_id=run-log-001" in message for message in messages)
+
+
+def test_run_screener_keeps_contract_under_controlled_parallel_scan() -> None:
+    market_data_service = FakeMarketDataService()
+    pipeline = ScreenerPipeline(
+        market_data_service=market_data_service,
+        technical_analysis_service=FakeTechnicalAnalysisService(),
+        factor_snapshot_service=FakeFactorSnapshotService(),
+        batch_scan_max_workers=3,
+    )
+
+    response = pipeline.run_screener(max_symbols=3)
+
+    assert response.scanned_symbols == 3
+    assert len(response.buy_candidates) == 1
+    assert len(response.watch_candidates) == 1
+    assert len(response.avoid_candidates) == 0
+    assert market_data_service.session_scope_entered == 1

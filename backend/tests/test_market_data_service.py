@@ -1118,6 +1118,31 @@ def test_service_financial_summary_with_secondary_metrics_is_warning(tmp_path: P
     assert "roe" in summary.missing_fields
 
 
+def test_service_financial_summary_allow_remote_sync_disabled_returns_degraded_placeholder(
+    tmp_path: Path,
+) -> None:
+    provider = FinancialSummaryProvider()
+    service = MarketDataService(
+        providers=[provider],
+        local_store=LocalMarketDataStore(tmp_path / "market.duckdb"),
+    )
+
+    summary = service.get_stock_financial_summary(
+        "600519.SH",
+        allow_remote_sync=False,
+    )
+
+    assert provider.financial_call_count == 0
+    assert summary.symbol == "600519.SH"
+    assert summary.quality_status == "degraded"
+    assert summary.source_mode == "local_only"
+    assert summary.freshness_mode == "cache_miss_remote_sync_disabled"
+    assert "remote_sync_skipped_no_cache" in summary.cleaning_warnings
+    assert "revenue" in summary.missing_fields
+    assert "net_profit" in summary.missing_fields
+    assert "roe" in summary.missing_fields
+
+
 def test_service_announcements_runs_cleaning_and_deduplicates() -> None:
     """公告接口应统一走清洗链路并输出去重后的结构化结果。"""
     provider = AnnouncementProvider()
@@ -1173,6 +1198,31 @@ def test_service_announcements_cache_hit_keeps_cleaning_metadata(tmp_path: Path)
     assert second_response.as_of_date is not None
     assert second_response.dropped_duplicate_rows == 0
     assert second_response.items[0].announcement_type in {"buyback", "earnings", "other"}
+
+
+def test_service_announcements_allow_remote_sync_disabled_returns_empty_warning_response(
+    tmp_path: Path,
+) -> None:
+    provider = AnnouncementProvider()
+    service = MarketDataService(
+        providers=[provider],
+        local_store=LocalMarketDataStore(tmp_path / "market.duckdb"),
+    )
+
+    response = service.get_stock_announcements(
+        symbol="600519.SH",
+        start_date="2026-03-20",
+        end_date="2026-03-30",
+        limit=20,
+        allow_remote_sync=False,
+    )
+
+    assert provider.announcement_call_count == 0
+    assert response.count == 0
+    assert response.quality_status == "warning"
+    assert response.source_mode == "local_only"
+    assert response.freshness_mode == "cache_miss_remote_sync_disabled"
+    assert "remote_sync_skipped_no_cache" in response.cleaning_warnings
 
 
 def test_provider_capability_reports_include_roles_and_persistence_rules() -> None:

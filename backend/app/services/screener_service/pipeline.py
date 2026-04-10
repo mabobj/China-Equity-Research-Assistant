@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 import logging
@@ -61,6 +62,7 @@ class ScreenerPipeline:
             "baostock",
             "akshare",
         ),
+        batch_scan_max_workers: int = 4,
     ) -> None:
         self._market_data_service = market_data_service
         self._technical_analysis_service = technical_analysis_service
@@ -69,6 +71,7 @@ class ScreenerPipeline:
         self._lookback_days = max(lookback_days, 180)
         self._progress_log_interval = max(progress_log_interval, 1)
         self._batch_daily_bar_provider_priority = batch_daily_bar_provider_priority
+        self._batch_scan_max_workers = max(batch_scan_max_workers, 1)
 
     def run_screener(
         self,
@@ -109,7 +112,7 @@ class ScreenerPipeline:
             ).isoformat()
 
             logger.info(
-                "event=screener.pipeline.started run_id=%s workflow=%s batch_size=%s total_symbols=%s scanned_symbols=%s top_n=%s lookback_start_date=%s force_refresh=%s cursor_start_symbol=%s cursor_start_index=%s",
+                "event=screener.pipeline.started run_id=%s workflow=%s batch_size=%s total_symbols=%s scanned_symbols=%s top_n=%s lookback_start_date=%s force_refresh=%s cursor_start_symbol=%s cursor_start_index=%s scan_max_workers=%s",
                 run_id,
                 workflow_name,
                 batch_size,
@@ -120,21 +123,31 @@ class ScreenerPipeline:
                 force_refresh,
                 cursor_start_symbol,
                 cursor_start_index,
+                self._batch_scan_max_workers,
             )
 
-            for index, item in enumerate(scan_items, start=1):
-                symbol_started_at = perf_counter()
-                scan_result = self._scan_one_symbol(
-                    item=item,
-                    start_date=lookback_start_date,
-                    force_refresh=force_refresh,
-                    run_context=run_context,
-                )
-                symbol_elapsed_ms = int((perf_counter() - symbol_started_at) * 1000)
-                if scan_result is None:
-                    skipped_symbols += 1
+            processed_symbols = 0
+            max_workers = min(self._batch_scan_max_workers, max(scanned_symbols, 1))
+            if max_workers == 1:
+                for item in scan_items:
+                    scan_result = self._scan_one_symbol(
+                        item=item,
+                        start_date=lookback_start_date,
+                        force_refresh=force_refresh,
+                        run_context=run_context,
+                    )
+                    processed_symbols += 1
+                    if scan_result is None:
+                        skipped_symbols += 1
+                    else:
+                        if scan_result.failed_placeholder is not None:
+                            failed_placeholders.append(scan_result.failed_placeholder)
+                        if scan_result.candidate is not None:
+                            candidates.append(scan_result.candidate)
+                        if latest_as_of_date is None or scan_result.as_of_date > latest_as_of_date:
+                            latest_as_of_date = scan_result.as_of_date
                     self._log_progress(
-                        index=index,
+                        index=processed_symbols,
                         total=scanned_symbols,
                         item=item,
                         candidates=candidates,
@@ -142,30 +155,52 @@ class ScreenerPipeline:
                         started_at=started_at,
                         run_context=run_context,
                     )
-                    logger.info(
-                        "event=screener.symbol.completed run_id=%s workflow=%s symbol=%s elapsed_ms=%s outcome=skipped",
-                        run_id,
-                        workflow_name,
-                        item.symbol,
-                        symbol_elapsed_ms,
-                    )
-                    continue
-                if scan_result.failed_placeholder is not None:
-                    failed_placeholders.append(scan_result.failed_placeholder)
-                if scan_result.candidate is not None:
-                    candidates.append(scan_result.candidate)
-
-                if latest_as_of_date is None or scan_result.as_of_date > latest_as_of_date:
-                    latest_as_of_date = scan_result.as_of_date
-                self._log_progress(
-                    index=index,
-                    total=scanned_symbols,
-                    item=item,
-                    candidates=candidates,
-                    skipped_symbols=skipped_symbols,
-                    started_at=started_at,
-                    run_context=run_context,
-                )
+            else:
+                with ThreadPoolExecutor(
+                    max_workers=max_workers,
+                    thread_name_prefix="screener-scan",
+                ) as executor:
+                    future_map = {
+                        executor.submit(
+                            self._scan_one_symbol,
+                            item=item,
+                            start_date=lookback_start_date,
+                            force_refresh=force_refresh,
+                            run_context=run_context,
+                        ): item
+                        for item in scan_items
+                    }
+                    for future in as_completed(future_map):
+                        item = future_map[future]
+                        processed_symbols += 1
+                        try:
+                            scan_result = future.result()
+                        except Exception:
+                            logger.exception(
+                                "event=screener.symbol.unhandled_error run_id=%s workflow=%s symbol=%s",
+                                run_id,
+                                workflow_name,
+                                item.symbol,
+                            )
+                            scan_result = None
+                        if scan_result is None:
+                            skipped_symbols += 1
+                        else:
+                            if scan_result.failed_placeholder is not None:
+                                failed_placeholders.append(scan_result.failed_placeholder)
+                            if scan_result.candidate is not None:
+                                candidates.append(scan_result.candidate)
+                            if latest_as_of_date is None or scan_result.as_of_date > latest_as_of_date:
+                                latest_as_of_date = scan_result.as_of_date
+                        self._log_progress(
+                            index=processed_symbols,
+                            total=scanned_symbols,
+                            item=item,
+                            candidates=candidates,
+                            skipped_symbols=skipped_symbols,
+                            started_at=started_at,
+                            run_context=run_context,
+                        )
 
         ready_to_buy_candidates = _rank_candidates(
             [item for item in candidates if item.v2_list_type == "READY_TO_BUY"],
@@ -379,6 +414,7 @@ class ScreenerPipeline:
         financial_summary, financial_quality = _safe_get_financial_summary(
             self._market_data_service,
             item.symbol,
+            force_refresh=force_refresh,
         )
         financial_elapsed_ms = int((perf_counter() - financial_started_at) * 1000)
         announcement_started_at = perf_counter()
@@ -386,6 +422,7 @@ class ScreenerPipeline:
             self._market_data_service,
             item.symbol,
             technical_snapshot.as_of_date,
+            force_refresh=force_refresh,
         )
         announcement_elapsed_ms = int((perf_counter() - announcement_started_at) * 1000)
         if self._factor_snapshot_service is not None:
@@ -814,9 +851,24 @@ def _append_failed_placeholders(
 def _safe_get_financial_summary(
     market_data_service: MarketDataService,
     symbol: str,
+    *,
+    force_refresh: bool = False,
 ) -> tuple[Optional[FinancialSummary], _QUALITY_STATUS]:
     try:
-        summary = market_data_service.get_stock_financial_summary(symbol)
+        try:
+            summary = market_data_service.get_stock_financial_summary(
+                symbol,
+                force_refresh=force_refresh,
+                allow_remote_sync=False,
+            )
+        except TypeError:
+            try:
+                summary = market_data_service.get_stock_financial_summary(
+                    symbol,
+                    force_refresh=force_refresh,
+                )
+            except TypeError:
+                summary = market_data_service.get_stock_financial_summary(symbol)
         return summary, _normalize_quality_status(summary.quality_status)
     except DataServiceError:
         return None, "warning"
@@ -826,14 +878,35 @@ def _safe_get_recent_announcements(
     market_data_service: MarketDataService,
     symbol: str,
     as_of_date: date,
+    *,
+    force_refresh: bool = False,
 ) -> tuple[list, _QUALITY_STATUS]:
     try:
-        response = market_data_service.get_stock_announcements(
-            symbol,
-            start_date=(as_of_date - timedelta(days=30)).isoformat(),
-            end_date=as_of_date.isoformat(),
-            limit=50,
-        )
+        try:
+            response = market_data_service.get_stock_announcements(
+                symbol,
+                start_date=(as_of_date - timedelta(days=30)).isoformat(),
+                end_date=as_of_date.isoformat(),
+                limit=50,
+                force_refresh=force_refresh,
+                allow_remote_sync=False,
+            )
+        except TypeError:
+            try:
+                response = market_data_service.get_stock_announcements(
+                    symbol,
+                    start_date=(as_of_date - timedelta(days=30)).isoformat(),
+                    end_date=as_of_date.isoformat(),
+                    limit=50,
+                    force_refresh=force_refresh,
+                )
+            except TypeError:
+                response = market_data_service.get_stock_announcements(
+                    symbol,
+                    start_date=(as_of_date - timedelta(days=30)).isoformat(),
+                    end_date=as_of_date.isoformat(),
+                    limit=50,
+                )
     except DataServiceError:
         return [], "warning"
     return response.items, _normalize_quality_status(response.quality_status)

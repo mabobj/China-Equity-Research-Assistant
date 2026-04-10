@@ -395,3 +395,9 @@ v2.2 推荐严格按下面顺序推进：
   - 当前已稳定输出 `started / selection / heartbeat / symbol.completed / batch.created / batch.finalized / window_summary.load_completed / result_persisted / completed` 等关键事件；
   - 单票完成日志已包含 `run_id / workflow / symbol / elapsed_ms / bars_elapsed_ms / financial_elapsed_ms / announcement_elapsed_ms / prediction_elapsed_ms / outcome / quality / list_type / screener_score` 等诊断字段；
   - 已补针对性测试，验证关键日志事件与核心字段存在。
+- 第四阶段“批量执行提速”已完成：
+  - 初筛批量链路继续坚持“轻量优先”原则：`daily_bars` 维持本地优先，`financial_summary / announcements` 现已支持 `allow_remote_sync=False`，在无本地数据时返回受控降级结果，而不再逐票远端补全；
+  - `market_data_service` 已为财务摘要与公告索引补齐 `allow_remote_sync` 开关，分别支持“本地缺失时返回 degraded 占位财务摘要”和“本地缺失时返回 warning 空公告响应”；
+  - `screener pipeline` 已引入受控小并发执行（默认 `batch_scan_max_workers=4`），在不改评分规则的前提下提升批量扫描吞吐；
+  - 批量模式下已明确透传“财务/公告禁止远端补数”的约束，避免为了补全单票重数据而显著拉长整批运行时间；
+  - 已补回归测试，验证 provider 参数透传、缺失降级与并发执行不破坏现有结果契约。

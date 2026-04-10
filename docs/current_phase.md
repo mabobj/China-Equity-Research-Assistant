@@ -141,3 +141,8 @@
   - `workflow / pipeline / batch service` 已补齐 run 级、批次级、单票级结构化日志；
   - 当前可以通过 `run_id` 串联查看启动、选股范围、heartbeat、单票完成、批次落盘与窗口摘要读取过程；
   - 单票日志已能区分 `skipped / failed_placeholder / candidate` 三类结果，并给出各数据域耗时与质量状态。
+- 第四阶段“批量执行提速”已完成：
+  - 初筛继续明确“只消费已有可用数据”的边界，不在批量执行时逐票远端补全财务摘要与公告窗口；
+  - `market_data_service` 已为 `financial_summary / announcements` 补齐 `allow_remote_sync=False` 支持，本地无数据时返回受控降级结果，不再阻塞整批；
+  - `screener pipeline` 已引入受控小并发（默认 4 worker），在保持评分规则与结果契约不变的前提下提升吞吐；
+  - 已补性能相关回归测试，验证 provider 参数透传、缺失降级与并发扫描的兼容性。

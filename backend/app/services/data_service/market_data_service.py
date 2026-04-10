@@ -530,6 +530,7 @@ class MarketDataService:
         limit: int = 20,
         *,
         force_refresh: bool = False,
+        allow_remote_sync: bool = True,
     ) -> AnnouncementListResponse:
         if limit <= 0:
             raise InvalidRequestError("limit must be greater than 0.")
@@ -579,6 +580,54 @@ class MarketDataService:
                     len(cleaned_cached.items),
                 )
                 return cleaned_cached.to_announcement_list_response()
+
+        if not allow_remote_sync:
+            cached_items = []
+            if self._local_store is not None:
+                cached_items = self._local_store.get_stock_announcements(
+                    canonical_symbol,
+                    normalized_start_date,
+                    normalized_end_date,
+                    limit=limit,
+                )
+            if cached_items:
+                cleaned_cached = clean_announcements(
+                    symbol=canonical_symbol,
+                    rows=cached_items,
+                    as_of_date=as_of_date,
+                    source_mode="local_cache_partial",
+                    freshness_mode="cache_preferred",
+                )
+                logger.debug(
+                    "market_data.announcements.skip_remote symbol=%s reason=allow_remote_sync_disabled_use_partial_cache count=%s",
+                    canonical_symbol,
+                    len(cleaned_cached.items),
+                )
+                response = cleaned_cached.to_announcement_list_response()
+                response.cleaning_warnings = list(
+                    dict.fromkeys(
+                        [*response.cleaning_warnings, "remote_sync_skipped_use_partial_cache"],
+                    ),
+                )
+                return response
+
+            logger.debug(
+                "market_data.announcements.skip_remote symbol=%s reason=allow_remote_sync_disabled_no_cache",
+                canonical_symbol,
+            )
+            return AnnouncementListResponse(
+                symbol=canonical_symbol,
+                count=0,
+                items=[],
+                quality_status="warning",
+                cleaning_warnings=["remote_sync_skipped_no_cache"],
+                provider_used=None,
+                fallback_applied=False,
+                fallback_reason=None,
+                source_mode="local_only",
+                freshness_mode="cache_miss_remote_sync_disabled",
+                as_of_date=as_of_date,
+            )
 
         items = self._load_stock_announcements_from_providers(
             canonical_symbol,
@@ -652,6 +701,7 @@ class MarketDataService:
         symbol: str,
         *,
         force_refresh: bool,
+        allow_remote_sync: bool,
     ) -> FinancialSummary:
         canonical_symbol = normalize_symbol(symbol)
         logger.debug(
@@ -678,6 +728,44 @@ class MarketDataService:
                     cached_summary.source,
                 )
                 return cached_summary
+
+        if not allow_remote_sync:
+            logger.debug(
+                "market_data.financial_summary.skip_remote symbol=%s reason=allow_remote_sync_disabled_no_cache",
+                canonical_symbol,
+            )
+            return FinancialSummary(
+                symbol=canonical_symbol,
+                name=canonical_symbol,
+                report_period=None,
+                report_type=None,
+                revenue=None,
+                revenue_yoy=None,
+                net_profit=None,
+                net_profit_yoy=None,
+                roe=None,
+                gross_margin=None,
+                debt_ratio=None,
+                eps=None,
+                bps=None,
+                source="local",
+                quality_status="degraded",
+                cleaning_warnings=["remote_sync_skipped_no_cache"],
+                missing_fields=[
+                    "revenue",
+                    "revenue_yoy",
+                    "net_profit",
+                    "net_profit_yoy",
+                    "roe",
+                ],
+                coerced_fields=[],
+                provider_used=None,
+                fallback_applied=False,
+                fallback_reason=None,
+                source_mode="local_only",
+                freshness_mode="cache_miss_remote_sync_disabled",
+                as_of_date=resolve_daily_analysis_as_of_date(),
+            )
 
         fetched = self._load_stock_financial_summary_from_providers(canonical_symbol)
         cleaned = clean_financial_summary(
@@ -719,8 +807,13 @@ class MarketDataService:
         symbol: str,
         *,
         force_refresh: bool = False,
+        allow_remote_sync: bool = True,
     ) -> FinancialSummary:
-        return self._get_stock_financial_summary(symbol, force_refresh=force_refresh)
+        return self._get_stock_financial_summary(
+            symbol,
+            force_refresh=force_refresh,
+            allow_remote_sync=allow_remote_sync,
+        )
 
     def refresh_stock_profile(self, symbol: str) -> StockProfile:
         canonical_symbol = normalize_symbol(symbol)
