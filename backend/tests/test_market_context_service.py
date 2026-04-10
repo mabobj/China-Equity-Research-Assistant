@@ -4,9 +4,12 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from app.db.market_data_store import LocalMarketDataStore
-from app.schemas.market_data import DailyBar, StockProfile, UniverseItem
+from app.schemas.market_data import DailyBar, DailyBarResponse, StockProfile, UniverseItem
 from app.services.data_products.datasets.benchmark_catalog_daily import (
     BenchmarkCatalogDailyDataset,
+)
+from app.services.data_products.datasets.benchmark_bars_daily import (
+    BenchmarkBarsDailyDataset,
 )
 from app.services.data_products.datasets.industry_classification_daily import (
     IndustryClassificationDailyDataset,
@@ -34,6 +37,34 @@ class FakeMarketDataService:
 
     def get_stock_profile(self, symbol: str) -> StockProfile:
         return self._profiles[symbol]
+
+    def get_daily_bars(
+        self,
+        symbol: str,
+        start_date=None,
+        end_date=None,
+        adjustment_mode: str = "raw",
+        **_,
+    ) -> DailyBarResponse:
+        resolved_end_date = end_date
+        if isinstance(resolved_end_date, str):
+            resolved_end_date = date.fromisoformat(resolved_end_date)
+        bars = []
+        if symbol == "000300.SH":
+            bars = _build_bar_series(
+                symbol=symbol,
+                source="akshare",
+                as_of_date=resolved_end_date or date(2026, 4, 9),
+                closes=[100.0 + idx for idx in range(30)],
+            )
+        return DailyBarResponse(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            count=len(bars),
+            bars=bars,
+            quality_status="ok",
+        )
 
 
 def _build_bar_series(
@@ -150,6 +181,9 @@ def test_market_context_service_builds_classification_breadth_and_risk(tmp_path:
 
     service = MarketContextService(
         benchmark_catalog_daily=BenchmarkCatalogDailyDataset(),
+        benchmark_bars_daily=BenchmarkBarsDailyDataset(
+            market_data_service=fake_market_data_service,
+        ),
         industry_classification_daily=IndustryClassificationDailyDataset(
             repository=repository,
             market_data_service=fake_market_data_service,
@@ -161,6 +195,10 @@ def test_market_context_service_builds_classification_breadth_and_risk(tmp_path:
         ),
         risk_proxy_daily=RiskProxyDailyDataset(
             repository=repository,
+            benchmark_catalog_daily=BenchmarkCatalogDailyDataset(),
+            benchmark_bars_daily=BenchmarkBarsDailyDataset(
+                market_data_service=fake_market_data_service,
+            ),
             market_breadth_daily=MarketBreadthDailyDataset(
                 repository=repository,
                 market_data_service=fake_market_data_service,
@@ -189,6 +227,14 @@ def test_market_context_service_builds_classification_breadth_and_risk(tmp_path:
     assert benchmark_catalog.count >= 5
     assert any(item.is_primary for item in benchmark_catalog.items)
 
+    benchmark_bars = service.get_benchmark_daily_bars(
+        "000300.SH",
+        as_of_date=as_of_date,
+        lookback_days=30,
+    )
+    assert benchmark_bars.symbol == "000300.SH"
+    assert benchmark_bars.count == 30
+
     breadth = service.get_market_breadth(as_of_date=as_of_date)
     assert breadth.universe_size == 3
     assert breadth.symbols_considered == 3
@@ -201,3 +247,5 @@ def test_market_context_service_builds_classification_breadth_and_risk(tmp_path:
     assert risk.universe_size == 3
     assert risk.quality_status == "ok"
     assert risk.risk_regime in {"risk_on", "neutral", "risk_off"}
+    assert risk.primary_benchmark_symbol == "000300.SH"
+    assert risk.benchmark_trend_state in {"up", "flat", "down", "unknown"}

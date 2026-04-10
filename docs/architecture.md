@@ -224,7 +224,8 @@
 - `MarketBreadthSnapshot` 把市场广度收成统一 schema 与日级数据产品；
 - `RiskProxySnapshot` 在市场广度基础上提供最小基础风险代理；
 - 对外已提供最小只读接口：
-  - `GET /market/benchmarks`
+ - `GET /market/benchmarks`
+  - `GET /market/benchmarks/{benchmark_symbol}/daily-bars`
   - `GET /market/breadth`
   - `GET /market/risk-proxies`
   - `GET /stocks/{symbol}/classification`

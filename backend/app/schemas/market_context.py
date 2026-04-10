@@ -18,6 +18,7 @@ BenchmarkCategory = Literal[
 ]
 QualityStatus = Literal["ok", "warning", "degraded", "failed"]
 RiskRegime = Literal["risk_on", "neutral", "risk_off"]
+BenchmarkTrendState = Literal["up", "flat", "down", "unknown"]
 
 
 class BenchmarkDefinition(BaseModel):
@@ -106,6 +107,12 @@ class RiskProxySnapshot(BaseModel):
     breadth_score: float = Field(ge=0.0, le=100.0)
     cross_sectional_volatility_1d: Optional[float] = None
     median_return_1d: Optional[float] = None
+    primary_benchmark_symbol: Optional[str] = None
+    primary_benchmark_name: Optional[str] = None
+    benchmark_close: Optional[float] = None
+    benchmark_return_1d: Optional[float] = None
+    benchmark_return_20d: Optional[float] = None
+    benchmark_trend_state: BenchmarkTrendState = "unknown"
     risk_score: float = Field(ge=0.0, le=100.0)
     risk_regime: RiskRegime
     quality_status: QualityStatus

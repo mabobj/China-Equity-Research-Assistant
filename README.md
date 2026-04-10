@@ -74,6 +74,7 @@
 ### 关键市场数据域入口
 
 - `GET /market/benchmarks`
+- `GET /market/benchmarks/{benchmark_symbol}/daily-bars`
 - `GET /market/breadth`
 - `GET /market/risk-proxies`
 - `GET /stocks/{symbol}/classification`

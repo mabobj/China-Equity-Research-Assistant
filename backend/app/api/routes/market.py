@@ -5,6 +5,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies import get_market_context_service
+from app.schemas.market_data import DailyBarResponse
 from app.schemas.market_context import (
     BenchmarkCatalogResponse,
     MarketBreadthSnapshot,
@@ -24,6 +25,29 @@ def get_benchmark_catalog(
     try:
         return service.get_benchmark_catalog(as_of_date=as_of_date)
     except (InvalidDateError, InvalidRequestError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/benchmarks/{benchmark_symbol}/daily-bars", response_model=DailyBarResponse)
+def get_benchmark_daily_bars(
+    benchmark_symbol: str,
+    as_of_date: Optional[str] = Query(default=None),
+    lookback_days: int = Query(default=120, ge=20, le=1000),
+    force_refresh: bool = Query(default=False),
+    service: Any = Depends(get_market_context_service),
+) -> DailyBarResponse:
+    """读取基准指数按日日线。"""
+    try:
+        return service.get_benchmark_daily_bars(
+            benchmark_symbol=benchmark_symbol,
+            as_of_date=as_of_date,
+            lookback_days=lookback_days,
+            force_refresh=force_refresh,
+        )
+    except (InvalidDateError, InvalidRequestError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),

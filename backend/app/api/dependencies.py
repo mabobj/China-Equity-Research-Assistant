@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     from app.services.data_products.datasets.benchmark_catalog_daily import (
         BenchmarkCatalogDailyDataset,
     )
+    from app.services.data_products.datasets.benchmark_bars_daily import (
+        BenchmarkBarsDailyDataset,
+    )
     from app.services.data_products.datasets.debate_review_daily import (
         DebateReviewDailyDataset,
     )
@@ -400,6 +403,15 @@ def get_benchmark_catalog_daily_dataset() -> "BenchmarkCatalogDailyDataset":
 
 
 @lru_cache
+def get_benchmark_bars_daily_dataset() -> "BenchmarkBarsDailyDataset":
+    from app.services.data_products.datasets.benchmark_bars_daily import (
+        BenchmarkBarsDailyDataset,
+    )
+
+    return BenchmarkBarsDailyDataset(market_data_service=get_market_data_service())
+
+
+@lru_cache
 def get_announcements_daily_dataset() -> "AnnouncementsDailyDataset":
     from app.services.data_products.datasets.announcements_daily import (
         AnnouncementsDailyDataset,
@@ -450,6 +462,8 @@ def get_risk_proxy_daily_dataset() -> "RiskProxyDailyDataset":
 
     return RiskProxyDailyDataset(
         repository=get_data_product_repository(),
+        benchmark_catalog_daily=get_benchmark_catalog_daily_dataset(),
+        benchmark_bars_daily=get_benchmark_bars_daily_dataset(),
         market_breadth_daily=get_market_breadth_daily_dataset(),
     )
 
@@ -460,6 +474,7 @@ def get_market_context_service() -> "MarketContextService":
 
     return MarketContextService(
         benchmark_catalog_daily=get_benchmark_catalog_daily_dataset(),
+        benchmark_bars_daily=get_benchmark_bars_daily_dataset(),
         industry_classification_daily=get_industry_classification_daily_dataset(),
         market_breadth_daily=get_market_breadth_daily_dataset(),
         risk_proxy_daily=get_risk_proxy_daily_dataset(),

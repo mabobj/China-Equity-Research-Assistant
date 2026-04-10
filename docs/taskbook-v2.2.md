@@ -106,6 +106,12 @@
     - `GET /market/risk-proxies`
     - `GET /stocks/{symbol}/classification`
   - 已补 service 与 API 测试，确认上述数据域已经可读、可算、可缓存、可回归。
+- 已完成第二阶段：
+  - 新增 `benchmark_bars_daily`，把静态基准目录推进为“可按日读取的基准行情链路”；
+  - `MarketContextService` 新增基准日线读取入口，并增加只读接口：`GET /market/benchmarks/{benchmark_symbol}/daily-bars`；
+  - `risk_proxy_daily` 已从“仅由市场广度派生”升级为“市场广度 + 主基准收益/趋势”的保守组合代理；
+  - 风险代理响应现已补充 `primary_benchmark_symbol / benchmark_return_1d / benchmark_return_20d / benchmark_trend_state` 等字段；
+  - 已补 service / API 回归测试，确保基准日线和增强风险代理不会破坏既有市场上下文接口。
 
 ### 优先数据域
 
