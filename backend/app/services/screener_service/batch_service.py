@@ -209,21 +209,26 @@ class ScreenerBatchService:
         self,
         *,
         now: datetime | None = None,
+        hydrate_predictive: bool = True,
     ) -> tuple[datetime, datetime, list[ScreenerSymbolResult]]:
         window_start, window_end = self.get_display_window(now=now)
         records = self.list_batches_in_window(window_start=window_start, window_end=window_end)
         logger.info(
-            "event=screener.window_results.load_started window_start=%s window_end=%s batch_count=%s",
+            "event=screener.window_results.load_started window_start=%s window_end=%s batch_count=%s hydrate_predictive=%s",
             window_start.isoformat(),
             window_end.isoformat(),
             len(records),
+            hydrate_predictive,
         )
 
         latest_by_symbol: dict[str, ScreenerSymbolResult] = {}
         for batch in records:
             if batch.status not in {"completed", "failed"}:
                 continue
-            for result in self.load_batch_results(batch.batch_id):
+            for result in self.load_batch_results(
+                batch.batch_id,
+                hydrate_predictive=hydrate_predictive,
+            ):
                 key = result.symbol.upper()
                 current = latest_by_symbol.get(key)
                 if current is None:
@@ -240,12 +245,24 @@ class ScreenerBatchService:
             reverse=True,
         )
         logger.info(
-            "event=screener.window_results.load_completed window_start=%s window_end=%s merged_symbol_count=%s",
+            "event=screener.window_results.load_completed window_start=%s window_end=%s merged_symbol_count=%s hydrate_predictive=%s",
             window_start.isoformat(),
             window_end.isoformat(),
             len(merged),
+            hydrate_predictive,
         )
         return window_start, window_end, merged
+
+    def load_window_summary(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[datetime, datetime, int]:
+        window_start, window_end, merged = self.load_window_results(
+            now=now,
+            hydrate_predictive=False,
+        )
+        return window_start, window_end, len(merged)
 
     def load_batch(self, batch_id: str) -> ScreenerBatchRecord | None:
         file_path = self._batch_file(batch_id)
@@ -253,7 +270,12 @@ class ScreenerBatchService:
             return None
         return ScreenerBatchRecord.model_validate_json(file_path.read_text(encoding="utf-8"))
 
-    def load_batch_results(self, batch_id: str) -> list[ScreenerSymbolResult]:
+    def load_batch_results(
+        self,
+        batch_id: str,
+        *,
+        hydrate_predictive: bool = True,
+    ) -> list[ScreenerSymbolResult]:
         file_path = self._result_file(batch_id)
         if not file_path.exists():
             return []
@@ -263,19 +285,23 @@ class ScreenerBatchService:
             for item in payload
         ]
         logger.info(
-            "event=screener.batch_results.load_started batch_id=%s raw_result_count=%s",
+            "event=screener.batch_results.load_started batch_id=%s raw_result_count=%s hydrate_predictive=%s",
             batch_id,
             len(results),
+            hydrate_predictive,
         )
-        results, updated = self._hydrate_missing_predictive_fields(results)
+        updated = False
+        if hydrate_predictive:
+            results, updated = self._hydrate_missing_predictive_fields(results)
         if updated:
             with self._lock:
                 self._save_batch_results(batch_id=batch_id, results=results)
         logger.info(
-            "event=screener.batch_results.load_completed batch_id=%s result_count=%s predictive_hydrated=%s",
+            "event=screener.batch_results.load_completed batch_id=%s result_count=%s predictive_hydrated=%s hydrate_predictive=%s",
             batch_id,
             len(results),
             updated,
+            hydrate_predictive,
         )
         return results
 

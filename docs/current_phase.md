@@ -132,3 +132,8 @@
   - 后端已修正读状态时的 stale 误判；
   - `/screener/active-run` 轻量查询入口已落地；
   - 前端刷新时会优先恢复当前运行中的初筛任务。
+- 第二阶段“刷新链路减负”已完成：
+  - 已新增 `/screener/latest-batch-summary` 轻量摘要接口；
+  - 已新增 `/screener/latest-batch/results` 延迟结果接口；
+  - 首屏不再默认重建整窗结果，也不在刷新时同步触发预测字段补齐；
+  - `/screener` 前端已改为“摘要先到、结果后到”的两段式加载。

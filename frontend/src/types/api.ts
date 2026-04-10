@@ -368,6 +368,13 @@ export type ScreenerLatestBatchResponse = {
   total_results: number;
 };
 
+export type ScreenerLatestBatchSummaryResponse = {
+  window_start: string;
+  window_end: string;
+  batch: ScreenerBatchRecord | null;
+  total_results: number;
+};
+
 export type ScreenerBatchDetailResponse = {
   batch: ScreenerBatchRecord;
 };

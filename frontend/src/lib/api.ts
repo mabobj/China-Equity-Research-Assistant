@@ -23,6 +23,7 @@ import type {
   ScreenerBatchResultsResponse,
   ScreenerCursorResetResponse,
   ScreenerLatestBatchResponse,
+  ScreenerLatestBatchSummaryResponse,
   ScreenerSymbolResultResponse,
   ScreenerWorkflowRunRequest,
   SingleStockWorkflowRunRequest,
@@ -128,6 +129,21 @@ export async function getDeepScreenerRun(
 
 export async function getLatestScreenerBatch(): Promise<ScreenerLatestBatchResponse> {
   return fetchBackend<ScreenerLatestBatchResponse>("/screener/latest-batch", {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+  });
+}
+
+export async function getLatestScreenerBatchSummary(): Promise<ScreenerLatestBatchSummaryResponse> {
+  return fetchBackend<ScreenerLatestBatchSummaryResponse>(
+    "/screener/latest-batch-summary",
+    {
+      timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    },
+  );
+}
+
+export async function getLatestScreenerWindowResults(): Promise<ScreenerLatestBatchResponse> {
+  return fetchBackend<ScreenerLatestBatchResponse>("/screener/latest-batch/results", {
     timeoutMs: STOCK_PAGE_TIMEOUT_MS,
   });
 }

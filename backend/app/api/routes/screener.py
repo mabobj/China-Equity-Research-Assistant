@@ -19,6 +19,7 @@ from app.schemas.screener import (
     ScreenerBatchDetailResponse,
     ScreenerBatchResultsResponse,
     ScreenerLatestBatchResponse,
+    ScreenerLatestBatchSummaryResponse,
     ScreenerRunResponse,
     ScreenerSymbolResultResponse,
 )
@@ -62,6 +63,37 @@ def get_latest_batch(
 ) -> ScreenerLatestBatchResponse:
     """返回当前可查看的最新批次。"""
     window_start, window_end, window_results = batch_service.load_window_results()
+    return ScreenerLatestBatchResponse(
+        window_start=window_start,
+        window_end=window_end,
+        batch=batch_service.get_latest_batch(),
+        results=window_results,
+        total_results=len(window_results),
+    )
+
+
+@router.get("/latest-batch-summary", response_model=ScreenerLatestBatchSummaryResponse)
+def get_latest_batch_summary(
+    batch_service: Any = Depends(get_screener_batch_service),
+) -> ScreenerLatestBatchSummaryResponse:
+    """返回当前可查看窗口的最新批次摘要，不加载结果列表。"""
+    window_start, window_end, total_results = batch_service.load_window_summary()
+    return ScreenerLatestBatchSummaryResponse(
+        window_start=window_start,
+        window_end=window_end,
+        batch=batch_service.get_latest_batch(),
+        total_results=total_results,
+    )
+
+
+@router.get("/latest-batch/results", response_model=ScreenerLatestBatchResponse)
+def get_latest_batch_results(
+    batch_service: Any = Depends(get_screener_batch_service),
+) -> ScreenerLatestBatchResponse:
+    """返回当前可查看窗口的结果列表，默认不做预测字段补齐。"""
+    window_start, window_end, window_results = batch_service.load_window_results(
+        hydrate_predictive=False,
+    )
     return ScreenerLatestBatchResponse(
         window_start=window_start,
         window_end=window_end,

@@ -6,7 +6,8 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 
 import {
   getActiveScreenerRun,
-  getLatestScreenerBatch,
+  getLatestScreenerBatchSummary,
+  getLatestScreenerWindowResults,
   getModelEvaluation,
   getWorkflowRunDetail,
   resetScreenerCursor,
@@ -32,6 +33,7 @@ import type {
   ModelEvaluationResponse,
   ScreenerListType,
   ScreenerLatestBatchResponse,
+  ScreenerLatestBatchSummaryResponse,
   ScreenerSymbolResult,
   WorkflowRunDetailResponse,
 } from "@/types/api";
@@ -78,6 +80,8 @@ export function ScreenerWorkspace() {
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchResultsLoading, setBatchResultsLoading] = useState(false);
+  const [batchResultsError, setBatchResultsError] = useState<string | null>(null);
   const [latestBatch, setLatestBatch] = useState<ScreenerLatestBatchResponse | null>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [filters, setFilters] = useState<ResultFilters>(INITIAL_FILTERS);
@@ -107,8 +111,10 @@ export function ScreenerWorkspace() {
   useEffect(() => {
     let active = true;
     const loadLatest = async () => {
+      let summaryLoaded = false;
       setBatchLoading(true);
       setBatchError(null);
+      setBatchResultsError(null);
       try {
         const activeRun = await getActiveScreenerRun();
         if (!active) return;
@@ -118,7 +124,19 @@ export function ScreenerWorkspace() {
           setSelectedSymbol(null);
           return;
         }
-        const response = await getLatestScreenerBatch();
+        const summary = await getLatestScreenerBatchSummary();
+        if (!active) return;
+        summaryLoaded = true;
+        setLatestBatch(toLatestBatchFromSummary(summary));
+        setSelectedSymbol(null);
+        setBatchLoading(false);
+
+        if (!summary.batch || summary.total_results === 0) {
+          return;
+        }
+
+        setBatchResultsLoading(true);
+        const response = await getLatestScreenerWindowResults();
         if (!active) return;
         setLatestBatch(response);
         setSelectedSymbol((previous) => {
@@ -130,10 +148,15 @@ export function ScreenerWorkspace() {
         });
       } catch (error) {
         if (!active) return;
-        setBatchError(toErrorMessage(error));
+        if (!summaryLoaded) {
+          setBatchError(toErrorMessage(error));
+        } else {
+          setBatchResultsError(toErrorMessage(error));
+        }
       } finally {
         if (active) {
           setBatchLoading(false);
+          setBatchResultsLoading(false);
         }
       }
     };
@@ -418,6 +441,19 @@ export function ScreenerWorkspace() {
                 <StatusBlock
                   title="批次失败说明"
                   description={latestBatch.batch.failure_reason}
+                  tone="error"
+                />
+              ) : null}
+              {batchResultsLoading ? (
+                <StatusBlock
+                  title="结果列表加载中"
+                  description="批次摘要已就绪，正在按需读取当前窗口结果列表。"
+                />
+              ) : null}
+              {batchResultsError ? (
+                <StatusBlock
+                  title="结果列表加载失败"
+                  description={batchResultsError}
                   tone="error"
                 />
               ) : null}
@@ -1104,6 +1140,15 @@ function Metric({ label, value }: { label: string; value: string }) {
       <p className="mt-2 break-all text-sm font-semibold text-slate-950">{value}</p>
     </div>
   );
+}
+
+function toLatestBatchFromSummary(
+  summary: ScreenerLatestBatchSummaryResponse,
+): ScreenerLatestBatchResponse {
+  return {
+    ...summary,
+    results: [],
+  };
 }
 
 function parseOptionalInteger(value: string): number | undefined {

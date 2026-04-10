@@ -112,11 +112,18 @@ class StubScreenerBatchService:
     def get_latest_batch(self):
         return self.batch
 
-    def load_window_results(self):
+    def load_window_results(self, *, hydrate_predictive: bool = True):
         return (
             datetime(2026, 3, 29, 17, 0, tzinfo=timezone.utc),
             datetime(2026, 3, 29, 18, 0, tzinfo=timezone.utc),
             self.results,
+        )
+
+    def load_window_summary(self):
+        return (
+            datetime(2026, 3, 29, 17, 0, tzinfo=timezone.utc),
+            datetime(2026, 3, 29, 18, 0, tzinfo=timezone.utc),
+            len(self.results),
         )
 
     def load_batch(self, batch_id: str):
@@ -124,7 +131,7 @@ class StubScreenerBatchService:
             return self.batch
         return None
 
-    def load_batch_results(self, batch_id: str):
+    def load_batch_results(self, batch_id: str, *, hydrate_predictive: bool = True):
         if batch_id == self.batch.batch_id:
             return self.results
         return []
@@ -206,6 +213,34 @@ def test_screener_latest_batch_route_returns_latest_batch() -> None:
     assert payload["results"][0]["symbol"] == "600519.SH"
     assert "window_start" in payload
     assert "window_end" in payload
+
+    app.dependency_overrides.clear()
+
+
+def test_screener_latest_batch_summary_route_returns_summary_only() -> None:
+    app.dependency_overrides[get_screener_batch_service] = lambda: StubScreenerBatchService()
+
+    response = client.get("/screener/latest-batch-summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["batch"]["batch_id"] == "batch-20260329-01"
+    assert payload["total_results"] == 1
+    assert "results" not in payload
+
+    app.dependency_overrides.clear()
+
+
+def test_screener_latest_batch_results_route_returns_window_results() -> None:
+    app.dependency_overrides[get_screener_batch_service] = lambda: StubScreenerBatchService()
+
+    response = client.get("/screener/latest-batch/results")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["batch"]["batch_id"] == "batch-20260329-01"
+    assert payload["total_results"] == 1
+    assert payload["results"][0]["symbol"] == "600519.SH"
 
     app.dependency_overrides.clear()
 

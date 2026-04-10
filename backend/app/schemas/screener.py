@@ -202,6 +202,17 @@ class ScreenerLatestBatchResponse(BaseModel):
     total_results: int = Field(default=0, ge=0)
 
 
+class ScreenerLatestBatchSummaryResponse(BaseModel):
+    """最新可查看批次摘要，不包含结果列表。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    window_start: datetime
+    window_end: datetime
+    batch: Optional[ScreenerBatchRecord] = None
+    total_results: int = Field(default=0, ge=0)
+
+
 class ScreenerCursorResetResponse(BaseModel):
     """初筛游标重置结果。"""
 
