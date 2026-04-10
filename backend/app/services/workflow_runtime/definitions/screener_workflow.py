@@ -169,6 +169,13 @@ class ScreenerWorkflowDefinitionBuilder:
             force_refresh=bool(request.force_refresh),
             scan_items=selection.selected_items,
             total_symbols_override=total_symbols,
+            run_context={
+                "run_id": context.run_id,
+                "workflow_name": context.workflow_name,
+                "batch_size": batch_size,
+                "cursor_start_symbol": selection.cursor_start_symbol,
+                "cursor_start_index": selection.start_index,
+            },
         )
         normalized_response = self._normalize_response(response)
         saved = self._screener_snapshot_daily.save(

@@ -137,3 +137,7 @@
   - 已新增 `/screener/latest-batch/results` 延迟结果接口；
   - 首屏不再默认重建整窗结果，也不在刷新时同步触发预测字段补齐；
   - `/screener` 前端已改为“摘要先到、结果后到”的两段式加载。
+- 第三阶段“日志与诊断增强”已完成：
+  - `workflow / pipeline / batch service` 已补齐 run 级、批次级、单票级结构化日志；
+  - 当前可以通过 `run_id` 串联查看启动、选股范围、heartbeat、单票完成、批次落盘与窗口摘要读取过程；
+  - 单票日志已能区分 `skipped / failed_placeholder / candidate` 三类结果，并给出各数据域耗时与质量状态。

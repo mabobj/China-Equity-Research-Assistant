@@ -74,6 +74,16 @@ class ScreenerBatchService:
         with self._lock:
             self._save_batch_record(record)
             self._save_run_index(run_id=run_id, batch_id=batch_id)
+        logger.info(
+            "event=screener.batch.created run_id=%s batch_id=%s trade_date=%s batch_size=%s max_symbols=%s top_n=%s started_at=%s",
+            run_id,
+            batch_id,
+            resolved_trade_date.isoformat(),
+            batch_size,
+            max_symbols,
+            top_n,
+            started_at.isoformat(),
+        )
         return record
 
     def finalize_batch(
@@ -129,6 +139,17 @@ class ScreenerBatchService:
             )
             self._save_batch_record(record)
             self._save_batch_results(batch_id=batch_id, results=results)
+            logger.info(
+                "event=screener.batch.finalized run_id=%s batch_id=%s status=%s scanned_size=%s universe_size=%s result_count=%s warning_count=%s failure_reason=%s",
+                run_id,
+                batch_id,
+                record.status,
+                scanned_size,
+                universe_size,
+                len(results),
+                len(warnings),
+                failure_reason,
+            )
             return record
 
     def get_display_window(
@@ -261,6 +282,12 @@ class ScreenerBatchService:
         window_start, window_end, merged = self.load_window_results(
             now=now,
             hydrate_predictive=False,
+        )
+        logger.info(
+            "event=screener.window_summary.load_completed window_start=%s window_end=%s total_results=%s",
+            window_start.isoformat(),
+            window_end.isoformat(),
+            len(merged),
         )
         return window_start, window_end, len(merged)
 

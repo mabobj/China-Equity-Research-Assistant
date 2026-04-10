@@ -390,3 +390,8 @@ v2.2 推荐严格按下面顺序推进：
   - `batch_service` 已支持 `hydrate_predictive=False` 的轻量读取模式，首屏摘要与窗口结果默认不触发预测字段补齐；
   - 前端 `/screener` 已改为“先摘要、后结果”的两段式加载流程；
   - 已补相应 API 测试，确保旧接口兼容不回退。
+- 第三阶段“日志与诊断增强”已完成：
+  - `screener workflow / pipeline / batch service` 已补齐结构化日志事件；
+  - 当前已稳定输出 `started / selection / heartbeat / symbol.completed / batch.created / batch.finalized / window_summary.load_completed / result_persisted / completed` 等关键事件；
+  - 单票完成日志已包含 `run_id / workflow / symbol / elapsed_ms / bars_elapsed_ms / financial_elapsed_ms / announcement_elapsed_ms / prediction_elapsed_ms / outcome / quality / list_type / screener_score` 等诊断字段；
+  - 已补针对性测试，验证关键日志事件与核心字段存在。

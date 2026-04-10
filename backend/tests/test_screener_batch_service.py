@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import logging
 from zoneinfo import ZoneInfo
 
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
@@ -552,3 +553,37 @@ def test_load_batch_results_hydrates_missing_predictive_fields(tmp_path) -> None
     assert rows[0].predictive_score == 66
     assert rows[0].predictive_confidence == 0.7
     assert rows[0].predictive_model_version == "baseline-rule-v1"
+
+
+def test_batch_service_emits_structured_batch_logs(tmp_path, caplog) -> None:
+    service = ScreenerBatchService(root_dir=tmp_path)
+    started_at = datetime(2026, 3, 30, 17, 5, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    with caplog.at_level(logging.INFO):
+        batch = service.create_running_batch(
+            run_id="run-log-batch",
+            batch_size=20,
+            max_symbols=20,
+            top_n=10,
+            started_at=started_at,
+        )
+        service.finalize_batch(
+            run_id="run-log-batch",
+            status="completed",
+            finished_at=started_at + timedelta(minutes=1),
+            final_output=None,
+            final_output_summary={"warning_messages": ["测试告警"]},
+            error_message=None,
+        )
+        service.load_window_summary(now=started_at + timedelta(minutes=2))
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "event=screener.batch.created" in message and batch.batch_id in message
+        for message in messages
+    )
+    assert any(
+        "event=screener.batch.finalized" in message and batch.batch_id in message
+        for message in messages
+    )
+    assert any("event=screener.window_summary.load_completed" in message for message in messages)

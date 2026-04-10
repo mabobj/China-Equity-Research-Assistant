@@ -77,8 +77,15 @@ class ScreenerPipeline:
         force_refresh: bool = False,
         scan_items: Optional[list[UniverseItem]] = None,
         total_symbols_override: Optional[int] = None,
+        run_context: Optional[dict[str, object]] = None,
     ) -> ScreenerRunResponse:
         started_at = perf_counter()
+        run_context = run_context or {}
+        run_id = _stringify_log_value(run_context.get("run_id"))
+        workflow_name = _stringify_log_value(run_context.get("workflow_name")) or "screener_run"
+        batch_size = _stringify_log_value(run_context.get("batch_size"))
+        cursor_start_symbol = _stringify_log_value(run_context.get("cursor_start_symbol"))
+        cursor_start_index = _stringify_log_value(run_context.get("cursor_start_index"))
 
         with self._market_data_service.session_scope():
             if scan_items is None:
@@ -102,19 +109,28 @@ class ScreenerPipeline:
             ).isoformat()
 
             logger.info(
-                "初筛开始：股票池总数=%s，实际扫描=%s，top_n=%s，lookback_start_date=%s",
+                "event=screener.pipeline.started run_id=%s workflow=%s batch_size=%s total_symbols=%s scanned_symbols=%s top_n=%s lookback_start_date=%s force_refresh=%s cursor_start_symbol=%s cursor_start_index=%s",
+                run_id,
+                workflow_name,
+                batch_size,
                 total_symbols,
                 scanned_symbols,
                 top_n,
                 lookback_start_date,
+                force_refresh,
+                cursor_start_symbol,
+                cursor_start_index,
             )
 
             for index, item in enumerate(scan_items, start=1):
+                symbol_started_at = perf_counter()
                 scan_result = self._scan_one_symbol(
                     item=item,
                     start_date=lookback_start_date,
                     force_refresh=force_refresh,
+                    run_context=run_context,
                 )
+                symbol_elapsed_ms = int((perf_counter() - symbol_started_at) * 1000)
                 if scan_result is None:
                     skipped_symbols += 1
                     self._log_progress(
@@ -124,6 +140,14 @@ class ScreenerPipeline:
                         candidates=candidates,
                         skipped_symbols=skipped_symbols,
                         started_at=started_at,
+                        run_context=run_context,
+                    )
+                    logger.info(
+                        "event=screener.symbol.completed run_id=%s workflow=%s symbol=%s elapsed_ms=%s outcome=skipped",
+                        run_id,
+                        workflow_name,
+                        item.symbol,
+                        symbol_elapsed_ms,
                     )
                     continue
                 if scan_result.failed_placeholder is not None:
@@ -140,6 +164,7 @@ class ScreenerPipeline:
                     candidates=candidates,
                     skipped_symbols=skipped_symbols,
                     started_at=started_at,
+                    run_context=run_context,
                 )
 
         ready_to_buy_candidates = _rank_candidates(
@@ -177,14 +202,16 @@ class ScreenerPipeline:
         )
 
         logger.info(
-            "初筛完成：实际扫描=%s，产出=%s，跳过=%s，READY=%s，WATCH=%s，AVOID=%s，耗时=%.1fs",
+            "event=screener.pipeline.completed run_id=%s workflow=%s scanned_symbols=%s produced_candidates=%s skipped_symbols=%s ready_count=%s watch_count=%s avoid_count=%s elapsed_ms=%s",
+            run_id,
+            workflow_name,
             scanned_symbols,
             len(candidates),
             skipped_symbols,
             len(ready_to_buy_candidates),
             len(watch_candidates),
             len(avoid_candidates),
-            perf_counter() - started_at,
+            int((perf_counter() - started_at) * 1000),
         )
 
         return ScreenerRunResponse(
@@ -207,34 +234,115 @@ class ScreenerPipeline:
         item: UniverseItem,
         start_date: str,
         force_refresh: bool,
+        run_context: Optional[dict[str, object]] = None,
     ) -> Optional["_ScanResult"]:
+        run_context = run_context or {}
+        run_id = _stringify_log_value(run_context.get("run_id"))
+        workflow_name = _stringify_log_value(run_context.get("workflow_name")) or "screener_run"
+        symbol_started_at = perf_counter()
+        bars_elapsed_ms = 0
+        financial_elapsed_ms = 0
+        announcement_elapsed_ms = 0
+        prediction_elapsed_ms = 0
+        bars_quality: _QUALITY_STATUS = "warning"
+        financial_quality: _QUALITY_STATUS = "warning"
+        announcement_quality: _QUALITY_STATUS = "warning"
+        technical_snapshot = None
+
         try:
+            bars_started_at = perf_counter()
             daily_bars_response = self._load_daily_bars_for_scan(
                 symbol=item.symbol,
                 start_date=start_date,
                 force_refresh=force_refresh,
             )
         except DataServiceError:
+            logger.info(
+                "event=screener.symbol.completed run_id=%s workflow=%s symbol=%s elapsed_ms=%s bars_elapsed_ms=%s financial_elapsed_ms=%s announcement_elapsed_ms=%s prediction_elapsed_ms=%s outcome=skipped reason=bars_load_failed",
+                run_id,
+                workflow_name,
+                item.symbol,
+                int((perf_counter() - symbol_started_at) * 1000),
+                bars_elapsed_ms,
+                financial_elapsed_ms,
+                announcement_elapsed_ms,
+                prediction_elapsed_ms,
+            )
             return None
+        bars_elapsed_ms = int((perf_counter() - bars_started_at) * 1000)
 
         bars_quality = _normalize_quality_status(daily_bars_response.quality_status)
         if bars_quality == "failed":
+            failed_placeholder = _build_failed_placeholder_for_bars(
+                item=item,
+                response=daily_bars_response,
+                quality_note="行情数据质量失败，未纳入候选排序。",
+            )
+            logger.info(
+                "event=screener.symbol.completed run_id=%s workflow=%s symbol=%s elapsed_ms=%s bars_elapsed_ms=%s financial_elapsed_ms=%s announcement_elapsed_ms=%s prediction_elapsed_ms=%s outcome=failed_placeholder reason=bars_quality_failed bars_quality=%s financial_quality=%s announcement_quality=%s list_type=%s screener_score=%s fail_reason=%s",
+                run_id,
+                workflow_name,
+                item.symbol,
+                int((perf_counter() - symbol_started_at) * 1000),
+                bars_elapsed_ms,
+                financial_elapsed_ms,
+                announcement_elapsed_ms,
+                prediction_elapsed_ms,
+                bars_quality,
+                financial_quality,
+                announcement_quality,
+                failed_placeholder.v2_list_type,
+                failed_placeholder.screener_score,
+                failed_placeholder.fail_reason,
+            )
             return _ScanResult(
                 as_of_date=_resolve_as_of_date(daily_bars_response),
                 candidate=None,
-                failed_placeholder=_build_failed_placeholder_for_bars(
-                    item=item,
-                    response=daily_bars_response,
-                    quality_note="行情数据质量失败，未纳入候选排序。",
-                ),
+                failed_placeholder=failed_placeholder,
             )
 
         daily_bars = daily_bars_response.bars
         if not has_sufficient_daily_bars(daily_bars_response):
+            logger.info(
+                "event=screener.symbol.completed run_id=%s workflow=%s symbol=%s elapsed_ms=%s bars_elapsed_ms=%s financial_elapsed_ms=%s announcement_elapsed_ms=%s prediction_elapsed_ms=%s outcome=skipped reason=insufficient_daily_bars bars_quality=%s",
+                run_id,
+                workflow_name,
+                item.symbol,
+                int((perf_counter() - symbol_started_at) * 1000),
+                bars_elapsed_ms,
+                financial_elapsed_ms,
+                announcement_elapsed_ms,
+                prediction_elapsed_ms,
+                bars_quality,
+            )
             return None
         if not has_acceptable_liquidity(daily_bars_response):
+            logger.info(
+                "event=screener.symbol.completed run_id=%s workflow=%s symbol=%s elapsed_ms=%s bars_elapsed_ms=%s financial_elapsed_ms=%s announcement_elapsed_ms=%s prediction_elapsed_ms=%s outcome=skipped reason=insufficient_liquidity bars_quality=%s",
+                run_id,
+                workflow_name,
+                item.symbol,
+                int((perf_counter() - symbol_started_at) * 1000),
+                bars_elapsed_ms,
+                financial_elapsed_ms,
+                announcement_elapsed_ms,
+                prediction_elapsed_ms,
+                bars_quality,
+            )
             return None
         if has_abnormal_price_data(daily_bars_response):
+            logger.info(
+                "event=screener.symbol.completed run_id=%s workflow=%s symbol=%s elapsed_ms=%s bars_elapsed_ms=%s financial_elapsed_ms=%s announcement_elapsed_ms=%s prediction_elapsed_ms=%s outcome=skipped reason=abnormal_price_data bars_quality=%s",
+                run_id,
+                workflow_name,
+                item.symbol,
+                int((perf_counter() - symbol_started_at) * 1000),
+                bars_elapsed_ms,
+                financial_elapsed_ms,
+                announcement_elapsed_ms,
+                prediction_elapsed_ms,
+                bars_quality,
+            )
             return None
 
         try:
@@ -253,17 +361,33 @@ class ScreenerPipeline:
                     item.symbol,
                 )
         except DataServiceError:
+            logger.info(
+                "event=screener.symbol.completed run_id=%s workflow=%s symbol=%s elapsed_ms=%s bars_elapsed_ms=%s financial_elapsed_ms=%s announcement_elapsed_ms=%s prediction_elapsed_ms=%s outcome=skipped reason=technical_snapshot_failed bars_quality=%s",
+                run_id,
+                workflow_name,
+                item.symbol,
+                int((perf_counter() - symbol_started_at) * 1000),
+                bars_elapsed_ms,
+                financial_elapsed_ms,
+                announcement_elapsed_ms,
+                prediction_elapsed_ms,
+                bars_quality,
+            )
             return None
 
+        financial_started_at = perf_counter()
         financial_summary, financial_quality = _safe_get_financial_summary(
             self._market_data_service,
             item.symbol,
         )
+        financial_elapsed_ms = int((perf_counter() - financial_started_at) * 1000)
+        announcement_started_at = perf_counter()
         recent_announcements, announcement_quality = _safe_get_recent_announcements(
             self._market_data_service,
             item.symbol,
             technical_snapshot.as_of_date,
         )
+        announcement_elapsed_ms = int((perf_counter() - announcement_started_at) * 1000)
         if self._factor_snapshot_service is not None:
             factor_snapshot = self._factor_snapshot_service.build_from_inputs(
                 FactorBuildInputs(
@@ -289,26 +413,45 @@ class ScreenerPipeline:
             announcement_quality=announcement_quality,
         )
 
+        prediction_started_at = perf_counter()
+        prediction_snapshot = self._try_get_prediction_snapshot(
+            symbol=item.symbol,
+            as_of_date=technical_snapshot.as_of_date,
+        )
+        prediction_elapsed_ms = int((perf_counter() - prediction_started_at) * 1000)
+        candidate = _build_candidate(
+            item=item,
+            technical_snapshot=technical_snapshot,
+            score_result=score_result,
+            prediction_snapshot=prediction_snapshot,
+            target_v2_list_type=quality_gate.target_v2_list_type,
+            target_screener_score=quality_gate.target_screener_score,
+            bars_quality=bars_quality,
+            financial_quality=financial_quality,
+            announcement_quality=announcement_quality,
+            quality_penalty_applied=quality_gate.quality_penalty_applied,
+            quality_note=quality_gate.quality_note,
+        )
+        logger.info(
+            "event=screener.symbol.completed run_id=%s workflow=%s symbol=%s elapsed_ms=%s bars_elapsed_ms=%s financial_elapsed_ms=%s announcement_elapsed_ms=%s prediction_elapsed_ms=%s outcome=candidate bars_quality=%s financial_quality=%s announcement_quality=%s list_type=%s screener_score=%s predictive_model_version=%s",
+            run_id,
+            workflow_name,
+            item.symbol,
+            int((perf_counter() - symbol_started_at) * 1000),
+            bars_elapsed_ms,
+            financial_elapsed_ms,
+            announcement_elapsed_ms,
+            prediction_elapsed_ms,
+            bars_quality,
+            financial_quality,
+            announcement_quality,
+            candidate.v2_list_type,
+            candidate.screener_score,
+            candidate.predictive_model_version,
+        )
         return _ScanResult(
             as_of_date=technical_snapshot.as_of_date,
-            candidate=_build_candidate(
-                item=item,
-                technical_snapshot=technical_snapshot,
-                score_result=score_result,
-                prediction_snapshot=(
-                    self._try_get_prediction_snapshot(
-                        symbol=item.symbol,
-                        as_of_date=technical_snapshot.as_of_date,
-                    )
-                ),
-                target_v2_list_type=quality_gate.target_v2_list_type,
-                target_screener_score=quality_gate.target_screener_score,
-                bars_quality=bars_quality,
-                financial_quality=financial_quality,
-                announcement_quality=announcement_quality,
-                quality_penalty_applied=quality_gate.quality_penalty_applied,
-                quality_note=quality_gate.quality_note,
-            ),
+            candidate=candidate,
             failed_placeholder=None,
         )
 
@@ -361,20 +504,23 @@ class ScreenerPipeline:
         candidates: list[ScreenerCandidate],
         skipped_symbols: int,
         started_at: float,
+        run_context: Optional[dict[str, object]] = None,
     ) -> None:
         if total <= 0:
             return
         if index != total and index % self._progress_log_interval != 0:
             return
-
+        run_context = run_context or {}
         logger.info(
-            "初筛进度：%s/%s，当前=%s，已产出=%s，已跳过=%s，耗时=%.1fs",
+            "event=screener.run.heartbeat run_id=%s workflow=%s processed_symbols=%s total_symbols=%s last_symbol=%s produced_candidates=%s skipped_symbols=%s elapsed_ms=%s",
+            _stringify_log_value(run_context.get("run_id")),
+            _stringify_log_value(run_context.get("workflow_name")) or "screener_run",
             index,
             total,
             item.symbol,
             len(candidates),
             skipped_symbols,
-            perf_counter() - started_at,
+            int((perf_counter() - started_at) * 1000),
         )
 
 
@@ -691,3 +837,9 @@ def _safe_get_recent_announcements(
     except DataServiceError:
         return [], "warning"
     return response.items, _normalize_quality_status(response.quality_status)
+
+
+def _stringify_log_value(value: object | None) -> str | None:
+    if value is None:
+        return None
+    return str(value)

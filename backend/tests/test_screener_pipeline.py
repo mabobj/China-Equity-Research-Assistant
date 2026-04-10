@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from datetime import date, timedelta
+import logging
 from typing import Iterator, Optional
 
 from app.schemas.factor import (
@@ -517,3 +518,32 @@ def _build_snapshot(
         support_level=support_level,
         resistance_level=resistance_level,
     )
+
+
+def test_run_screener_emits_structured_runtime_logs(caplog) -> None:
+    market_data_service = FakeMarketDataService()
+    pipeline = ScreenerPipeline(
+        market_data_service=market_data_service,
+        technical_analysis_service=FakeTechnicalAnalysisService(),
+        factor_snapshot_service=FakeFactorSnapshotService(),
+        progress_log_interval=1,
+    )
+
+    with caplog.at_level(logging.INFO):
+        pipeline.run_screener(
+            max_symbols=2,
+            run_context={
+                "run_id": "run-log-001",
+                "workflow_name": "screener_run",
+                "batch_size": 2,
+                "cursor_start_symbol": "000001.SZ",
+                "cursor_start_index": 0,
+            },
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("event=screener.pipeline.started" in message for message in messages)
+    assert any("event=screener.symbol.completed" in message for message in messages)
+    assert any("event=screener.run.heartbeat" in message for message in messages)
+    assert any("event=screener.pipeline.completed" in message for message in messages)
+    assert any("run_id=run-log-001" in message for message in messages)
