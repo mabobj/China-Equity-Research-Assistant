@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 import logging
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from app.schemas.decision_brief import DecisionBrief
@@ -102,8 +103,49 @@ class WorkspaceBundleService:
         self._debate_review_daily = debate_review_daily
         self._decision_brief_daily = decision_brief_daily
         self._prediction_service = prediction_service
+        self._bundle_lock_guard = Lock()
+        self._bundle_locks: dict[tuple[str, date, bool, bool], Lock] = {}
 
     def get_workspace_bundle(
+        self,
+        symbol: str,
+        *,
+        use_llm: bool | None = None,
+        force_refresh: bool = False,
+        request_id: str | None = None,
+        as_of_date: date | None = None,
+    ) -> WorkspaceBundleResponse:
+        resolved_as_of_date = resolve_daily_analysis_as_of_date(as_of_date)
+        bundle_lock = self._get_bundle_lock(
+            symbol=symbol,
+            as_of_date=resolved_as_of_date,
+            use_llm=bool(use_llm),
+            force_refresh=force_refresh,
+        )
+        logger.debug(
+            "workspace.bundle.lock_wait symbol=%s as_of_date=%s use_llm=%s force_refresh=%s",
+            symbol,
+            resolved_as_of_date,
+            bool(use_llm),
+            force_refresh,
+        )
+        with bundle_lock:
+            logger.debug(
+                "workspace.bundle.lock_acquired symbol=%s as_of_date=%s use_llm=%s force_refresh=%s",
+                symbol,
+                resolved_as_of_date,
+                bool(use_llm),
+                force_refresh,
+            )
+            return self._build_workspace_bundle(
+                symbol,
+                use_llm=use_llm,
+                force_refresh=force_refresh,
+                request_id=request_id,
+                as_of_date=resolved_as_of_date,
+            )
+
+    def _build_workspace_bundle(
         self,
         symbol: str,
         *,
@@ -669,6 +711,23 @@ class WorkspaceBundleService:
             runtime_mode_effective=runtime_mode_effective,
             warning_messages=warning_messages,
         )
+
+    def _get_bundle_lock(
+        self,
+        *,
+        symbol: str,
+        as_of_date: date,
+        use_llm: bool,
+        force_refresh: bool,
+    ) -> Lock:
+        lock_key = (symbol, as_of_date, use_llm, force_refresh)
+        with self._bundle_lock_guard:
+            existing_lock = self._bundle_locks.get(lock_key)
+            if existing_lock is not None:
+                return existing_lock
+            created_lock = Lock()
+            self._bundle_locks[lock_key] = created_lock
+            return created_lock
 
     def _get_trigger_snapshot_with_fallback(
         self,

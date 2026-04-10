@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from threading import Lock, Thread
+from time import sleep
 
 from app.schemas.market_data import DailyBar, DailyBarResponse, StockProfile
 from app.schemas.prediction import PredictionSnapshotResponse
@@ -303,6 +305,25 @@ class _TrackingPredictionService(_StubPredictionService):
     def get_symbol_prediction(self, symbol: str, as_of_date):
         self.as_of_dates.append(as_of_date)
         return super().get_symbol_prediction(symbol, as_of_date)
+
+
+class _ConcurrentTrackingDailyBarsDaily(_StubDailyBarsDaily):
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self.active_calls = 0
+        self.max_active_calls = 0
+
+    def get(self, symbol: str, *, as_of_date=None, force_refresh: bool = False):
+        with self._lock:
+            self.active_calls += 1
+            if self.active_calls > self.max_active_calls:
+                self.max_active_calls = self.active_calls
+        try:
+            sleep(0.15)
+            return super().get(symbol, as_of_date=as_of_date, force_refresh=force_refresh)
+        finally:
+            with self._lock:
+                self.active_calls -= 1
 
 
 class _FailingPredictionService:
@@ -620,3 +641,41 @@ def test_workspace_bundle_service_uses_explicit_as_of_date() -> None:
     assert tracking_daily_bars.as_of_dates == [date(2024, 1, 5)]
     assert tracking_prediction_service.as_of_dates == [date(2024, 1, 5)]
     assert bundle.freshness_summary.default_as_of_date == date(2024, 1, 5)
+
+
+def test_workspace_bundle_service_serializes_same_key_requests() -> None:
+    tracking_daily_bars = _ConcurrentTrackingDailyBarsDaily()
+    service = WorkspaceBundleService(
+        market_data_service=_StubMarketDataService(),
+        technical_analysis_service=_StubTechnicalAnalysisService(),
+        research_manager=_StubResearchManager(),
+        factor_snapshot_service=_StubFactorSnapshotService(),
+        stock_review_service=_StubStockReviewService(),
+        debate_orchestrator=_StubDebateOrchestrator(),
+        debate_runtime_service=_StubDebateRuntimeService(),
+        strategy_planner=_StubStrategyPlanner(),
+        trigger_snapshot_service=_StubTriggerSnapshotService(),
+        daily_bars_daily=tracking_daily_bars,
+        announcements_daily=_StubAnnouncementsDaily(),
+        financial_summary_daily=_StubFinancialSummaryDaily(),
+        factor_snapshot_daily=_StubFactorSnapshotDaily(),
+        review_report_daily=_StubReviewReportDaily(),
+        strategy_plan_daily=_StubStrategyPlanDaily(),
+        debate_review_daily=_StubDebateReviewDaily(),
+        decision_brief_daily=_StubDecisionBriefDaily(),
+        prediction_service=_StubPredictionService(),
+    )
+
+    bundles: list = []
+
+    def _run_bundle() -> None:
+        bundles.append(service.get_workspace_bundle("600519.SH", use_llm=False))
+
+    threads = [Thread(target=_run_bundle), Thread(target=_run_bundle)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(bundles) == 2
+    assert tracking_daily_bars.max_active_calls == 1
