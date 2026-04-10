@@ -11,6 +11,7 @@ from app.api.dependencies import (
     get_deep_screener_pipeline,
     get_screener_batch_service,
     get_screener_pipeline,
+    get_workflow_runtime_service,
 )
 from app.schemas.screener import (
     ScreenerCursorResetResponse,
@@ -21,6 +22,7 @@ from app.schemas.screener import (
     ScreenerRunResponse,
     ScreenerSymbolResultResponse,
 )
+from app.schemas.workflow import WorkflowRunDetailResponse
 
 router = APIRouter(prefix="/screener", tags=["screener"])
 _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
@@ -66,6 +68,16 @@ def get_latest_batch(
         batch=batch_service.get_latest_batch(),
         results=window_results,
         total_results=len(window_results),
+    )
+
+
+@router.get("/active-run", response_model=WorkflowRunDetailResponse | None)
+def get_active_screener_run(
+    workflow_runtime_service: Any = Depends(get_workflow_runtime_service),
+) -> WorkflowRunDetailResponse | None:
+    """返回当前仍在执行中的初筛任务详情。"""
+    return workflow_runtime_service.get_latest_running_detail(
+        workflow_name="screener_run"
     )
 
 

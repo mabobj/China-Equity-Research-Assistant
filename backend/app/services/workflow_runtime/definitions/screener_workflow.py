@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time
+import logging
+from time import perf_counter
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -25,6 +27,7 @@ _CURSOR_SYMBOL_KEY = "screener_run_cursor_symbol"
 _CURSOR_LAST_RESET_DATE_KEY = "screener_run_cursor_last_reset_date"
 _CURSOR_SNAPSHOT_INVALIDATED_DATE_KEY = "screener_run_snapshot_invalidated_date"
 _DEFAULT_BATCH_SIZE = 50
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,7 @@ class ScreenerWorkflowDefinitionBuilder:
         now = datetime.now(_SHANGHAI_TZ)
         current_date = now.date()
         batch_size = self._resolve_batch_size(request)
+        started_at = perf_counter()
         total_symbols, universe_items = load_scan_universe(
             market_data_service=self._market_data_service,
             max_symbols=None,
@@ -115,6 +119,18 @@ class ScreenerWorkflowDefinitionBuilder:
         snapshot_invalidated_today = self._is_snapshot_invalidated_for_date(
             current_date=current_date
         )
+        logger.info(
+            "event=screener.run.selection run_id=%s workflow=%s batch_size=%s total_symbols=%s selected_symbols=%s cursor_start_symbol=%s cursor_start_index=%s snapshot_invalidated_today=%s force_refresh=%s",
+            context.run_id,
+            context.workflow_name,
+            batch_size,
+            total_symbols,
+            len(selection.selected_items),
+            selection.cursor_start_symbol,
+            selection.start_index,
+            snapshot_invalidated_today,
+            bool(request.force_refresh),
+        )
         if snapshot_invalidated_today:
             warning_messages = list(context.get_meta("warning_messages") or [])
             warning_messages.append(
@@ -128,6 +144,15 @@ class ScreenerWorkflowDefinitionBuilder:
                 params=snapshot_params,
             )
             if cached is not None:
+                logger.info(
+                    "event=screener.run.snapshot_hit run_id=%s workflow=%s as_of_date=%s selected_symbols=%s source_mode=%s freshness_mode=%s",
+                    context.run_id,
+                    context.workflow_name,
+                    current_date.isoformat(),
+                    len(selection.selected_items),
+                    cached.source_mode,
+                    cached.freshness_mode,
+                )
                 payload = cached.payload.model_copy(
                     update={
                         "freshness_mode": cached.freshness_mode,
@@ -163,6 +188,17 @@ class ScreenerWorkflowDefinitionBuilder:
             }
         )
         self._advance_cursor_after_success(selection.selected_items)
+        logger.info(
+            "event=screener.run.result_persisted run_id=%s workflow=%s as_of_date=%s scanned_symbols=%s ready_count=%s watch_count=%s avoid_count=%s elapsed_ms=%s",
+            context.run_id,
+            context.workflow_name,
+            payload.as_of_date.isoformat(),
+            payload.scanned_symbols,
+            len(payload.ready_to_buy_candidates),
+            len(payload.watch_candidates),
+            len(payload.avoid_candidates),
+            int((perf_counter() - started_at) * 1000),
+        )
         context.set_output("ScreenerRun", payload)
         return payload
 
@@ -239,6 +275,11 @@ class ScreenerWorkflowDefinitionBuilder:
             return
         last_symbol = str(selected_items[-1].symbol).upper()
         self._market_data_service.set_refresh_cursor(_CURSOR_SYMBOL_KEY, last_symbol)
+        logger.info(
+            "event=screener.run.cursor_advanced cursor_symbol=%s scanned_count=%s",
+            last_symbol,
+            len(selected_items),
+        )
 
     def _normalize_response(self, response: ScreenerRunResponse) -> ScreenerRunResponse:
         def _normalize_candidates(candidates):

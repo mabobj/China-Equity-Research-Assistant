@@ -10,6 +10,7 @@ from app.api.dependencies import (
     get_market_data_service,
     get_screener_batch_service,
     get_screener_pipeline,
+    get_workflow_runtime_service,
 )
 from app.main import app
 from app.schemas.screener import (
@@ -18,6 +19,7 @@ from app.schemas.screener import (
     ScreenerRunResponse,
     ScreenerSymbolResult,
 )
+from app.schemas.workflow import WorkflowRunDetailResponse
 
 
 class StubScreenerPipeline:
@@ -147,6 +149,36 @@ class StubMarketDataService:
         self.storage[cursor_key] = cursor_value
 
 
+class StubWorkflowRuntimeService:
+    def get_latest_running_detail(self, *, workflow_name: str):
+        assert workflow_name == "screener_run"
+        return WorkflowRunDetailResponse(
+            run_id="run-screener-001",
+            workflow_name="screener_run",
+            status="running",
+            started_at=datetime(2026, 3, 29, 17, 1, tzinfo=timezone.utc),
+            finished_at=None,
+            input_summary={"batch_size": 50},
+            steps=[],
+            final_output_summary={},
+            error_message=None,
+            accepted=True,
+            existing_run_id=None,
+            message=None,
+            provider_used=None,
+            provider_candidates=[],
+            fallback_applied=False,
+            fallback_reason=None,
+            runtime_mode_requested=None,
+            runtime_mode_effective=None,
+            warning_messages=[],
+            failed_symbols=[],
+            model_recommendation=None,
+            version_recommendation_alert=None,
+            final_output=None,
+        )
+
+
 def test_run_screener_route_returns_structured_payload() -> None:
     app.dependency_overrides[get_screener_pipeline] = lambda: StubScreenerPipeline()
 
@@ -174,6 +206,22 @@ def test_screener_latest_batch_route_returns_latest_batch() -> None:
     assert payload["results"][0]["symbol"] == "600519.SH"
     assert "window_start" in payload
     assert "window_end" in payload
+
+    app.dependency_overrides.clear()
+
+
+def test_screener_active_run_route_returns_running_detail() -> None:
+    app.dependency_overrides[get_workflow_runtime_service] = (
+        lambda: StubWorkflowRuntimeService()
+    )
+
+    response = client.get("/screener/active-run")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == "run-screener-001"
+    assert payload["status"] == "running"
+    assert payload["input_summary"]["batch_size"] == 50
 
     app.dependency_overrides.clear()
 

@@ -1,7 +1,8 @@
-"""Workflow runtime 可见性测试。"""
+"""Workflow runtime 可见性与长任务状态测试。"""
 
 from __future__ import annotations
 
+from concurrent.futures import Future
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -95,10 +96,47 @@ def test_runtime_visibility_without_predictive_version_has_no_recommendation(
     assert visibility["version_recommendation_alert"] is None
 
 
-def test_get_run_detail_marks_stale_running_artifact_failed(tmp_path: Path) -> None:
+def test_get_run_detail_keeps_running_artifact_when_future_is_active(
+    tmp_path: Path,
+) -> None:
     service = _build_service(tmp_path)
     stale_started_at = datetime.now(timezone.utc) - timedelta(hours=2)
     run_id = "stale-running-run"
+    service._artifact_store.save_artifact(  # noqa: SLF001
+        WorkflowArtifact(
+            run_id=run_id,
+            workflow_name="screener_run",
+            status="running",
+            started_at=stale_started_at,
+            finished_at=None,
+            input_summary={},
+            steps=(
+                WorkflowStepResult(
+                    node_name="ScreenerRun",
+                    status="running",
+                    started_at=stale_started_at,
+                    message="Running node 'ScreenerRun'.",
+                ),
+            ),
+            final_output_summary={},
+            final_output=None,
+            error_message=None,
+        )
+    )
+    service._active_futures[run_id] = Future()  # noqa: SLF001
+
+    detail = service.get_run_detail(run_id)
+
+    assert detail.status == "running"
+    assert detail.error_message is None
+
+
+def test_get_run_detail_marks_stale_running_artifact_failed_without_future(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+    stale_started_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    run_id = "stale-running-no-future"
     service._artifact_store.save_artifact(  # noqa: SLF001
         WorkflowArtifact(
             run_id=run_id,

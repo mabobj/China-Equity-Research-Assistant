@@ -89,18 +89,34 @@ class WorkflowRuntimeService:
             workflow_name=definition.name
         )
         if running_artifact is not None:
+            logger.info(
+                "event=screener.run.reuse_existing workflow=%s run_id=%s started_at=%s",
+                definition.name,
+                running_artifact.run_id,
+                running_artifact.started_at.isoformat(),
+            )
             return self._build_existing_running_response(running_artifact)
 
         def _on_started(artifact: WorkflowArtifact) -> None:
             if self._screener_batch_service is None:
                 return
             batch_size = self._resolve_screener_batch_size(request)
-            self._screener_batch_service.create_running_batch(
+            batch_record = self._screener_batch_service.create_running_batch(
                 run_id=artifact.run_id,
                 batch_size=batch_size,
                 max_symbols=request.max_symbols,
                 top_n=request.top_n,
                 started_at=artifact.started_at,
+            )
+            logger.info(
+                "event=screener.run.started workflow=%s run_id=%s batch_id=%s batch_size=%s max_symbols=%s top_n=%s force_refresh=%s",
+                definition.name,
+                artifact.run_id,
+                batch_record.batch_id,
+                batch_size,
+                request.max_symbols,
+                request.top_n,
+                request.force_refresh,
             )
 
         def _on_completed(result: WorkflowRunResult) -> None:
@@ -118,6 +134,14 @@ class WorkflowRuntimeService:
                 final_output=final_output_dump,
                 final_output_summary=result.final_output_summary,
                 error_message=result.error_message,
+            )
+            logger.info(
+                "event=screener.run.completed workflow=%s run_id=%s status=%s scanned_symbols=%s finished_at=%s",
+                definition.name,
+                result.run_id,
+                result.status,
+                final_output_dump.get("scanned_symbols") if isinstance(final_output_dump, dict) else None,
+                result.finished_at.isoformat() if result.finished_at is not None else None,
             )
 
         return self._start_background_workflow(
@@ -154,6 +178,16 @@ class WorkflowRuntimeService:
                 **visibility,
             }
         )
+
+    def get_latest_running_detail(
+        self,
+        *,
+        workflow_name: str,
+    ) -> WorkflowRunDetailResponse | None:
+        artifact = self._find_valid_running_artifact(workflow_name=workflow_name)
+        if artifact is None:
+            return None
+        return self.get_run_detail(artifact.run_id)
 
     def _start_background_workflow(
         self,
@@ -583,14 +617,7 @@ class WorkflowRuntimeService:
         with self._future_lock:
             future = self._active_futures.get(running.run_id)
             if future is not None and not future.done():
-                if now - running.started_at < self._stale_running_timeout:
-                    return running
-                self._active_futures.pop(running.run_id, None)
-                self._mark_stale_running_artifact_failed(
-                    running,
-                    finished_at=now,
-                )
-                return None
+                return running
             if future is not None and future.done():
                 self._active_futures.pop(running.run_id, None)
 
@@ -639,15 +666,15 @@ class WorkflowRuntimeService:
             return artifact
 
         now = datetime.now(timezone.utc)
-        if now - artifact.started_at < self._stale_running_timeout:
-            return artifact
-
         with self._future_lock:
             future = self._active_futures.get(artifact.run_id)
             if future is not None and not future.done():
+                return artifact
+            if future is not None and future.done():
                 self._active_futures.pop(artifact.run_id, None)
-            elif future is not None and future.done():
-                self._active_futures.pop(artifact.run_id, None)
+
+        if now - artifact.started_at < self._stale_running_timeout:
+            return artifact
 
         self._mark_stale_running_artifact_failed(artifact, finished_at=now)
         return self._artifact_store.load_run(artifact.run_id)

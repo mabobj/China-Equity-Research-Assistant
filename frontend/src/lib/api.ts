@@ -132,6 +132,12 @@ export async function getLatestScreenerBatch(): Promise<ScreenerLatestBatchRespo
   });
 }
 
+export async function getActiveScreenerRun(): Promise<WorkflowRunDetailResponse | null> {
+  return fetchBackend<WorkflowRunDetailResponse | null>("/screener/active-run", {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+  });
+}
+
 export async function resetScreenerCursor(): Promise<ScreenerCursorResetResponse> {
   return fetchBackend<ScreenerCursorResetResponse>("/screener/cursor/reset", {
     timeoutMs: STOCK_PAGE_TIMEOUT_MS,

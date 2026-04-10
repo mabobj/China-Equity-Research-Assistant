@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 import json
+import logging
 from pathlib import Path
 from threading import Lock
 from typing import Any, Iterable
@@ -18,6 +19,7 @@ from app.schemas.screener import (
 from app.services.data_products.freshness import resolve_last_closed_trading_day
 from app.services.screener_service.texts import normalize_candidate_display_fields
 
+logger = logging.getLogger(__name__)
 _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 _DEFAULT_RULE_VERSION = "screener_workflow_v1"
 _DEFAULT_RULE_SUMMARY = "基于趋势评分、因子快照与风险约束的规则初筛。"
@@ -210,6 +212,12 @@ class ScreenerBatchService:
     ) -> tuple[datetime, datetime, list[ScreenerSymbolResult]]:
         window_start, window_end = self.get_display_window(now=now)
         records = self.list_batches_in_window(window_start=window_start, window_end=window_end)
+        logger.info(
+            "event=screener.window_results.load_started window_start=%s window_end=%s batch_count=%s",
+            window_start.isoformat(),
+            window_end.isoformat(),
+            len(records),
+        )
 
         latest_by_symbol: dict[str, ScreenerSymbolResult] = {}
         for batch in records:
@@ -231,6 +239,12 @@ class ScreenerBatchService:
             key=lambda item: (_to_shanghai_datetime(item.calculated_at), item.symbol),
             reverse=True,
         )
+        logger.info(
+            "event=screener.window_results.load_completed window_start=%s window_end=%s merged_symbol_count=%s",
+            window_start.isoformat(),
+            window_end.isoformat(),
+            len(merged),
+        )
         return window_start, window_end, merged
 
     def load_batch(self, batch_id: str) -> ScreenerBatchRecord | None:
@@ -248,10 +262,21 @@ class ScreenerBatchService:
             _normalize_symbol_result(ScreenerSymbolResult.model_validate(item))
             for item in payload
         ]
+        logger.info(
+            "event=screener.batch_results.load_started batch_id=%s raw_result_count=%s",
+            batch_id,
+            len(results),
+        )
         results, updated = self._hydrate_missing_predictive_fields(results)
         if updated:
             with self._lock:
                 self._save_batch_results(batch_id=batch_id, results=results)
+        logger.info(
+            "event=screener.batch_results.load_completed batch_id=%s result_count=%s predictive_hydrated=%s",
+            batch_id,
+            len(results),
+            updated,
+        )
         return results
 
     def load_symbol_result(self, batch_id: str, symbol: str) -> ScreenerSymbolResult | None:

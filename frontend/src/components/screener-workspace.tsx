@@ -5,6 +5,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 
 import {
+  getActiveScreenerRun,
   getLatestScreenerBatch,
   getModelEvaluation,
   getWorkflowRunDetail,
@@ -109,6 +110,14 @@ export function ScreenerWorkspace() {
       setBatchLoading(true);
       setBatchError(null);
       try {
+        const activeRun = await getActiveScreenerRun();
+        if (!active) return;
+        if (activeRun?.status === "running") {
+          setScreenerRun(activeRun);
+          setLatestBatch(null);
+          setSelectedSymbol(null);
+          return;
+        }
         const response = await getLatestScreenerBatch();
         if (!active) return;
         setLatestBatch(response);
