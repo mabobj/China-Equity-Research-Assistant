@@ -77,6 +77,14 @@ from app.schemas.provider import (
     ProviderCapabilityReport,
     ProviderHealthReport,
 )
+from app.schemas.lineage import (
+    LineageDependency,
+    LineageListResponse,
+    LineageMetadata,
+    LineageSourceRef,
+    LineageSummary,
+    WorkspaceLineageItem,
+)
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.schemas.technical import (
     BollingerSnapshot,
@@ -151,6 +159,11 @@ __all__ = [
     "ProviderCapabilityReport",
     "CapabilityHealthReport",
     "CapabilityPolicyReport",
+    "LineageDependency",
+    "LineageListResponse",
+    "LineageMetadata",
+    "LineageSourceRef",
+    "LineageSummary",
     "ProviderHealthReport",
     "ResearchReport",
     "RiskProxySnapshot",
@@ -190,4 +203,5 @@ __all__ = [
     "WorkflowRunResponse",
     "WorkflowStepSummary",
     "WorkflowSymbolFailure",
+    "WorkspaceLineageItem",
 ]

@@ -59,6 +59,10 @@ class ScreenerSnapshotDailyDataset:
             freshness_mode="cache_hit",
             source_mode="snapshot",
             updated_at=cached.updated_at,
+            dataset_version=cached.dataset_version,
+            provider_used=cached.provider_used,
+            warning_messages=cached.warning_messages,
+            lineage_metadata=cached.lineage_metadata,
         )
 
     def save(
@@ -88,6 +92,10 @@ class ScreenerSnapshotDailyDataset:
             freshness_mode="computed",
             source_mode="snapshot",
             updated_at=entry.updated_at,
+            dataset_version=entry.dataset_version,
+            provider_used=entry.provider_used,
+            warning_messages=entry.warning_messages,
+            lineage_metadata=entry.lineage_metadata,
         )
 
     def _params_hash(self, params: ScreenerSnapshotParams) -> str:

@@ -7,6 +7,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.lineage import LineageMetadata
+
 
 class PredictionSnapshotResponse(BaseModel):
     """单票预测快照。"""
@@ -15,6 +17,7 @@ class PredictionSnapshotResponse(BaseModel):
 
     symbol: str
     as_of_date: date
+    dataset_version: str
     model_version: str
     feature_version: str
     label_version: str
@@ -25,6 +28,7 @@ class PredictionSnapshotResponse(BaseModel):
     runtime_mode: Literal["baseline"]
     warning_messages: list[str] = Field(default_factory=list)
     generated_at: datetime
+    lineage_metadata: Optional[LineageMetadata] = None
 
 
 class CrossSectionPredictionRunRequest(BaseModel):
@@ -59,6 +63,7 @@ class CrossSectionPredictionRunResponse(BaseModel):
     run_id: str
     status: Literal["completed"]
     as_of_date: date
+    dataset_version: str
     model_version: str
     feature_version: str
     label_version: str
@@ -66,4 +71,4 @@ class CrossSectionPredictionRunResponse(BaseModel):
     candidates: list[CrossSectionPredictionCandidate] = Field(default_factory=list)
     warning_messages: list[str] = Field(default_factory=list)
     generated_at: datetime
-
+    lineage_metadata: Optional[LineageMetadata] = None

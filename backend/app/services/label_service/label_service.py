@@ -1,9 +1,9 @@
-"""标签服务（最小真实链路版）。"""
+"""Label dataset service."""
 
 from __future__ import annotations
 
 from contextlib import nullcontext
-from datetime import date
+from datetime import date, datetime
 import json
 import logging
 from pathlib import Path
@@ -15,15 +15,24 @@ from app.schemas.dataset import (
     LabelDatasetResponse,
     LabelDatasetSummary,
 )
+from app.schemas.lineage import LineageDependency, LineageSourceRef
+from app.services.data_products.base import build_dataset_version
 from app.services.data_products.freshness import resolve_label_analysis_as_of_date
 from app.services.data_service.market_data_service import MarketDataService
 from app.services.dataset_service.dataset_service import DatasetService
+from app.services.lineage_service.lineage_service import LineageService
+from app.services.lineage_service.utils import (
+    build_dependency,
+    build_lineage_metadata,
+    build_source_ref,
+    utcnow,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class LabelService:
-    """管理标签数据集版本，支持从特征样本生成未来收益标签。"""
+    """Build and reuse forward-return label datasets."""
 
     def __init__(
         self,
@@ -32,6 +41,8 @@ class LabelService:
         root_dir: Path,
         market_data_service: MarketDataService,
         dataset_service: DatasetService,
+        daily_bars_daily,
+        lineage_service: LineageService,
     ) -> None:
         self._default_label_version = default_label_version
         self._root_dir = root_dir
@@ -41,12 +52,13 @@ class LabelService:
         self._manifest_path = self._root_dir / "label_manifest.json"
         self._market_data_service = market_data_service
         self._dataset_service = dataset_service
+        self._daily_bars_daily = daily_bars_daily
+        self._lineage_service = lineage_service
 
     def get_default_label_version(self) -> str:
         return self._default_label_version
 
     def get_label_window(self) -> tuple[int, int]:
-        """返回默认标签窗口（未来 5/10 交易日）。"""
         return (5, 10)
 
     def resolve_as_of_date(self, as_of_date: date | None) -> date:
@@ -65,7 +77,6 @@ class LabelService:
         if existing is not None and label_path.exists() and not request.force_refresh:
             return _build_label_response(label_version, existing)
 
-        # 先确保同日特征数据集可用（同样走本地优先构建）。
         self._dataset_service.build_feature_dataset(
             FeatureDatasetBuildRequest(
                 as_of_date=as_of_date,
@@ -78,6 +89,21 @@ class LabelService:
 
         records: list[dict[str, Any]] = []
         warning_messages: list[str] = []
+        generated_at = utcnow()
+        daily_bars_source = _build_global_daily_bars_source(as_of_date)
+        feature_source = build_source_ref(
+            dataset="feature_dataset",
+            dataset_version=feature_version,
+            as_of_date=as_of_date,
+            symbol=None,
+            source_mode="mixed",
+            freshness_mode="cache_preferred",
+        )
+        dependencies = [
+            build_dependency("feature_dataset", feature_source),
+            build_dependency("daily_bars_daily", daily_bars_source),
+        ]
+
         session_scope = getattr(self._market_data_service, "session_scope", None)
         scope = session_scope() if callable(session_scope) else nullcontext()
         with scope:
@@ -86,12 +112,18 @@ class LabelService:
                 if symbol == "":
                     continue
                 try:
-                    bars_response = self._get_daily_bars_for_labels(symbol=symbol)
+                    bars_result = self._daily_bars_daily.get(
+                        symbol,
+                        as_of_date=as_of_date,
+                        force_refresh=False,
+                        provider_priority=("mootdx", "baostock", "akshare"),
+                    )
                 except Exception:
                     warning_messages.append(f"{symbol}:daily_bars_unavailable_for_labels")
                     continue
 
-                bars = [bar for bar in bars_response.bars if bar.close is not None]
+                self._lineage_service.register_data_product(bars_result)
+                bars = [bar for bar in bars_result.payload.bars if bar.close is not None]
                 bars.sort(key=lambda item: item.trade_date)
                 index = _find_trade_date_index(bars, as_of_date)
                 if index is None or (index + 10) >= len(bars):
@@ -121,6 +153,14 @@ class LabelService:
                     }
                 )
 
+        lineage_metadata = build_lineage_metadata(
+            dataset="label_dataset",
+            dataset_version=label_version,
+            as_of_date=as_of_date,
+            dependencies=dependencies,
+            warning_messages=warning_messages[:200],
+            generated_at=generated_at,
+        )
         payload = {
             "label_version": label_version,
             "as_of_date": as_of_date.isoformat(),
@@ -130,6 +170,10 @@ class LabelService:
             "source_mode": "mixed",
             "description": "基于日线未来收益构建的最小标签集",
             "warning_messages": warning_messages[:200],
+            "feature_version": feature_version,
+            "generated_at": generated_at.isoformat(),
+            "schema_version": 1,
+            "dependencies": [item.model_dump(mode="json") for item in dependencies],
             "records": records,
         }
         with label_path.open("w", encoding="utf-8") as file:
@@ -143,9 +187,14 @@ class LabelService:
             "source_mode": payload["source_mode"],
             "description": payload["description"],
             "warning_messages": payload["warning_messages"],
+            "feature_version": payload["feature_version"],
+            "generated_at": payload["generated_at"],
+            "schema_version": payload["schema_version"],
+            "dependencies": payload["dependencies"],
         }
         manifest["latest_version"] = label_version
         self._save_manifest(manifest)
+        self._lineage_service.register_metadata(lineage_metadata)
 
         logger.info(
             "prediction.labels.build_done label_version=%s symbol_count=%s warning_count=%s",
@@ -197,37 +246,43 @@ class LabelService:
             json.dump(manifest, file, ensure_ascii=False, indent=2)
 
     def _build_default_manifest(self) -> dict[str, Any]:
-        today = self.resolve_as_of_date(None).isoformat()
+        today = self.resolve_as_of_date(None)
+        generated_at = utcnow()
+        feature_source = build_source_ref(
+            dataset="feature_dataset",
+            dataset_version=f"features-{today.isoformat()}-v1",
+            as_of_date=today,
+            symbol=None,
+            source_mode="mixed",
+            freshness_mode="cache_preferred",
+        )
+        daily_bars_source = _build_global_daily_bars_source(today)
         return {
             "latest_version": self._default_label_version,
             "datasets": {
                 self._default_label_version: {
-                    "as_of_date": today,
+                    "as_of_date": today.isoformat(),
                     "symbol_count": 0,
                     "window_5d": 5,
                     "window_10d": 10,
                     "source_mode": "local",
                     "description": "预测标签骨架初始版本（未构建真实标签）",
                     "warning_messages": ["尚未构建真实标签数据集。"],
+                    "feature_version": None,
+                    "generated_at": generated_at.isoformat(),
+                    "schema_version": 1,
+                    "dependencies": [
+                        build_dependency("feature_dataset", feature_source).model_dump(
+                            mode="json"
+                        ),
+                        build_dependency(
+                            "daily_bars_daily",
+                            daily_bars_source,
+                        ).model_dump(mode="json"),
+                    ],
                 }
             },
         }
-
-    def _get_daily_bars_for_labels(self, *, symbol: str):
-        try:
-            return self._market_data_service.get_daily_bars(
-                symbol=symbol,
-                allow_remote_sync=False,
-                provider_names=("mootdx", "baostock", "akshare"),
-            )
-        except TypeError:
-            try:
-                return self._market_data_service.get_daily_bars(
-                    symbol=symbol,
-                    provider_names=("mootdx", "baostock", "akshare"),
-                )
-            except TypeError:
-                return self._market_data_service.get_daily_bars(symbol=symbol)
 
 
 def _find_trade_date_index(bars: list[Any], target_date: date) -> int | None:
@@ -241,17 +296,58 @@ def _build_label_response(
     label_version: str,
     dataset: dict[str, Any],
 ) -> LabelDatasetResponse:
+    dependencies = _load_dependencies(dataset)
+    as_of_date = date.fromisoformat(str(dataset["as_of_date"]))
     return LabelDatasetResponse(
         summary=LabelDatasetSummary(
             label_version=label_version,
-            as_of_date=date.fromisoformat(str(dataset["as_of_date"])),
+            as_of_date=as_of_date,
             symbol_count=int(dataset.get("symbol_count", 0)),
             window_5d=int(dataset.get("window_5d", 5)),
             window_10d=int(dataset.get("window_10d", 10)),
             source_mode=str(dataset.get("source_mode", "local")),
             description=_optional_text(dataset.get("description")),
+            feature_version=_optional_text(dataset.get("feature_version")),
+            lineage_metadata=build_lineage_metadata(
+                dataset="label_dataset",
+                dataset_version=label_version,
+                as_of_date=as_of_date,
+                dependencies=dependencies,
+                warning_messages=list(dataset.get("warning_messages", [])),
+                generated_at=datetime.fromisoformat(
+                    str(dataset.get("generated_at", utcnow().isoformat()))
+                ),
+            ),
         ),
         warning_messages=list(dataset.get("warning_messages", [])),
+    )
+
+
+def _load_dependencies(dataset: dict[str, Any]) -> list[LineageDependency]:
+    result: list[LineageDependency] = []
+    for item in dataset.get("dependencies", []):
+        if not isinstance(item, dict):
+            continue
+        source_ref = item.get("source_ref")
+        if not isinstance(source_ref, dict):
+            continue
+        result.append(
+            build_dependency(
+                str(item.get("role", "upstream")),
+                LineageSourceRef.model_validate(source_ref),
+            )
+        )
+    return result
+
+
+def _build_global_daily_bars_source(as_of_date: date) -> LineageSourceRef:
+    return build_source_ref(
+        dataset="daily_bars_daily",
+        dataset_version=build_dataset_version("daily_bars_daily", as_of_date, "global"),
+        as_of_date=as_of_date,
+        symbol=None,
+        source_mode="local_preferred",
+        freshness_mode="cache_preferred",
     )
 
 
@@ -260,11 +356,3 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-
-
-def _default_label_as_of_date() -> date:
-    # 为保证 5/10 日未来窗口通常可用，默认回退约 14 个自然日。
-    candidate = resolve_last_closed_trading_day() - timedelta(days=14)
-    while candidate.weekday() >= 5:
-        candidate -= timedelta(days=1)
-    return candidate

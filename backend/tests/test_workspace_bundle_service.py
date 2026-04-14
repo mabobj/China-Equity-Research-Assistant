@@ -7,6 +7,7 @@ from threading import Lock, Thread
 from time import sleep
 
 from app.schemas.market_data import DailyBar, DailyBarResponse, StockProfile
+from app.schemas.lineage import LineageMetadata
 from app.schemas.prediction import PredictionSnapshotResponse
 from app.schemas.research import ResearchReport
 from app.schemas.research_inputs import AnnouncementListResponse, FinancialSummary
@@ -276,6 +277,7 @@ class _StubPredictionService:
         return PredictionSnapshotResponse(
             symbol=symbol,
             as_of_date=as_of_date,
+            dataset_version=f"prediction_snapshot:{as_of_date.isoformat()}:{symbol}:baseline-rule-v1:v1",
             model_version="baseline-rule-v1",
             feature_version=f"features-{as_of_date.isoformat()}-v1",
             label_version="labels-v0-forward-return",
@@ -286,6 +288,15 @@ class _StubPredictionService:
             runtime_mode="baseline",
             warning_messages=[],
             generated_at=datetime.now(),
+            lineage_metadata=LineageMetadata(
+                dataset="prediction_snapshot",
+                dataset_version=f"prediction_snapshot:{as_of_date.isoformat()}:{symbol}:baseline-rule-v1:v1",
+                generated_at=datetime.now(),
+                as_of_date=as_of_date,
+                symbol=symbol,
+                dependencies=[],
+                warning_messages=[],
+            ),
         )
 
 
@@ -445,9 +456,11 @@ def test_workspace_bundle_service_returns_bundle_with_evidence_and_freshness() -
     assert bundle.predictive_snapshot is not None
     assert bundle.evidence_manifest is not None
     assert bundle.freshness_summary.items
+    assert bundle.lineage_summary.items
     assert any(item.module_name == "decision_brief" for item in bundle.module_status_summary)
     assert bundle.runtime_mode_effective == "rule_based"
     assert bundle.fallback_applied is False
+    assert any(item.item_name == "predictive_snapshot" for item in bundle.lineage_summary.items)
 
 
 def test_workspace_bundle_service_returns_partial_bundle_when_module_fails() -> None:

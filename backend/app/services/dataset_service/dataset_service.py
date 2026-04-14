@@ -1,9 +1,9 @@
-"""特征数据集服务（最小真实链路版）。"""
+"""Feature dataset service."""
 
 from __future__ import annotations
 
 from contextlib import nullcontext
-from datetime import date
+from datetime import date, datetime
 import json
 import logging
 from pathlib import Path
@@ -15,14 +15,23 @@ from app.schemas.dataset import (
     FeatureDatasetResponse,
     FeatureDatasetSummary,
 )
+from app.schemas.lineage import LineageDependency, LineageMetadata, LineageSourceRef
+from app.services.data_products.base import build_dataset_version
 from app.services.data_products.freshness import resolve_daily_analysis_as_of_date
 from app.services.data_service.market_data_service import MarketDataService
+from app.services.lineage_service.lineage_service import LineageService
+from app.services.lineage_service.utils import (
+    build_dependency,
+    build_lineage_metadata,
+    build_source_ref,
+    utcnow,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class DatasetService:
-    """管理特征数据集版本，支持按交易日构建与复用。"""
+    """Build and reuse point-in-time feature datasets."""
 
     def __init__(
         self,
@@ -30,6 +39,8 @@ class DatasetService:
         root_dir: Path,
         default_feature_version: str,
         market_data_service: MarketDataService,
+        daily_bars_daily,
+        lineage_service: LineageService,
     ) -> None:
         self._root_dir = root_dir
         self._root_dir.mkdir(parents=True, exist_ok=True)
@@ -38,6 +49,8 @@ class DatasetService:
         self._manifest_path = self._root_dir / "feature_manifest.json"
         self._default_feature_version = default_feature_version
         self._market_data_service = market_data_service
+        self._daily_bars_daily = daily_bars_daily
+        self._lineage_service = lineage_service
         self._default_feature_names = [
             "close_return_5d",
             "close_return_20d",
@@ -90,23 +103,25 @@ class DatasetService:
                 self._default_feature_names,
             )
 
-        universe = self._market_data_service.get_stock_universe().items[
-            : request.max_symbols
-        ]
+        universe = self._market_data_service.get_stock_universe().items[: request.max_symbols]
         records: list[dict[str, Any]] = []
         warning_messages: list[str] = []
+        generated_at = utcnow()
+        daily_bars_source = _build_global_daily_bars_source(as_of_date)
+        dependencies = [build_dependency("daily_bars_daily", daily_bars_source)]
 
-        # 批量构建特征时强制本地优先，避免单次评估触发大量远端补数。
         session_scope = getattr(self._market_data_service, "session_scope", None)
         scope = session_scope() if callable(session_scope) else nullcontext()
         with scope:
             for item in universe:
                 try:
-                    bars_response = self._get_daily_bars_for_dataset(
-                        symbol=item.symbol,
-                        end_date=as_of_date.isoformat(),
+                    bars_result = self._daily_bars_daily.get(
+                        item.symbol,
+                        as_of_date=as_of_date,
+                        force_refresh=False,
+                        provider_priority=("mootdx", "baostock", "akshare"),
                     )
-                except Exception as exc:  # pragma: no cover - 防御性分支
+                except Exception as exc:  # pragma: no cover
                     warning_messages.append(f"{item.symbol}:daily_bars_unavailable")
                     logger.debug(
                         "prediction.features.symbol_skip symbol=%s reason=%s",
@@ -115,6 +130,8 @@ class DatasetService:
                     )
                     continue
 
+                self._lineage_service.register_data_product(bars_result)
+                bars_response = bars_result.payload
                 valid_bars = [
                     bar
                     for bar in bars_response.bars
@@ -131,14 +148,23 @@ class DatasetService:
 
                 closes = [float(bar.close) for bar in valid_bars]
                 volumes = [float(bar.volume or 0.0) for bar in valid_bars]
-                record = _build_feature_record(
-                    symbol=item.symbol,
-                    as_of_date=as_of_date,
-                    closes=closes,
-                    volumes=volumes,
+                records.append(
+                    _build_feature_record(
+                        symbol=item.symbol,
+                        as_of_date=as_of_date,
+                        closes=closes,
+                        volumes=volumes,
+                    )
                 )
-                records.append(record)
 
+        lineage_metadata = build_lineage_metadata(
+            dataset="feature_dataset",
+            dataset_version=dataset_version,
+            as_of_date=as_of_date,
+            dependencies=dependencies,
+            warning_messages=warning_messages[:200],
+            generated_at=generated_at,
+        )
         payload = {
             "dataset_version": dataset_version,
             "as_of_date": as_of_date.isoformat(),
@@ -148,6 +174,9 @@ class DatasetService:
             "source_mode": "mixed",
             "description": "point-in-time 特征数据集（最小可用版）",
             "warning_messages": warning_messages[:200],
+            "generated_at": generated_at.isoformat(),
+            "schema_version": 1,
+            "dependencies": [item.model_dump(mode="json") for item in dependencies],
             "records": records,
         }
 
@@ -162,9 +191,13 @@ class DatasetService:
             "source_mode": payload["source_mode"],
             "description": payload["description"],
             "warning_messages": payload["warning_messages"],
+            "generated_at": payload["generated_at"],
+            "schema_version": payload["schema_version"],
+            "dependencies": payload["dependencies"],
         }
         manifest["latest_version"] = dataset_version
         self._save_manifest(manifest)
+        self._lineage_service.register_metadata(lineage_metadata)
 
         logger.info(
             "prediction.features.build_done dataset_version=%s symbol_count=%s warning_count=%s",
@@ -209,45 +242,29 @@ class DatasetService:
             json.dump(manifest, file, ensure_ascii=False, indent=2)
 
     def _build_default_manifest(self) -> dict[str, Any]:
-        today = resolve_daily_analysis_as_of_date().isoformat()
+        today = resolve_daily_analysis_as_of_date()
+        generated_at = utcnow()
+        dependency = build_dependency("daily_bars_daily", _build_global_daily_bars_source(today))
         return {
             "latest_version": self._default_feature_version,
             "datasets": {
                 self._default_feature_version: {
-                    "as_of_date": today,
+                    "as_of_date": today.isoformat(),
                     "symbol_count": 0,
                     "feature_names": self._default_feature_names,
                     "label_version": None,
                     "source_mode": "local",
                     "description": "预测底座骨架初始版本（未构建真实特征）",
                     "warning_messages": ["尚未构建真实特征数据集。"],
+                    "generated_at": generated_at.isoformat(),
+                    "schema_version": 1,
+                    "dependencies": [dependency.model_dump(mode="json")],
                 }
             },
         }
 
     def resolve_as_of_date(self, as_of_date: date | None) -> date:
         return resolve_daily_analysis_as_of_date(as_of_date)
-
-    def _get_daily_bars_for_dataset(self, *, symbol: str, end_date: str):
-        try:
-            return self._market_data_service.get_daily_bars(
-                symbol=symbol,
-                end_date=end_date,
-                allow_remote_sync=False,
-                provider_names=("mootdx", "baostock", "akshare"),
-            )
-        except TypeError:
-            try:
-                return self._market_data_service.get_daily_bars(
-                    symbol=symbol,
-                    end_date=end_date,
-                    provider_names=("mootdx", "baostock", "akshare"),
-                )
-            except TypeError:
-                return self._market_data_service.get_daily_bars(
-                    symbol=symbol,
-                    end_date=end_date,
-                )
 
 
 def _build_feature_response(
@@ -256,14 +273,28 @@ def _build_feature_response(
     default_feature_names: list[str],
 ) -> FeatureDatasetResponse:
     feature_names = list(dataset.get("feature_names", default_feature_names))
+    dependencies = _load_dependencies(dataset)
+    generated_at = datetime.fromisoformat(
+        str(dataset.get("generated_at", utcnow().isoformat()))
+    )
+    as_of_date = date.fromisoformat(str(dataset["as_of_date"]))
     summary = FeatureDatasetSummary(
         dataset_version=dataset_version,
-        as_of_date=date.fromisoformat(str(dataset["as_of_date"])),
+        as_of_date=as_of_date,
         symbol_count=int(dataset.get("symbol_count", 0)),
         feature_count=len(feature_names),
         label_version=_optional_text(dataset.get("label_version")),
         source_mode=str(dataset.get("source_mode", "local")),
         description=_optional_text(dataset.get("description")),
+        lineage_metadata=build_lineage_metadata(
+            dataset="feature_dataset",
+            dataset_version=dataset_version,
+            as_of_date=as_of_date,
+            dependencies=dependencies,
+            warning_messages=list(dataset.get("warning_messages", [])),
+            generated_at=generated_at,
+        ),
+        upstream_sources=[dependency.source_ref for dependency in dependencies],
     )
     return FeatureDatasetResponse(
         summary=summary,
@@ -317,6 +348,34 @@ def _build_feature_record(
         "risk_score": risk_score,
         "latest_close": round(closes[-1], 4),
     }
+
+
+def _build_global_daily_bars_source(as_of_date: date) -> LineageSourceRef:
+    return build_source_ref(
+        dataset="daily_bars_daily",
+        dataset_version=build_dataset_version("daily_bars_daily", as_of_date, "global"),
+        as_of_date=as_of_date,
+        symbol=None,
+        source_mode="local_preferred",
+        freshness_mode="cache_preferred",
+    )
+
+
+def _load_dependencies(dataset: dict[str, Any]) -> list[LineageDependency]:
+    result: list[LineageDependency] = []
+    for item in dataset.get("dependencies", []):
+        if not isinstance(item, dict):
+            continue
+        source_ref = item.get("source_ref")
+        if not isinstance(source_ref, dict):
+            continue
+        result.append(
+            build_dependency(
+                str(item.get("role", "upstream")),
+                LineageSourceRef.model_validate(source_ref),
+            )
+        )
+    return result
 
 
 def _pct_change(base_value: float, current_value: float) -> float:

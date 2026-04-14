@@ -11,10 +11,13 @@ from app.schemas.dataset import FeatureDatasetBuildRequest, LabelDatasetBuildReq
 from app.schemas.market_data import DailyBar, DailyBarResponse, UniverseItem, UniverseResponse
 from app.schemas.prediction import CrossSectionPredictionRunRequest
 from app.services.backtest_service.backtest_service import BacktestService
+from app.services.data_products.datasets.daily_bars_daily import DailyBarsDailyDataset
 from app.services.dataset_service.dataset_service import DatasetService
 from app.services.evaluation_service.evaluation_service import EvaluationService
 from app.services.experiment_service.experiment_service import ExperimentService
 from app.services.label_service.label_service import LabelService
+from app.services.lineage_service.lineage_service import LineageService
+from app.services.lineage_service.repository import LineageRepository
 from app.services.prediction_service.prediction_service import PredictionService
 
 
@@ -101,31 +104,42 @@ class _StubMarketDataService:
 def _build_services(tmp_path: Path):
     market = _StubMarketDataService()
     experiment_service = ExperimentService()
+    daily_bars_daily = DailyBarsDailyDataset(market_data_service=market)
+    lineage_service = LineageService(
+        repository=LineageRepository(tmp_path / "prediction_assets" / "lineage.sqlite3")
+    )
     dataset_service = DatasetService(
         root_dir=tmp_path / "prediction_assets" / "datasets",
         default_feature_version=experiment_service.get_default_feature_version(),
         market_data_service=market,
+        daily_bars_daily=daily_bars_daily,
+        lineage_service=lineage_service,
     )
     label_service = LabelService(
         default_label_version=experiment_service.get_default_label_version(),
         root_dir=tmp_path / "prediction_assets" / "datasets",
         market_data_service=market,
         dataset_service=dataset_service,
+        daily_bars_daily=daily_bars_daily,
+        lineage_service=lineage_service,
     )
     prediction_service = PredictionService(
         dataset_service=dataset_service,
         label_service=label_service,
         experiment_service=experiment_service,
+        lineage_service=lineage_service,
     )
     backtest_service = BacktestService(
         experiment_service=experiment_service,
         label_service=label_service,
         prediction_service=prediction_service,
+        lineage_service=lineage_service,
     )
     evaluation_service = EvaluationService(
         experiment_service=experiment_service,
         label_service=label_service,
         backtest_service=backtest_service,
+        lineage_service=lineage_service,
     )
     return (
         dataset_service,
@@ -148,6 +162,8 @@ def test_feature_and_label_dataset_build_chain(tmp_path: Path) -> None:
         )
     )
     assert feature_dataset.summary.symbol_count == 2
+    assert feature_dataset.summary.lineage_metadata is not None
+    assert feature_dataset.summary.upstream_sources
     feature_records = dataset_service.load_feature_records(
         feature_dataset.summary.dataset_version
     )
@@ -161,6 +177,8 @@ def test_feature_and_label_dataset_build_chain(tmp_path: Path) -> None:
         )
     )
     assert label_dataset.summary.symbol_count == 2
+    assert label_dataset.summary.feature_version == feature_dataset.summary.dataset_version
+    assert label_dataset.summary.lineage_metadata is not None
     label_records = label_service.load_label_records(label_dataset.summary.label_version)
     assert len(label_records) == 2
     assert "forward_return_5d" in label_records[0]
@@ -199,6 +217,8 @@ def test_prediction_and_backtest_consume_real_dataset_records(tmp_path: Path) ->
     assert snapshot.symbol == "600519.SH"
     assert snapshot.predictive_score >= 0
     assert snapshot.feature_version.startswith("features-")
+    assert snapshot.dataset_version.startswith("prediction_snapshot:")
+    assert snapshot.lineage_metadata is not None
 
     cross = prediction_service.run_cross_section_prediction(
         CrossSectionPredictionRunRequest(
@@ -211,6 +231,7 @@ def test_prediction_and_backtest_consume_real_dataset_records(tmp_path: Path) ->
     )
     assert cross.total_symbols == 2
     assert len(cross.candidates) == 1
+    assert cross.lineage_metadata is not None
 
     backtest = backtest_service.run_screener_backtest(
         ScreenerBacktestRunRequest(
@@ -222,6 +243,7 @@ def test_prediction_and_backtest_consume_real_dataset_records(tmp_path: Path) ->
     )
     assert backtest.backtest_type == "screener"
     assert "win_rate" in backtest.metrics
+    assert backtest.lineage_metadata is not None
 
 
 def test_symbol_prediction_fallback_when_feature_records_missing(tmp_path: Path) -> None:
@@ -245,6 +267,7 @@ def test_symbol_prediction_fallback_when_feature_records_missing(tmp_path: Path)
     assert snapshot.predictive_score >= 0
     assert snapshot.feature_version.startswith("features-")
     assert snapshot.warning_messages
+    assert snapshot.lineage_metadata is not None
 
 
 def test_evaluation_service_consumes_real_backtest_metrics(tmp_path: Path) -> None:
@@ -286,6 +309,7 @@ def test_evaluation_service_consumes_real_backtest_metrics(tmp_path: Path) -> No
     assert evaluation.backtest_references
     assert "screener_win_rate" in evaluation.metrics
     assert "quality_score" in evaluation.metrics
+    assert evaluation.lineage_metadata is not None
     assert evaluation.recommendation is not None
     assert evaluation.recommendation.recommendation in {
         "keep_baseline",

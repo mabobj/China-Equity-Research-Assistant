@@ -51,6 +51,7 @@ from app.schemas.market_data import (
     UniverseItem,
     UniverseResponse,
 )
+from app.schemas.lineage import LineageSummary, WorkspaceLineageItem
 from app.schemas.research_inputs import (
     AnnouncementListResponse,
     FinancialReportIndexItem,
@@ -565,6 +566,19 @@ class StubWorkspaceBundleService:
                     )
                 ],
             ),
+            lineage_summary=LineageSummary(
+                items=[
+                    WorkspaceLineageItem(
+                        item_name="factor_snapshot_daily",
+                        dataset="factor_snapshot_daily",
+                        dataset_version=f"factor_snapshot_daily:{resolved_as_of_date.isoformat()}:600519.SH:v1",
+                        as_of_date=resolved_as_of_date,
+                        provider_used="snapshot",
+                        source_mode="snapshot",
+                        freshness_mode="cache_hit",
+                    )
+                ]
+            ),
         )
 
 
@@ -599,6 +613,7 @@ class StubPartialWorkspaceBundleService:
                 ),
             ],
             freshness_summary=FreshnessSummary(default_as_of_date=date(2024, 1, 2), items=[]),
+            lineage_summary=LineageSummary(items=[]),
             fallback_applied=True,
             fallback_reason="One or more workspace modules failed and were skipped.",
             runtime_mode_requested="rule_based",
@@ -728,6 +743,21 @@ def test_workspace_bundle_route_supports_explicit_as_of_date() -> None:
     payload = response.json()
     assert payload["freshness_summary"]["default_as_of_date"] == "2024-01-05"
     assert payload["freshness_summary"]["items"][0]["as_of_date"] == "2024-01-05"
+
+    app.dependency_overrides.clear()
+
+
+def test_workspace_lineage_route_returns_summary() -> None:
+    app.dependency_overrides[get_workspace_bundle_service] = (
+        lambda: StubWorkspaceBundleService()
+    )
+
+    response = client.get("/stocks/600519/workspace-lineage")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"][0]["item_name"] == "factor_snapshot_daily"
+    assert payload["items"][0]["dataset"] == "factor_snapshot_daily"
 
     app.dependency_overrides.clear()
 

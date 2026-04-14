@@ -22,6 +22,7 @@ from app.schemas.dataset import (
     LabelDatasetSummary,
 )
 from app.schemas.evaluation import ModelEvaluationResponse
+from app.schemas.lineage import LineageMetadata
 from app.schemas.prediction import (
     CrossSectionPredictionCandidate,
     CrossSectionPredictionRunResponse,
@@ -42,6 +43,7 @@ class _StubPredictionService:
         return PredictionSnapshotResponse(
             symbol=symbol,
             as_of_date=as_of_date or date(2026, 4, 1),
+            dataset_version="prediction_snapshot:2026-04-01:600519.SH:baseline-rule-v1:v1",
             model_version=model_version or "baseline-rule-v1",
             feature_version="features-v0-baseline",
             label_version="labels-v0-forward-return",
@@ -52,6 +54,15 @@ class _StubPredictionService:
             runtime_mode="baseline",
             warning_messages=["stub"],
             generated_at=datetime.now(timezone.utc),
+            lineage_metadata=LineageMetadata(
+                dataset="prediction_snapshot",
+                dataset_version="prediction_snapshot:2026-04-01:600519.SH:baseline-rule-v1:v1",
+                generated_at=datetime.now(timezone.utc),
+                as_of_date=as_of_date or date(2026, 4, 1),
+                symbol=symbol,
+                dependencies=[],
+                warning_messages=[],
+            ),
         )
 
     def run_cross_section_prediction(self, request) -> CrossSectionPredictionRunResponse:
@@ -59,6 +70,7 @@ class _StubPredictionService:
             run_id="pred-20260401010101",
             status="completed",
             as_of_date=request.as_of_date or date(2026, 4, 1),
+            dataset_version="cross_section_prediction:2026-04-01:global:baseline-rule-v1:v1",
             model_version=request.model_version or "baseline-rule-v1",
             feature_version="features-v0-baseline",
             label_version="labels-v0-forward-return",
@@ -74,6 +86,15 @@ class _StubPredictionService:
             ],
             warning_messages=[],
             generated_at=datetime.now(timezone.utc),
+            lineage_metadata=LineageMetadata(
+                dataset="cross_section_prediction",
+                dataset_version="cross_section_prediction:2026-04-01:global:baseline-rule-v1:v1",
+                generated_at=datetime.now(timezone.utc),
+                as_of_date=request.as_of_date or date(2026, 4, 1),
+                symbol=None,
+                dependencies=[],
+                warning_messages=[],
+            ),
         )
 
 
@@ -81,27 +102,51 @@ class _StubBacktestService:
     def run_screener_backtest(self, request) -> BacktestRunResponse:
         return BacktestRunResponse(
             run_id="bt-screener-20260401",
+            dataset_version="backtest:screener:2026-04-01:baseline-rule-v1:v1",
             backtest_type="screener",
             model_version=request.model_version or "baseline-rule-v1",
+            feature_version="features-v0-baseline",
+            label_version="labels-v0-forward-return",
             window_start=date(2025, 12, 1),
             window_end=date(2026, 4, 1),
             metrics={"top_k_avg_return": 0.08},
             summary="stub",
             warning_messages=[],
             finished_at=datetime.now(timezone.utc),
+            lineage_metadata=LineageMetadata(
+                dataset="backtest",
+                dataset_version="backtest:screener:2026-04-01:baseline-rule-v1:v1",
+                generated_at=datetime.now(timezone.utc),
+                as_of_date=date(2026, 4, 1),
+                symbol=None,
+                dependencies=[],
+                warning_messages=[],
+            ),
         )
 
     def run_strategy_backtest(self, request) -> BacktestRunResponse:
         return BacktestRunResponse(
             run_id="bt-strategy-20260401",
+            dataset_version="backtest:strategy:2026-04-01:baseline-rule-v1:v1",
             backtest_type="strategy",
             model_version=request.model_version or "baseline-rule-v1",
+            feature_version="features-v0-baseline",
+            label_version="labels-v0-forward-return",
             window_start=date(2025, 12, 1),
             window_end=date(2026, 4, 1),
             metrics={"top_k_avg_return": 0.05},
             summary="stub",
             warning_messages=[],
             finished_at=datetime.now(timezone.utc),
+            lineage_metadata=LineageMetadata(
+                dataset="backtest",
+                dataset_version="backtest:strategy:2026-04-01:baseline-rule-v1:v1",
+                generated_at=datetime.now(timezone.utc),
+                as_of_date=date(2026, 4, 1),
+                symbol=None,
+                dependencies=[],
+                warning_messages=[],
+            ),
         )
 
 
@@ -125,6 +170,16 @@ class _StubEvaluationService:
                 "supporting_metrics": {"quality_score": 0.62},
                 "guardrails": ["stub"],
             },
+            dataset_version="model_evaluation:2026-04-01:baseline-rule-v1:v1",
+            lineage_metadata=LineageMetadata(
+                dataset="model_evaluation",
+                dataset_version="model_evaluation:2026-04-01:baseline-rule-v1:v1",
+                generated_at=datetime.now(timezone.utc),
+                as_of_date=date(2026, 4, 1),
+                symbol=None,
+                dependencies=[],
+                warning_messages=[],
+            ),
         )
 
 
@@ -180,6 +235,11 @@ def test_prediction_and_backtest_routes_return_structured_payload() -> None:
     assert prediction_response.status_code == 200
     assert prediction_response.json()["symbol"] == "600519.SH"
     assert prediction_response.json()["runtime_mode"] == "baseline"
+    assert prediction_response.json()["dataset_version"].startswith("prediction_snapshot:")
+
+    prediction_lineage_response = client.get("/predictions/600519.SH/lineage")
+    assert prediction_lineage_response.status_code == 200
+    assert prediction_lineage_response.json()["dataset"] == "prediction_snapshot"
 
     cross_section_response = client.post(
         "/predictions/cross-section/run",
@@ -212,6 +272,9 @@ def test_prediction_and_backtest_routes_return_structured_payload() -> None:
     assert dataset_response.status_code == 200
     assert dataset_response.json()["summary"]["dataset_version"] == "features-v0-baseline"
 
+    dataset_lineage_response = client.get("/datasets/features/latest/lineage")
+    assert dataset_lineage_response.status_code == 404
+
     dataset_build_response = client.post(
         "/datasets/features/build",
         json={"max_symbols": 100},
@@ -221,6 +284,9 @@ def test_prediction_and_backtest_routes_return_structured_payload() -> None:
     labels_response = client.get("/datasets/labels/latest")
     assert labels_response.status_code == 200
     assert labels_response.json()["summary"]["label_version"] == "labels-v0-forward-return"
+
+    labels_lineage_response = client.get("/datasets/labels/latest/lineage")
+    assert labels_lineage_response.status_code == 404
 
     labels_build_response = client.post(
         "/datasets/labels/build",

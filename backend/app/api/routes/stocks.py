@@ -32,6 +32,7 @@ from app.schemas.market_data import (
     TimelineResponse,
     UniverseResponse,
 )
+from app.schemas.lineage import LineageSummary
 from app.schemas.research_inputs import (
     AnnouncementListResponse,
     FinancialReportIndexResponse,
@@ -340,4 +341,31 @@ def get_workspace_bundle(
         raise HTTPException(
             status_code=503,
             detail="Workspace bundle is temporarily unavailable.",
+        ) from exc
+
+
+@router.get("/{symbol}/workspace-lineage", response_model=LineageSummary)
+def get_workspace_lineage(
+    symbol: str,
+    use_llm: Optional[bool] = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    request_id: Optional[str] = Query(default=None),
+    as_of_date: Optional[date] = Query(default=None),
+    service: Any = Depends(get_workspace_bundle_service),
+) -> LineageSummary:
+    try:
+        bundle = service.get_workspace_bundle(
+            symbol,
+            use_llm=use_llm,
+            force_refresh=force_refresh,
+            request_id=request_id,
+            as_of_date=as_of_date,
+        )
+        return bundle.lineage_summary
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Workspace lineage is temporarily unavailable.",
         ) from exc

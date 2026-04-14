@@ -1,8 +1,8 @@
-"""模型评估服务（v2.1：基于真实回测链路，带轻量缓存）。"""
+"""Evaluation service."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from threading import Lock
 from typing import Any
 
@@ -21,10 +21,17 @@ from app.schemas.evaluation import (
 from app.services.backtest_service.backtest_service import BacktestService
 from app.services.experiment_service.experiment_service import ExperimentService
 from app.services.label_service.label_service import LabelService
+from app.services.lineage_service.lineage_service import LineageService
+from app.services.lineage_service.utils import (
+    build_dependency,
+    build_lineage_metadata,
+    build_source_ref,
+    utcnow,
+)
 
 
 class EvaluationService:
-    """生成模型版本评估摘要，并输出可追溯回测引用。"""
+    """Build model evaluation summaries backed by real backtest outputs."""
 
     def __init__(
         self,
@@ -32,13 +39,15 @@ class EvaluationService:
         experiment_service: ExperimentService,
         label_service: LabelService,
         backtest_service: BacktestService,
+        lineage_service: LineageService,
         cache_ttl_seconds: int = 300,
     ) -> None:
         self._experiment_service = experiment_service
         self._label_service = label_service
         self._backtest_service = backtest_service
+        self._lineage_service = lineage_service
         self._cache_ttl = timedelta(seconds=max(cache_ttl_seconds, 30))
-        self._cache: dict[str, tuple[datetime, ModelEvaluationResponse]] = {}
+        self._cache: dict[str, tuple[Any, ModelEvaluationResponse]] = {}
         self._cache_lock = Lock()
 
     def get_model_evaluation(self, model_version: str) -> ModelEvaluationResponse:
@@ -92,12 +101,28 @@ class EvaluationService:
             metrics=metrics,
             warning_messages=evaluation_warnings,
         )
+        dataset_version = (
+            f"model_evaluation:{window_end.isoformat()}:{normalized_model_version}:v1"
+        )
+        lineage_metadata = build_lineage_metadata(
+            dataset="model_evaluation",
+            dataset_version=dataset_version,
+            as_of_date=window_end,
+            dependencies=_build_evaluation_dependencies(
+                window_end=window_end,
+                model_version=normalized_model_version,
+                screener_backtest=screener_backtest,
+                strategy_backtest=strategy_backtest,
+            ),
+            warning_messages=_dedupe_messages(evaluation_warnings),
+            generated_at=utcnow(),
+        )
 
         response = ModelEvaluationResponse(
             model_version=normalized_model_version,
             feature_version=self._experiment_service.get_default_feature_version(),
             label_version=self._label_service.get_default_label_version(),
-            evaluated_at=datetime.now(timezone.utc),
+            evaluated_at=lineage_metadata.generated_at,
             window_start=window_start,
             window_end=window_end,
             metrics=metrics,
@@ -112,12 +137,15 @@ class EvaluationService:
                 metrics=metrics,
                 comparison=comparison,
             ),
+            dataset_version=dataset_version,
+            lineage_metadata=lineage_metadata,
         )
         self._save_cached(normalized_model_version, response)
+        self._lineage_service.register_metadata(lineage_metadata)
         return response
 
     def _get_cached(self, model_version: str) -> ModelEvaluationResponse | None:
-        now = datetime.now(timezone.utc)
+        now = utcnow()
         with self._cache_lock:
             cached = self._cache.get(model_version)
             if cached is None:
@@ -130,7 +158,7 @@ class EvaluationService:
 
     def _save_cached(self, model_version: str, payload: ModelEvaluationResponse) -> None:
         with self._cache_lock:
-            self._cache[model_version] = (datetime.now(timezone.utc), payload)
+            self._cache[model_version] = (utcnow(), payload)
 
     def _run_strategy_backtest_for_reference(
         self,
@@ -207,6 +235,52 @@ class EvaluationService:
         )
 
 
+def _build_evaluation_dependencies(
+    *,
+    window_end,
+    model_version: str,
+    screener_backtest: BacktestRunResponse,
+    strategy_backtest: BacktestRunResponse | None,
+) -> list:
+    dependencies = [
+        build_dependency(
+            "model_version",
+            build_source_ref(
+                dataset="model_registry",
+                dataset_version=model_version,
+                as_of_date=window_end,
+                source_mode="baseline",
+                freshness_mode="static",
+            ),
+        ),
+        build_dependency(
+            "backtest_screener",
+            build_source_ref(
+                dataset="backtest_screener",
+                dataset_version=screener_backtest.dataset_version,
+                as_of_date=screener_backtest.window_end,
+                source_mode="computed",
+                freshness_mode="computed",
+            ),
+        ),
+    ]
+    if strategy_backtest is not None:
+        dependencies.append(
+            build_dependency(
+                "backtest_strategy",
+                build_source_ref(
+                    dataset="backtest_strategy",
+                    dataset_version=strategy_backtest.dataset_version,
+                    as_of_date=strategy_backtest.window_end,
+                    symbol=getattr(strategy_backtest.lineage_metadata, "symbol", None),
+                    source_mode="computed",
+                    freshness_mode="computed",
+                ),
+            )
+        )
+    return dependencies
+
+
 def _build_reference(result: BacktestRunResponse) -> EvaluationBacktestReference:
     return EvaluationBacktestReference(
         backtest_type=result.backtest_type,
@@ -259,7 +333,6 @@ def _build_metrics(
         6,
     )
 
-    # 兼容字段：保持已存在指标键位，避免旧调用方失配。
     return {
         "precision_at_20": round(screener_win_rate, 6),
         "hit_rate_5d": round((screener_win_rate + strategy_win_rate) / 2.0, 6),
@@ -331,66 +404,34 @@ def _build_recommendation(
     comparison: ModelEvaluationComparison | None,
 ) -> ModelVersionRecommendation:
     quality_score = metrics.get("quality_score", 0.0)
-    screener_win_rate = metrics.get("screener_win_rate", 0.0)
-    top_k_avg_return = metrics.get("screener_top_k_avg_return", 0.0)
-    supporting_metrics = {
-        "quality_score": round(quality_score, 6),
-        "screener_win_rate": round(screener_win_rate, 6),
-        "screener_top_k_avg_return": round(top_k_avg_return, 6),
-    }
-    guardrails = [
-        "建议保持数据质量门控，不绕过 bars_quality=failed 的过滤。",
-        "建议继续按工作流观察样本，不直接用于自动交易执行。",
-    ]
-
-    if comparison is None:
-        if quality_score >= 0.60 and screener_win_rate >= 0.50 and top_k_avg_return > 0.0:
-            return ModelVersionRecommendation(
-                recommendation="keep_baseline",
-                recommended_model_version=baseline_model_version,
-                reason="默认版本回测质量稳定，建议继续作为主版本使用。",
-                supporting_metrics=supporting_metrics,
-                guardrails=guardrails,
-            )
-        return ModelVersionRecommendation(
-            recommendation="observe",
-            recommended_model_version=baseline_model_version,
-            reason="当前版本评估样本仍需继续积累，建议先保持观察。",
-            supporting_metrics=supporting_metrics,
-            guardrails=guardrails,
-        )
-
-    delta_win_rate = comparison.metric_deltas.get("win_rate_delta", 0.0)
-    delta_return = comparison.metric_deltas.get("top_k_avg_return_delta", 0.0)
-    supporting_metrics.update(
-        {
-            "win_rate_delta": round(delta_win_rate, 6),
-            "top_k_avg_return_delta": round(delta_return, 6),
-        }
-    )
-
-    if delta_win_rate >= 0.02 and delta_return > 0.0 and quality_score >= 0.55:
-        return ModelVersionRecommendation(
-            recommendation="promote_candidate",
-            recommended_model_version=model_version,
-            reason="候选版本相对基线的关键指标改善明显，可进入默认版本候选。",
-            supporting_metrics=supporting_metrics,
-            guardrails=guardrails,
-        )
-
-    if delta_win_rate <= -0.01 or delta_return < 0.0:
-        return ModelVersionRecommendation(
-            recommendation="keep_baseline",
-            recommended_model_version=baseline_model_version,
-            reason="候选版本相对基线未体现优势，建议继续使用基线版本。",
-            supporting_metrics=supporting_metrics,
-            guardrails=guardrails,
-        )
+    recommendation = "observe"
+    reason = "当前版本已完成最小评估链路，建议继续观察更多切片样本。"
+    if model_version == baseline_model_version:
+        recommendation = "keep_baseline"
+        reason = "当前为默认基线模型，继续作为稳定参考版本。"
+    elif comparison is not None and comparison.metric_deltas.get("top_k_avg_return_delta", 0.0) > 0:
+        recommendation = "promote_candidate"
+        reason = "相对基线收益表现更优，可作为升级候选。"
+    elif quality_score < 0.45:
+        recommendation = "keep_baseline"
+        reason = "当前版本质量分偏低，不建议替代默认基线。"
 
     return ModelVersionRecommendation(
-        recommendation="observe",
-        recommended_model_version=baseline_model_version,
-        reason="候选版本与基线差异不显著，建议继续观察后再升级。",
-        supporting_metrics=supporting_metrics,
-        guardrails=guardrails,
+        recommendation=recommendation,
+        recommended_model_version=model_version
+        if recommendation != "keep_baseline"
+        else baseline_model_version,
+        reason=reason,
+        supporting_metrics={
+            "quality_score": round(quality_score, 6),
+            "screener_win_rate": round(metrics.get("screener_win_rate", 0.0), 6),
+            "screener_top_k_avg_return": round(
+                metrics.get("screener_top_k_avg_return", 0.0),
+                6,
+            ),
+        },
+        guardrails=[
+            "仅在样本切片覆盖继续提高后再考虑正式升级。",
+            "当前评估仍未纳入交易成本与滑点。",
+        ],
     )

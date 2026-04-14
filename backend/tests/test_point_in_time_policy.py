@@ -20,6 +20,8 @@ from app.services.dataset_service.dataset_service import DatasetService
 from app.services.experiment_service.experiment_service import ExperimentService
 from app.services.label_service import label_service as label_service_module
 from app.services.label_service.label_service import LabelService
+from app.services.lineage_service.lineage_service import LineageService
+from app.services.lineage_service.repository import LineageRepository
 from app.services.prediction_service.prediction_service import PredictionService
 
 
@@ -186,10 +188,15 @@ def test_dataset_service_uses_central_daily_policy_when_as_of_date_missing(
         "resolve_daily_analysis_as_of_date",
         lambda _as_of_date=None: date(2026, 3, 27),
     )
+    market_data_service = _StubMarketDataService()
     service = DatasetService(
         root_dir=tmp_path / "datasets",
         default_feature_version="features-v0-baseline",
-        market_data_service=_StubMarketDataService(),
+        market_data_service=market_data_service,
+        daily_bars_daily=DailyBarsDailyDataset(market_data_service=market_data_service),
+        lineage_service=LineageService(
+            repository=LineageRepository(tmp_path / "lineage-dataset.sqlite3")
+        ),
     )
 
     response = service.build_feature_dataset(
@@ -212,16 +219,25 @@ def test_label_service_uses_central_label_policy_when_as_of_date_missing(
         "resolve_label_analysis_as_of_date",
         lambda _as_of_date=None: date(2026, 3, 20),
     )
+    market_data_service = _StubMarketDataService()
     dataset_service = DatasetService(
         root_dir=tmp_path / "datasets",
         default_feature_version="features-v0-baseline",
-        market_data_service=_StubMarketDataService(),
+        market_data_service=market_data_service,
+        daily_bars_daily=DailyBarsDailyDataset(market_data_service=market_data_service),
+        lineage_service=LineageService(
+            repository=LineageRepository(tmp_path / "lineage-label.sqlite3")
+        ),
     )
     service = LabelService(
         default_label_version="labels-v0-forward-return",
         root_dir=tmp_path / "datasets",
-        market_data_service=_StubMarketDataService(),
+        market_data_service=market_data_service,
         dataset_service=dataset_service,
+        daily_bars_daily=DailyBarsDailyDataset(market_data_service=market_data_service),
+        lineage_service=LineageService(
+            repository=LineageRepository(tmp_path / "lineage-label-service.sqlite3")
+        ),
     )
 
     response = service.build_label_dataset(
@@ -237,6 +253,7 @@ def test_label_service_uses_central_label_policy_when_as_of_date_missing(
 
 def test_backtest_service_uses_central_label_policy_for_default_window_end(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
         backtest_service_module,
@@ -249,6 +266,9 @@ def test_backtest_service_uses_central_label_policy_for_default_window_end(
         experiment_service=_StubExperimentService(),
         label_service=label_service,
         prediction_service=prediction_service,
+        lineage_service=LineageService(
+            repository=LineageRepository(tmp_path / "lineage-backtest.sqlite3")
+        ),
     )
 
     response = service.run_screener_backtest(

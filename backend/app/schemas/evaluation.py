@@ -7,6 +7,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.lineage import LineageMetadata
+
 
 class EvaluationBacktestReference(BaseModel):
     """评估引用的回测结果摘要。"""
@@ -64,3 +66,5 @@ class ModelEvaluationResponse(BaseModel):
     )
     comparison: Optional[ModelEvaluationComparison] = None
     recommendation: Optional[ModelVersionRecommendation] = None
+    dataset_version: Optional[str] = None
+    lineage_metadata: Optional[LineageMetadata] = None

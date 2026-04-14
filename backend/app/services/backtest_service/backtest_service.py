@@ -1,8 +1,8 @@
-"""回测服务（最小真实链路版）。"""
+"""Backtest service."""
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 import logging
 from typing import Any
 
@@ -16,13 +16,20 @@ from app.schemas.prediction import CrossSectionPredictionRunRequest
 from app.services.data_products.freshness import resolve_label_analysis_as_of_date
 from app.services.experiment_service.experiment_service import ExperimentService
 from app.services.label_service.label_service import LabelService
+from app.services.lineage_service.lineage_service import LineageService
+from app.services.lineage_service.utils import (
+    build_dependency,
+    build_lineage_metadata,
+    build_source_ref,
+    utcnow,
+)
 from app.services.prediction_service.prediction_service import PredictionService
 
 logger = logging.getLogger(__name__)
 
 
 class BacktestService:
-    """提供最小可用回测能力，输出真实可解释指标。"""
+    """Run minimal walk-forward backtests."""
 
     def __init__(
         self,
@@ -30,10 +37,12 @@ class BacktestService:
         experiment_service: ExperimentService,
         label_service: LabelService,
         prediction_service: PredictionService,
+        lineage_service: LineageService,
     ) -> None:
         self._experiment_service = experiment_service
         self._label_service = label_service
         self._prediction_service = prediction_service
+        self._lineage_service = lineage_service
 
     def run_screener_backtest(
         self,
@@ -47,6 +56,8 @@ class BacktestService:
         slices = _build_walk_forward_slices(window_start=window_start, window_end=window_end)
         all_slice_returns: list[float] = []
         effective_slices = 0
+        label_versions_used: set[str] = set()
+        feature_versions_used: set[str] = set()
 
         for slice_date in slices:
             label_dataset = self._label_service.build_label_dataset(
@@ -56,6 +67,10 @@ class BacktestService:
                     force_refresh=False,
                 )
             )
+            label_versions_used.add(label_dataset.summary.label_version)
+            if label_dataset.summary.feature_version:
+                feature_versions_used.add(label_dataset.summary.feature_version)
+
             label_records = self._label_service.load_label_records(
                 label_dataset.summary.label_version
             )
@@ -68,6 +83,8 @@ class BacktestService:
                     model_version=model_version,
                 )
             )
+            feature_versions_used.add(prediction.feature_version)
+            label_versions_used.add(prediction.label_version)
             candidate_symbols = [item.symbol for item in prediction.candidates]
             slice_returns = [
                 label_map[symbol]["forward_return_5d"]
@@ -81,20 +98,46 @@ class BacktestService:
 
         metrics = _build_backtest_metrics(all_slice_returns)
         metrics["slice_count"] = float(effective_slices)
-
-        return BacktestRunResponse(
-            run_id=_build_run_id(prefix="bt-screener"),
+        run_id = _build_run_id(prefix="bt-screener")
+        feature_version = _prefer_first_sorted(feature_versions_used)
+        label_version = _prefer_first_sorted(label_versions_used)
+        dataset_version = (
+            f"backtest:screener:{window_end.isoformat()}:{model_version}:v1"
+        )
+        lineage_metadata = build_lineage_metadata(
+            dataset="backtest_screener",
+            dataset_version=dataset_version,
+            as_of_date=window_end,
+            dependencies=_build_backtest_dependencies(
+                window_end=window_end,
+                model_version=model_version,
+                feature_versions=feature_versions_used,
+                label_versions=label_versions_used,
+            ),
+            warning_messages=[
+                "当前为最小可用回测版本，切片评估已启用，仍未接入成本与滑点模拟。",
+            ],
+            generated_at=utcnow(),
+        )
+        response = BacktestRunResponse(
+            run_id=run_id,
+            dataset_version=dataset_version,
             backtest_type="screener",
             model_version=model_version,
+            feature_version=feature_version,
+            label_version=label_version,
             window_start=window_start,
             window_end=window_end,
             metrics=metrics,
             summary="选股回测已完成（简化 walk-forward 切片聚合）。",
             warning_messages=[
-                "当前为最小可用回测版本，切片评估已启用，仍未接入成本与滑点模拟。"
+                "当前为最小可用回测版本，切片评估已启用，仍未接入成本与滑点模拟。",
             ],
-            finished_at=datetime.now(timezone.utc),
+            finished_at=lineage_metadata.generated_at,
+            lineage_metadata=lineage_metadata,
         )
+        self._lineage_service.register_metadata(lineage_metadata)
+        return response
 
     def run_strategy_backtest(
         self,
@@ -108,6 +151,8 @@ class BacktestService:
         slices = _build_walk_forward_slices(window_start=window_start, window_end=window_end)
 
         returns_5d: list[float] = []
+        label_versions_used: set[str] = set()
+        feature_versions_used: set[str] = set()
         for slice_date in slices:
             label_dataset = self._label_service.build_label_dataset(
                 LabelDatasetBuildRequest(
@@ -116,6 +161,9 @@ class BacktestService:
                     force_refresh=False,
                 )
             )
+            label_versions_used.add(label_dataset.summary.label_version)
+            if label_dataset.summary.feature_version:
+                feature_versions_used.add(label_dataset.summary.feature_version)
             label_records = self._label_service.load_label_records(
                 label_dataset.summary.label_version
             )
@@ -124,34 +172,125 @@ class BacktestService:
                     continue
                 returns_5d.append(float(record.get("forward_return_5d", 0.0)))
 
+        dataset_version = f"backtest:strategy:{window_end.isoformat()}:{model_version}:v1"
         if not returns_5d:
-            return BacktestRunResponse(
+            lineage_metadata = build_lineage_metadata(
+                dataset="backtest_strategy",
+                dataset_version=dataset_version,
+                as_of_date=window_end,
+                symbol=request.symbol,
+                dependencies=_build_backtest_dependencies(
+                    window_end=window_end,
+                    model_version=model_version,
+                    feature_versions=feature_versions_used,
+                    label_versions=label_versions_used,
+                ),
+                warning_messages=["strategy_symbol_not_found_in_label_dataset"],
+                generated_at=utcnow(),
+            )
+            response = BacktestRunResponse(
                 run_id=_build_run_id(prefix="bt-strategy"),
+                dataset_version=dataset_version,
                 backtest_type="strategy",
                 model_version=model_version,
+                feature_version=_prefer_first_sorted(feature_versions_used),
+                label_version=_prefer_first_sorted(label_versions_used),
                 window_start=window_start,
                 window_end=window_end,
                 metrics={"top_k_avg_return": 0.0, "win_rate": 0.0, "max_drawdown": 0.0},
                 summary="未找到该股票在当前标签窗口的样本，返回空回测结果。",
                 warning_messages=["strategy_symbol_not_found_in_label_dataset"],
-                finished_at=datetime.now(timezone.utc),
+                finished_at=lineage_metadata.generated_at,
+                lineage_metadata=lineage_metadata,
             )
+            self._lineage_service.register_metadata(lineage_metadata)
+            return response
 
         metrics = _build_backtest_metrics(returns_5d)
         metrics["slice_count"] = float(len(slices))
-        return BacktestRunResponse(
+        lineage_metadata = build_lineage_metadata(
+            dataset="backtest_strategy",
+            dataset_version=dataset_version,
+            as_of_date=window_end,
+            symbol=request.symbol,
+            dependencies=_build_backtest_dependencies(
+                window_end=window_end,
+                model_version=model_version,
+                feature_versions=feature_versions_used,
+                label_versions=label_versions_used,
+            ),
+            warning_messages=[
+                "当前为最小可用回测版本，未包含交易成本和滑点模拟。",
+            ],
+            generated_at=utcnow(),
+        )
+        response = BacktestRunResponse(
             run_id=_build_run_id(prefix="bt-strategy"),
+            dataset_version=dataset_version,
             backtest_type="strategy",
             model_version=model_version,
+            feature_version=_prefer_first_sorted(feature_versions_used),
+            label_version=_prefer_first_sorted(label_versions_used),
             window_start=window_start,
             window_end=window_end,
             metrics=metrics,
             summary="策略回测已完成（简化 walk-forward 切片聚合）。",
             warning_messages=[
-                "当前为最小可用回测版本，未包含交易成本和滑点模拟。"
+                "当前为最小可用回测版本，未包含交易成本和滑点模拟。",
             ],
-            finished_at=datetime.now(timezone.utc),
+            finished_at=lineage_metadata.generated_at,
+            lineage_metadata=lineage_metadata,
         )
+        self._lineage_service.register_metadata(lineage_metadata)
+        return response
+
+
+def _build_backtest_dependencies(
+    *,
+    window_end: date,
+    model_version: str,
+    feature_versions: set[str],
+    label_versions: set[str],
+) -> list:
+    dependencies = [
+        build_dependency(
+            "model_version",
+            build_source_ref(
+                dataset="model_registry",
+                dataset_version=model_version,
+                as_of_date=window_end,
+                source_mode="baseline",
+                freshness_mode="static",
+            ),
+        )
+    ]
+    for version in sorted(feature_versions):
+        dependencies.append(
+            build_dependency(
+                "feature_dataset",
+                build_source_ref(
+                    dataset="feature_dataset",
+                    dataset_version=version,
+                    as_of_date=window_end,
+                    source_mode="mixed",
+                    freshness_mode="cache_preferred",
+                ),
+            )
+        )
+    for version in sorted(label_versions):
+        dependencies.append(
+            build_dependency(
+                "label_dataset",
+                build_source_ref(
+                    dataset="label_dataset",
+                    dataset_version=version,
+                    as_of_date=window_end,
+                    source_mode="mixed",
+                    freshness_mode="cache_preferred",
+                ),
+            )
+        )
+    return dependencies
 
 
 def _build_label_map(records: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
@@ -181,7 +320,7 @@ def _build_backtest_metrics(returns_5d: list[float]) -> dict[str, float]:
     peak = 1.0
     max_drawdown = 0.0
     for value in returns_5d:
-        cumulative *= (1.0 + value)
+        cumulative *= 1.0 + value
         peak = max(peak, cumulative)
         drawdown = 1.0 - (cumulative / peak)
         max_drawdown = max(max_drawdown, drawdown)
@@ -220,9 +359,15 @@ def _normalize_weekday(value: date) -> date:
 
 
 def _build_run_id(*, prefix: str) -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    timestamp = utcnow().strftime("%Y%m%d%H%M%S")
     return f"{prefix}-{timestamp}"
 
 
 def _default_backtest_as_of_date() -> date:
     return resolve_label_analysis_as_of_date()
+
+
+def _prefer_first_sorted(values: set[str]) -> str | None:
+    if not values:
+        return None
+    return sorted(values)[0]

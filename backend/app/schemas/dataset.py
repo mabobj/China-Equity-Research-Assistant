@@ -7,6 +7,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.lineage import LineageMetadata, LineageSourceRef
+
 
 class FeatureDatasetSummary(BaseModel):
     """特征数据集摘要。"""
@@ -20,6 +22,8 @@ class FeatureDatasetSummary(BaseModel):
     label_version: Optional[str] = None
     source_mode: str = "local"
     description: Optional[str] = None
+    lineage_metadata: Optional[LineageMetadata] = None
+    upstream_sources: list[LineageSourceRef] = Field(default_factory=list)
 
 
 class FeatureDatasetResponse(BaseModel):
@@ -54,6 +58,8 @@ class LabelDatasetSummary(BaseModel):
     window_10d: int = Field(default=10, ge=1)
     source_mode: str = "local"
     description: Optional[str] = None
+    feature_version: Optional[str] = None
+    lineage_metadata: Optional[LineageMetadata] = None
 
 
 class LabelDatasetResponse(BaseModel):

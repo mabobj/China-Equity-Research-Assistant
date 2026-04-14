@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.schemas.decision_brief import DecisionBrief
 from app.schemas.evidence import EvidenceManifest
+from app.schemas.lineage import LineageSummary, WorkspaceLineageItem
 from app.schemas.market_data import StockProfile
 from app.schemas.prediction import PredictionSnapshotResponse
 from app.schemas.workspace import (
@@ -18,6 +19,7 @@ from app.schemas.workspace import (
     WorkspaceFreshnessItem,
     WorkspaceModuleStatus,
 )
+from app.services.lineage_service.lineage_service import LineageService
 from app.services.data_products.datasets.announcements_daily import AnnouncementsDailyDataset
 from app.services.data_products.datasets.daily_bars_daily import DailyBarsDailyDataset
 from app.services.data_products.datasets.debate_review_daily import DebateReviewDailyDataset
@@ -84,6 +86,7 @@ class WorkspaceBundleService:
         debate_review_daily: DebateReviewDailyDataset,
         decision_brief_daily: DecisionBriefDailyDataset,
         prediction_service=None,
+        lineage_service: LineageService | None = None,
     ) -> None:
         self._market_data_service = market_data_service
         self._technical_analysis_service = technical_analysis_service
@@ -103,6 +106,7 @@ class WorkspaceBundleService:
         self._debate_review_daily = debate_review_daily
         self._decision_brief_daily = decision_brief_daily
         self._prediction_service = prediction_service
+        self._lineage_service = lineage_service
         self._bundle_lock_guard = Lock()
         self._bundle_locks: dict[tuple[str, date, bool, bool], Lock] = {}
 
@@ -156,6 +160,7 @@ class WorkspaceBundleService:
     ) -> WorkspaceBundleResponse:
         statuses: list[WorkspaceModuleStatus] = []
         freshness_items: list[WorkspaceFreshnessItem] = []
+        lineage_items: list[WorkspaceLineageItem] = []
         warning_messages: list[str] = []
         state = _WorkspaceState()
         resolved_as_of_date = resolve_daily_analysis_as_of_date(as_of_date)
@@ -178,6 +183,12 @@ class WorkspaceBundleService:
             ),
         )
         if daily_bars_product is not None:
+            self._register_lineage(daily_bars_product)
+            self._append_lineage_item(
+                lineage_items,
+                item_name="daily_bars_daily",
+                dataset_result=daily_bars_product,
+            )
             if daily_bars_product.payload.count == 0:
                 warning_messages.append(
                     "No daily bars are available for the selected trading date."
@@ -201,6 +212,12 @@ class WorkspaceBundleService:
             ),
         )
         if announcements_product is not None:
+            self._register_lineage(announcements_product)
+            self._append_lineage_item(
+                lineage_items,
+                item_name="announcements_daily",
+                dataset_result=announcements_product,
+            )
             freshness_items.append(
                 WorkspaceFreshnessItem(
                     item_name="announcements_daily",
@@ -220,6 +237,12 @@ class WorkspaceBundleService:
             ),
         )
         if financial_summary_product is not None:
+            self._register_lineage(financial_summary_product)
+            self._append_lineage_item(
+                lineage_items,
+                item_name="financial_summary_daily",
+                dataset_result=financial_summary_product,
+            )
             freshness_items.append(
                 WorkspaceFreshnessItem(
                     item_name="financial_summary_daily",
@@ -255,6 +278,7 @@ class WorkspaceBundleService:
             as_of_date=resolved_as_of_date,
         )
         if factor_cached is not None:
+            self._register_lineage(factor_cached)
             state.factor_snapshot = factor_cached.payload.model_copy(
                 update={
                     "freshness_mode": factor_cached.freshness_mode,
@@ -275,6 +299,11 @@ class WorkspaceBundleService:
                     freshness_mode=factor_cached.freshness_mode,
                     source_mode=factor_cached.source_mode,
                 )
+            )
+            self._append_lineage_item(
+                lineage_items,
+                item_name="factor_snapshot_daily",
+                dataset_result=factor_cached,
             )
         elif technical_snapshot is not None and daily_bars_product is not None:
             computed_factor = self._run_module(
@@ -300,6 +329,7 @@ class WorkspaceBundleService:
             )
             if computed_factor is not None:
                 saved_factor = self._factor_snapshot_daily.save(symbol, computed_factor)
+                self._register_lineage(saved_factor)
                 state.factor_snapshot = saved_factor.payload.model_copy(
                     update={
                         "freshness_mode": saved_factor.freshness_mode,
@@ -314,12 +344,18 @@ class WorkspaceBundleService:
                         source_mode=saved_factor.source_mode,
                     )
                 )
+                self._append_lineage_item(
+                    lineage_items,
+                    item_name="factor_snapshot_daily",
+                    dataset_result=saved_factor,
+                )
 
         strategy_cached = None if force_refresh else self._strategy_plan_daily.load(
             symbol,
             as_of_date=resolved_as_of_date,
         )
         if strategy_cached is not None:
+            self._register_lineage(strategy_cached)
             state.strategy_plan = strategy_cached.payload.model_copy(
                 update={
                     "freshness_mode": strategy_cached.freshness_mode,
@@ -340,6 +376,11 @@ class WorkspaceBundleService:
                     freshness_mode=strategy_cached.freshness_mode,
                     source_mode=strategy_cached.source_mode,
                 )
+            )
+            self._append_lineage_item(
+                lineage_items,
+                item_name="strategy_plan_daily",
+                dataset_result=strategy_cached,
             )
         else:
             research_report = None
@@ -388,6 +429,7 @@ class WorkspaceBundleService:
                         symbol,
                         computed_strategy,
                     )
+                    self._register_lineage(saved_strategy)
                     state.strategy_plan = saved_strategy.payload.model_copy(
                         update={
                             "freshness_mode": saved_strategy.freshness_mode,
@@ -402,12 +444,18 @@ class WorkspaceBundleService:
                             source_mode=saved_strategy.source_mode,
                         )
                     )
+                    self._append_lineage_item(
+                        lineage_items,
+                        item_name="strategy_plan_daily",
+                        dataset_result=saved_strategy,
+                    )
 
         review_cached = None if force_refresh else self._review_report_daily.load(
             symbol,
             as_of_date=resolved_as_of_date,
         )
         if review_cached is not None:
+            self._register_lineage(review_cached)
             state.review_report = review_cached.payload.model_copy(
                 update={
                     "freshness_mode": review_cached.freshness_mode,
@@ -428,6 +476,11 @@ class WorkspaceBundleService:
                     freshness_mode=review_cached.freshness_mode,
                     source_mode=review_cached.source_mode,
                 )
+            )
+            self._append_lineage_item(
+                lineage_items,
+                item_name="review_report_daily",
+                dataset_result=review_cached,
             )
         elif (
             state.profile is not None
@@ -460,6 +513,7 @@ class WorkspaceBundleService:
             )
             if computed_review is not None:
                 saved_review = self._review_report_daily.save(symbol, computed_review)
+                self._register_lineage(saved_review)
                 state.review_report = saved_review.payload.model_copy(
                     update={
                         "freshness_mode": saved_review.freshness_mode,
@@ -473,6 +527,11 @@ class WorkspaceBundleService:
                         freshness_mode=saved_review.freshness_mode,
                         source_mode=saved_review.source_mode,
                     )
+                )
+                self._append_lineage_item(
+                    lineage_items,
+                    item_name="review_report_daily",
+                    dataset_result=saved_review,
                 )
 
         debate_inputs = None
@@ -489,6 +548,7 @@ class WorkspaceBundleService:
             ):
                 debate_cached = None
         if debate_cached is not None:
+            self._register_lineage(debate_cached)
             state.debate_review = debate_cached.payload.model_copy(
                 update={
                     "freshness_mode": debate_cached.freshness_mode,
@@ -509,6 +569,11 @@ class WorkspaceBundleService:
                     freshness_mode=debate_cached.freshness_mode,
                     source_mode=debate_cached.source_mode,
                 )
+            )
+            self._append_lineage_item(
+                lineage_items,
+                item_name="debate_review_daily",
+                dataset_result=debate_cached,
             )
         elif (
             state.review_report is not None
@@ -545,6 +610,7 @@ class WorkspaceBundleService:
                         computed_debate,
                         variant=debate_variant_to_save,
                     )
+                    self._register_lineage(saved_debate)
                     state.debate_review = saved_debate.payload.model_copy(
                         update={
                             "freshness_mode": saved_debate.freshness_mode,
@@ -559,6 +625,11 @@ class WorkspaceBundleService:
                             source_mode=saved_debate.source_mode,
                         )
                     )
+                    self._append_lineage_item(
+                        lineage_items,
+                        item_name="debate_review_daily",
+                        dataset_result=saved_debate,
+                    )
 
         brief_cached = None if force_refresh else self._decision_brief_daily.load(
             symbol,
@@ -566,6 +637,7 @@ class WorkspaceBundleService:
             variant=brief_variant,
         )
         if brief_cached is not None:
+            self._register_lineage(brief_cached)
             state.decision_brief = brief_cached.payload.model_copy(
                 update={
                     "freshness_mode": brief_cached.freshness_mode,
@@ -586,6 +658,11 @@ class WorkspaceBundleService:
                     freshness_mode=brief_cached.freshness_mode,
                     source_mode=brief_cached.source_mode,
                 )
+            )
+            self._append_lineage_item(
+                lineage_items,
+                item_name="decision_brief_daily",
+                dataset_result=brief_cached,
             )
         elif (
             state.profile is not None
@@ -615,6 +692,7 @@ class WorkspaceBundleService:
                     computed_brief,
                     variant=brief_variant,
                 )
+                self._register_lineage(saved_brief)
                 state.decision_brief = saved_brief.payload.model_copy(
                     update={
                         "freshness_mode": saved_brief.freshness_mode,
@@ -628,6 +706,11 @@ class WorkspaceBundleService:
                         freshness_mode=saved_brief.freshness_mode,
                         source_mode=saved_brief.source_mode,
                     )
+                )
+                self._append_lineage_item(
+                    lineage_items,
+                    item_name="decision_brief_daily",
+                    dataset_result=saved_brief,
                 )
 
         if state.decision_brief is not None:
@@ -644,6 +727,25 @@ class WorkspaceBundleService:
                 skip_message="Predictive snapshot is not ready yet. Continue with research modules.",
                 fallback_reason="Predictive assets are not ready; module was skipped.",
             )
+            if state.predictive_snapshot is not None:
+                if (
+                    self._lineage_service is not None
+                    and state.predictive_snapshot.lineage_metadata is not None
+                ):
+                    self._lineage_service.register_metadata(
+                        state.predictive_snapshot.lineage_metadata
+                    )
+                lineage_items.append(
+                    WorkspaceLineageItem(
+                        item_name="predictive_snapshot",
+                        dataset="prediction_snapshot",
+                        dataset_version=state.predictive_snapshot.dataset_version,
+                        as_of_date=state.predictive_snapshot.as_of_date,
+                        provider_used=None,
+                        source_mode=state.predictive_snapshot.runtime_mode,
+                        freshness_mode=None,
+                    )
+                )
 
         debate_progress = None
         if request_id is not None:
@@ -701,6 +803,10 @@ class WorkspaceBundleService:
             freshness_summary=FreshnessSummary(
                 default_as_of_date=resolved_as_of_date,
                 items=freshness_items,
+            ),
+            lineage_summary=LineageSummary(
+                items=lineage_items,
+                warning_messages=list(warning_messages),
             ),
             debate_progress=debate_progress,
             provider_used=provider_used,
@@ -800,6 +906,37 @@ class WorkspaceBundleService:
             )
         )
         return value
+
+    def _register_lineage(self, dataset_result) -> None:
+        if self._lineage_service is None:
+            return
+        try:
+            self._lineage_service.register_data_product(dataset_result)
+        except Exception as exc:
+            logger.debug(
+                "workspace.bundle.lineage_register_skip dataset=%s error=%s",
+                getattr(dataset_result, "dataset", "unknown"),
+                exc,
+            )
+
+    def _append_lineage_item(
+        self,
+        items: list[WorkspaceLineageItem],
+        *,
+        item_name: str,
+        dataset_result,
+    ) -> None:
+        items.append(
+            WorkspaceLineageItem(
+                item_name=item_name,
+                dataset=dataset_result.dataset,
+                dataset_version=dataset_result.dataset_version,
+                as_of_date=dataset_result.as_of_date,
+                provider_used=dataset_result.provider_used,
+                source_mode=dataset_result.source_mode,
+                freshness_mode=dataset_result.freshness_mode,
+            )
+        )
 
     def _get_prediction_snapshot(self, *, symbol: str, as_of_date):
         try:

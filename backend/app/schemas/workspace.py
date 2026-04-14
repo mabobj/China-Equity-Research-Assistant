@@ -16,6 +16,7 @@ from app.schemas.market_data import StockProfile
 from app.schemas.prediction import PredictionSnapshotResponse
 from app.schemas.review import StockReviewReport
 from app.schemas.strategy import StrategyPlan
+from app.schemas.lineage import LineageSummary
 
 
 ModuleStatus = Literal["success", "error", "skipped"]
@@ -74,6 +75,7 @@ class WorkspaceBundleResponse(BaseModel):
     module_status_summary: list[WorkspaceModuleStatus] = Field(default_factory=list)
     evidence_manifest: Optional[EvidenceManifest] = None
     freshness_summary: FreshnessSummary = Field(default_factory=FreshnessSummary)
+    lineage_summary: LineageSummary = Field(default_factory=LineageSummary)
     debate_progress: Optional[DebateReviewProgress] = None
     provider_used: Optional[str] = None
     provider_candidates: list[str] = Field(default_factory=list)

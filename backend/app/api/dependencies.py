@@ -90,6 +90,8 @@ if TYPE_CHECKING:
     from app.services.llm_debate_service.llm_role_runner import LLMRoleRunner
     from app.services.llm_debate_service.progress_tracker import DebateProgressTracker
     from app.services.label_service.label_service import LabelService
+    from app.services.lineage_service.lineage_service import LineageService
+    from app.services.lineage_service.repository import LineageRepository
     from app.services.prediction_service.prediction_service import PredictionService
     from app.services.research_service.research_manager import ResearchManager
     from app.services.research_service.strategy_planner import StrategyPlanner
@@ -325,6 +327,23 @@ def get_data_product_repository() -> "DataProductRepository":
 
 
 @lru_cache
+def get_lineage_repository() -> "LineageRepository":
+    from app.services.lineage_service.repository import LineageRepository
+
+    settings = get_settings()
+    return LineageRepository(
+        database_path=settings.data_dir / "lineage" / "lineage.sqlite3"
+    )
+
+
+@lru_cache
+def get_lineage_service() -> "LineageService":
+    from app.services.lineage_service.lineage_service import LineageService
+
+    return LineageService(repository=get_lineage_repository())
+
+
+@lru_cache
 def get_experiment_service() -> "ExperimentService":
     from app.services.experiment_service.experiment_service import ExperimentService
 
@@ -341,6 +360,8 @@ def get_label_service() -> "LabelService":
         root_dir=settings.data_dir / "prediction_assets" / "datasets",
         market_data_service=get_market_data_service(),
         dataset_service=get_dataset_service(),
+        daily_bars_daily=get_daily_bars_daily_dataset(),
+        lineage_service=get_lineage_service(),
     )
 
 
@@ -353,6 +374,8 @@ def get_dataset_service() -> "DatasetService":
         root_dir=settings.data_dir / "prediction_assets" / "datasets",
         default_feature_version=get_experiment_service().get_default_feature_version(),
         market_data_service=get_market_data_service(),
+        daily_bars_daily=get_daily_bars_daily_dataset(),
+        lineage_service=get_lineage_service(),
     )
 
 
@@ -364,6 +387,7 @@ def get_prediction_service() -> "PredictionService":
         dataset_service=get_dataset_service(),
         label_service=get_label_service(),
         experiment_service=get_experiment_service(),
+        lineage_service=get_lineage_service(),
     )
 
 
@@ -375,6 +399,7 @@ def get_backtest_service() -> "BacktestService":
         experiment_service=get_experiment_service(),
         label_service=get_label_service(),
         prediction_service=get_prediction_service(),
+        lineage_service=get_lineage_service(),
     )
 
 
@@ -386,6 +411,7 @@ def get_evaluation_service() -> "EvaluationService":
         experiment_service=get_experiment_service(),
         label_service=get_label_service(),
         backtest_service=get_backtest_service(),
+        lineage_service=get_lineage_service(),
     )
 
 
@@ -563,6 +589,7 @@ def get_workspace_bundle_service() -> "WorkspaceBundleService":
         debate_review_daily=get_debate_review_daily_dataset(),
         decision_brief_daily=get_decision_brief_daily_dataset(),
         prediction_service=get_prediction_service(),
+        lineage_service=get_lineage_service(),
     )
 
 
