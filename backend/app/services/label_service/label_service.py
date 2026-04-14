@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import json
 import logging
 from pathlib import Path
@@ -112,18 +112,18 @@ class LabelService:
                 if symbol == "":
                     continue
                 try:
-                    bars_result = self._daily_bars_daily.get(
+                    bars_result = self._market_data_service.get_daily_bars(
                         symbol,
-                        as_of_date=as_of_date,
+                        end_date=_resolve_label_window_end_date(as_of_date).isoformat(),
                         force_refresh=False,
-                        provider_priority=("mootdx", "baostock", "akshare"),
+                        allow_remote_sync=False,
+                        provider_names=("mootdx", "baostock", "akshare"),
                     )
                 except Exception:
                     warning_messages.append(f"{symbol}:daily_bars_unavailable_for_labels")
                     continue
 
-                self._lineage_service.register_data_product(bars_result)
-                bars = [bar for bar in bars_result.payload.bars if bar.close is not None]
+                bars = [bar for bar in bars_result.bars if bar.close is not None]
                 bars.sort(key=lambda item: item.trade_date)
                 index = _find_trade_date_index(bars, as_of_date)
                 if index is None or (index + 10) >= len(bars):
@@ -290,6 +290,10 @@ def _find_trade_date_index(bars: list[Any], target_date: date) -> int | None:
         if bar.trade_date == target_date:
             return index
     return None
+
+
+def _resolve_label_window_end_date(as_of_date: date) -> date:
+    return as_of_date + timedelta(days=20)
 
 
 def _build_label_response(

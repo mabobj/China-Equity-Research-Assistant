@@ -15,7 +15,11 @@ from app.services.workflow_runtime.workflow_service import WorkflowRuntimeServic
 
 
 class _StubEvaluationService:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
     def get_model_evaluation(self, model_version: str) -> ModelEvaluationResponse:
+        self.calls.append(model_version)
         return ModelEvaluationResponse(
             model_version=model_version,
             feature_version="features-v0-baseline",
@@ -47,11 +51,12 @@ class _StubExperimentService:
 def _build_service(tmp_path: Path) -> WorkflowRuntimeService:
     artifact_store = FileWorkflowArtifactStore(tmp_path / "artifacts")
     executor = WorkflowExecutor(artifact_store=artifact_store)
+    evaluation_service = _StubEvaluationService()
     return WorkflowRuntimeService(
         registry=WorkflowRegistry(definitions=()),
         executor=executor,
         artifact_store=artifact_store,
-        evaluation_service=_StubEvaluationService(),
+        evaluation_service=evaluation_service,
         experiment_service=_StubExperimentService(),
         stale_running_timeout_seconds=60,
     )
@@ -61,8 +66,19 @@ def test_runtime_visibility_includes_model_recommendation_and_alert(
     tmp_path: Path,
 ) -> None:
     service = _build_service(tmp_path)
+    service._recommendation_cache["candidate-v2"] = (  # noqa: SLF001
+        datetime.now(timezone.utc),
+        ModelVersionRecommendation(
+            recommendation="promote_candidate",
+            recommended_model_version="candidate-v2",
+            reason="cached recommendation",
+            supporting_metrics={"win_rate_delta": 0.03},
+            guardrails=["keep quality gate"],
+        ).model_dump(mode="json"),
+    )
 
     visibility = service._build_runtime_visibility(  # noqa: SLF001
+        status="completed",
         workflow_name="screener_run",
         input_summary={},
         final_output_summary={},
@@ -78,6 +94,7 @@ def test_runtime_visibility_includes_model_recommendation_and_alert(
     assert recommendation["recommended_model_version"] == "candidate-v2"
     assert visibility["version_recommendation_alert"] is not None
     assert "baseline-rule-v1" in visibility["version_recommendation_alert"]
+    assert service._evaluation_service.calls == []  # noqa: SLF001
 
 
 def test_runtime_visibility_without_predictive_version_has_no_recommendation(
@@ -86,6 +103,7 @@ def test_runtime_visibility_without_predictive_version_has_no_recommendation(
     service = _build_service(tmp_path)
 
     visibility = service._build_runtime_visibility(  # noqa: SLF001
+        status="completed",
         workflow_name="single_stock_full_review",
         input_summary={},
         final_output_summary={},
@@ -94,6 +112,28 @@ def test_runtime_visibility_without_predictive_version_has_no_recommendation(
 
     assert visibility["model_recommendation"] is None
     assert visibility["version_recommendation_alert"] is None
+
+
+def test_runtime_visibility_does_not_resolve_model_recommendation_while_running(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+
+    visibility = service._build_runtime_visibility(  # noqa: SLF001
+        status="running",
+        workflow_name="screener_run",
+        input_summary={},
+        final_output_summary={},
+        final_output={
+            "ready_to_buy_candidates": [
+                {"symbol": "600519.SH", "predictive_model_version": "candidate-v2"}
+            ]
+        },
+    )
+
+    assert visibility["model_recommendation"] is None
+    assert visibility["version_recommendation_alert"] is None
+    assert service._evaluation_service.calls == []  # noqa: SLF001
 
 
 def test_get_run_detail_keeps_running_artifact_when_future_is_active(
@@ -129,6 +169,7 @@ def test_get_run_detail_keeps_running_artifact_when_future_is_active(
 
     assert detail.status == "running"
     assert detail.error_message is None
+    assert service._evaluation_service.calls == []  # noqa: SLF001
 
 
 def test_get_run_detail_marks_stale_running_artifact_failed_without_future(

@@ -249,6 +249,9 @@ def test_label_service_uses_central_label_policy_when_as_of_date_missing(
 
     assert response.summary.as_of_date == date(2026, 3, 20)
     assert response.summary.label_version == "labels-2026-03-20-v1"
+    assert response.summary.symbol_count > 0
+    assert market_data_service.calls[-1]["end_date"] == "2026-04-09"
+    assert market_data_service.calls[-1]["allow_remote_sync"] is False
 
 
 def test_backtest_service_uses_central_label_policy_for_default_window_end(

@@ -155,6 +155,7 @@ class WorkflowRuntimeService:
         artifact = self._artifact_store.load_run(run_id)
         artifact = self._resolve_running_artifact_for_read(artifact)
         visibility = self._build_runtime_visibility(
+            status=artifact.status,
             workflow_name=artifact.workflow_name,
             input_summary=artifact.input_summary,
             final_output_summary=artifact.final_output_summary,
@@ -233,6 +234,7 @@ class WorkflowRuntimeService:
         with self._future_lock:
             self._active_futures[run_id] = future
         visibility = self._build_runtime_visibility(
+            status="running",
             workflow_name=definition.name,
             input_summary=initial_artifact.input_summary,
             final_output_summary={},
@@ -306,6 +308,7 @@ class WorkflowRuntimeService:
             else None
         )
         visibility = self._build_runtime_visibility(
+            status=result.status,
             workflow_name=result.workflow_name,
             input_summary=result.input_summary,
             final_output_summary=result.final_output_summary,
@@ -350,6 +353,7 @@ class WorkflowRuntimeService:
     def _build_runtime_visibility(
         self,
         *,
+        status: str,
         workflow_name: str,
         input_summary: dict[str, Any],
         final_output_summary: dict[str, Any],
@@ -390,7 +394,8 @@ class WorkflowRuntimeService:
             final_output_summary=final_output_summary,
         )
         model_recommendation, recommendation_warning = self._resolve_model_recommendation(
-            model_versions=model_versions
+            status=status,
+            model_versions=model_versions,
         )
         if recommendation_warning is not None:
             warning_messages.append(recommendation_warning)
@@ -420,6 +425,7 @@ class WorkflowRuntimeService:
         artifact: WorkflowArtifact,
     ) -> WorkflowRunResponse:
         visibility = self._build_runtime_visibility(
+            status=artifact.status,
             workflow_name=artifact.workflow_name,
             input_summary=artifact.input_summary,
             final_output_summary=artifact.final_output_summary,
@@ -512,9 +518,14 @@ class WorkflowRuntimeService:
     def _resolve_model_recommendation(
         self,
         *,
+        status: str,
         model_versions: list[str],
     ) -> tuple[dict[str, Any] | None, str | None]:
-        if self._evaluation_service is None or not model_versions:
+        if (
+            self._evaluation_service is None
+            or not model_versions
+            or status == "running"
+        ):
             return None, None
 
         default_model_version = self._get_default_model_version()
@@ -536,22 +547,11 @@ class WorkflowRuntimeService:
         cached = self._recommendation_cache.get(model_version)
         if cached is not None and now - cached[0] < self._recommendation_cache_ttl:
             return cached[1]
-        try:
-            evaluation = self._evaluation_service.get_model_evaluation(model_version)
-        except Exception:
-            logger.exception(
-                "workflow.runtime.recommendation_failed model_version=%s",
-                model_version,
-            )
-            return None
-        recommendation = evaluation.recommendation
-        recommendation_dump = (
-            recommendation.model_dump(mode="json")
-            if recommendation is not None
-            else None
+        logger.debug(
+            "workflow.runtime.recommendation_cache_miss model_version=%s",
+            model_version,
         )
-        self._recommendation_cache[model_version] = (now, recommendation_dump)
-        return recommendation_dump
+        return None
 
     def _build_version_recommendation_alert(
         self,

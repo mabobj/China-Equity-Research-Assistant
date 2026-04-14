@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { Dispatch, SetStateAction } from "react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getActiveScreenerRun,
@@ -600,15 +600,24 @@ function useWorkflowPolling(
   runId: string | null,
   setRun: Dispatch<SetStateAction<WorkflowRunDetailResponse | null>>,
 ) {
+  const inFlightRef = useRef(false);
+
   useEffect(() => {
     if (!runId) return;
     let active = true;
     const poll = async () => {
+      if (!active || inFlightRef.current) return;
+      inFlightRef.current = true;
       try {
         const detail = await getWorkflowRunDetail(runId);
-        if (!active) return;
+        if (!active) {
+          inFlightRef.current = false;
+          return;
+        }
         setRun(detail);
+        inFlightRef.current = false;
       } catch {
+        inFlightRef.current = false;
         // 保持当前状态，避免短时网络波动打断展示。
       }
     };
@@ -616,6 +625,7 @@ function useWorkflowPolling(
     const timer = window.setInterval(() => void poll(), POLL_MS);
     return () => {
       active = false;
+      inFlightRef.current = false;
       window.clearInterval(timer);
     };
   }, [runId, setRun]);
