@@ -18,6 +18,7 @@ from app.services.data_service.providers.baostock_provider import BaostockProvid
 from app.services.data_service.providers.cninfo_provider import CninfoProvider
 from app.services.data_service.providers.mootdx_provider import MootdxProvider
 from app.services.data_service.providers.tdx_api_provider import TdxApiProvider
+from app.services.data_service.providers.tushare_provider import TushareProvider
 
 if TYPE_CHECKING:
     from app.services.backtest_service.backtest_service import BacktestService
@@ -139,6 +140,8 @@ def get_market_data_service() -> MarketDataService:
         providers.append(BaostockProvider())
     if settings.enable_cninfo:
         providers.append(CninfoProvider())
+    if settings.tushare_enabled and settings.tushare_token:
+        providers.append(TushareProvider(token=settings.tushare_token))
 
     return MarketDataService(
         providers=ProviderRegistry(providers),

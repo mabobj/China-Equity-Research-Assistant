@@ -1,4 +1,6 @@
-"""AKShare provider，负责基础行情与财务摘要。"""
+"""AKShare provider for A-share market data and fallback financial summary."""
+
+from __future__ import annotations
 
 from datetime import date, datetime
 import importlib
@@ -20,9 +22,24 @@ from app.services.data_service.providers.base import (
     UNIVERSE_CAPABILITY,
 )
 
+_COL_STOCK_NAME = "\u80a1\u7968\u7b80\u79f0"
+_COL_INDUSTRY = "\u884c\u4e1a"
+_COL_LIST_DATE = "\u4e0a\u5e02\u65f6\u95f4"
+_COL_TOTAL_MV = "\u603b\u5e02\u503c"
+_COL_FLOAT_MV = "\u6d41\u901a\u5e02\u503c"
+_COL_TRADE_DATE = "\u65e5\u671f"
+_COL_OPEN = "\u5f00\u76d8"
+_COL_HIGH = "\u6700\u9ad8"
+_COL_LOW = "\u6700\u4f4e"
+_COL_CLOSE = "\u6536\u76d8"
+_COL_VOLUME = "\u6210\u4ea4\u91cf"
+_COL_AMOUNT = "\u6210\u4ea4\u989d"
+_COL_REPORT_PERIOD = "\u62a5\u544a\u671f"
+_COL_REPORT_DATE = "\u62a5\u544a\u65e5\u671f"
+
 
 class AkshareProvider:
-    """基于 AKShare 的 provider。"""
+    """AKShare provider."""
 
     name = "akshare"
     capabilities = (
@@ -43,7 +60,6 @@ class AkshareProvider:
         self._daily_bars_retry_jitter_seconds = max(0.0, daily_bars_retry_jitter_seconds)
 
     def is_available(self) -> bool:
-        """返回 AKShare 是否可导入。"""
         return importlib.util.find_spec("akshare") is not None
 
     def get_unavailable_reason(self) -> Optional[str]:
@@ -52,7 +68,6 @@ class AkshareProvider:
         return "AKShare is not installed or unavailable."
 
     def get_stock_profile(self, symbol: str) -> Optional[StockProfile]:
-        """获取单只股票基础信息。"""
         self._ensure_available()
         ak = _get_akshare_module()
         parts = parse_symbol(symbol)
@@ -65,23 +80,22 @@ class AkshareProvider:
 
         if frame is None or frame.empty:
             return None
-
         if "item" not in frame.columns or "value" not in frame.columns:
             raise ProviderError("AKShare returned an unexpected stock profile format.")
 
         items = {str(row["item"]): row["value"] for _, row in frame.iterrows()}
-        name = _as_optional_string(items.get("股票简称")) or parts.code
+        name = _as_optional_string(items.get(_COL_STOCK_NAME)) or parts.code
 
         return StockProfile(
             symbol=parts.canonical,
             code=parts.code,
             exchange=parts.exchange,
             name=name,
-            industry=_as_optional_string(items.get("行业")),
-            list_date=_parse_compact_date(items.get("上市时间")),
+            industry=_as_optional_string(items.get(_COL_INDUSTRY)),
+            list_date=_parse_compact_date(items.get(_COL_LIST_DATE)),
             status="active",
-            total_market_cap=_as_optional_float(items.get("总市值")),
-            circulating_market_cap=_as_optional_float(items.get("流通市值")),
+            total_market_cap=_as_optional_float(items.get(_COL_TOTAL_MV)),
+            circulating_market_cap=_as_optional_float(items.get(_COL_FLOAT_MV)),
             source=self.name,
         )
 
@@ -92,7 +106,6 @@ class AkshareProvider:
         end_date: Optional[date] = None,
         adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
-        """获取单只股票日线行情。"""
         self._ensure_available()
         ak = _get_akshare_module()
         parts = parse_symbol(symbol)
@@ -111,7 +124,7 @@ class AkshareProvider:
 
         bars: list[DailyBar] = []
         for _, row in frame.iterrows():
-            trade_date = _parse_flexible_date(row.get("日期"))
+            trade_date = _parse_flexible_date(row.get(_COL_TRADE_DATE))
             if trade_date is None:
                 continue
 
@@ -119,15 +132,15 @@ class AkshareProvider:
                 DailyBar(
                     symbol=parts.canonical,
                     trade_date=trade_date,
-                    open=_as_optional_float(row.get("开盘")),
-                    high=_as_optional_float(row.get("最高")),
-                    low=_as_optional_float(row.get("最低")),
-                    close=_as_optional_float(row.get("收盘")),
-                    volume=_as_optional_float(row.get("成交量")),
-                    amount=_as_optional_float(row.get("成交额")),
+                    open=_as_optional_float(row.get(_COL_OPEN)),
+                    high=_as_optional_float(row.get(_COL_HIGH)),
+                    low=_as_optional_float(row.get(_COL_LOW)),
+                    close=_as_optional_float(row.get(_COL_CLOSE)),
+                    volume=_as_optional_float(row.get(_COL_VOLUME)),
+                    amount=_as_optional_float(row.get(_COL_AMOUNT)),
                     adjustment_mode=adjustment_mode,
                     source=self.name,
-                ),
+                )
             )
 
         return bars
@@ -138,9 +151,8 @@ class AkshareProvider:
         ak_symbol: str,
         start_date: Optional[date],
         end_date: Optional[date],
-        adjustment_mode: str,
+        adjustment_mode: str = "raw",
     ) -> Any:
-        """日线查询在网络抖动时执行重试。"""
         last_error: Optional[Exception] = None
         attempts_used = 0
 
@@ -171,12 +183,11 @@ class AkshareProvider:
             raise ProviderError("AKShare failed to load daily bars.")
         raise ProviderError(
             "AKShare failed to load daily bars after {attempts} attempts.".format(
-                attempts=attempts_used,
-            ),
+                attempts=attempts_used
+            )
         ) from last_error
 
     def get_stock_universe(self) -> list[UniverseItem]:
-        """获取基础股票池。"""
         self._ensure_available()
         ak = _get_akshare_module()
 
@@ -208,7 +219,7 @@ class AkshareProvider:
                     name=name,
                     status="active",
                     source=self.name,
-                ),
+                )
             )
 
         return items
@@ -220,11 +231,9 @@ class AkshareProvider:
         end_date: date,
         limit: int = 20,
     ) -> list[AnnouncementItem]:
-        """当前 provider 不负责公告列表。"""
         return []
 
-    def _get_stock_financial_summary_v2(self, symbol: str) -> Optional[FinancialSummary]:
-        """获取单只股票基础财务摘要。"""
+    def get_stock_financial_summary_raw(self, symbol: str) -> Optional[dict[str, Any]]:
         self._ensure_available()
         ak = _get_akshare_module()
         parts = parse_symbol(symbol)
@@ -232,7 +241,7 @@ class AkshareProvider:
         try:
             frame = ak.stock_financial_analysis_indicator_em(
                 symbol=parts.canonical,
-                indicator="按报告期",
+                indicator="\u6309\u62a5\u544a\u671f",
             )
         except Exception as exc:  # pragma: no cover - network/runtime dependent
             raise ProviderError("AKShare failed to load financial summary.") from exc
@@ -240,91 +249,13 @@ class AkshareProvider:
         if frame is None or frame.empty:
             return None
 
-        latest_row = _select_latest_financial_row_v2(frame)
+        latest_row = _select_latest_financial_row(frame)
         if latest_row is None:
             return None
 
-        return FinancialSummary(
-            symbol=parts.canonical,
-            name=_pick_first_string(
-                latest_row,
-                ["SECURITY_NAME_ABBR", "股票简称", "名称"],
-            )
-            or parts.code,
-            report_period=_parse_flexible_date(
-                _pick_first_value(
-                    latest_row,
-                    ["REPORT_DATE", "REPORT_PERIOD", "报告期"],
-                ),
-            ),
-            revenue=_pick_first_float(
-                latest_row,
-                [
-                    "TOTAL_OPERATE_INCOME",
-                    "OPERATE_INCOME",
-                    "营业总收入",
-                    "营业收入",
-                ],
-            ),
-            revenue_yoy=_pick_first_float(
-                latest_row,
-                ["YSTZ", "TOTAL_OPERATE_INCOME_YOY", "营业总收入同比增长", "营业收入同比增长"],
-            ),
-            net_profit=_pick_first_float(
-                latest_row,
-                ["PARENT_NETPROFIT", "NETPROFIT", "归母净利润", "净利润"],
-            ),
-            net_profit_yoy=_pick_first_float(
-                latest_row,
-                ["SJLTZ", "NETPROFIT_YOY", "归母净利润同比增长", "净利润同比增长"],
-            ),
-            roe=_pick_first_float(
-                latest_row,
-                ["ROE_WEIGHT", "WEIGHTAVG_ROE", "净资产收益率", "加权净资产收益率"],
-            ),
-            gross_margin=_pick_first_float(
-                latest_row,
-                ["XSMLL", "GROSS_MARGIN", "销售毛利率"],
-            ),
-            debt_ratio=_pick_first_float(
-                latest_row,
-                ["ZCFZL", "DEBT_RATIO", "资产负债率"],
-            ),
-            eps=_pick_first_float(
-                latest_row,
-                ["BASIC_EPS", "EPSJB", "基本每股收益", "每股收益"],
-            ),
-            bps=_pick_first_float(
-                latest_row,
-                ["BPS", "每股净资产"],
-            ),
-            source=self.name,
-        )
-
-    def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
-        """获取单只股票财务摘要（覆盖实现，优先稳健字段提取）。"""
-        self._ensure_available()
-        ak = _get_akshare_module()
-        parts = parse_symbol(symbol)
-
-        try:
-            frame = ak.stock_financial_analysis_indicator_em(
-                symbol=parts.canonical,
-                indicator="按报告期",
-            )
-        except Exception as exc:  # pragma: no cover - network/runtime dependent
-            raise ProviderError("AKShare failed to load financial summary.") from exc
-
-        if frame is None or frame.empty:
-            return None
-
-        latest_row = _select_latest_financial_row_v2(frame)
-        if latest_row is None:
-            return None
-
-        return FinancialSummary(
-            symbol=parts.canonical,
-            name=(
+        return {
+            "symbol": parts.canonical,
+            "name": (
                 _pick_first_string(
                     latest_row,
                     [
@@ -332,133 +263,108 @@ class AkshareProvider:
                         "SECURITY_NAME",
                         "SEC_NAME",
                         "NAME",
-                        "股票简称",
-                        "名称",
+                        _COL_STOCK_NAME,
+                        "\u540d\u79f0",
                     ],
                 )
-                or _pick_first_string_by_key_fragments(latest_row, ["NAME", "简称", "股票名称"])
+                or _pick_first_string_by_key_fragments(
+                    latest_row,
+                    ["NAME", "\u7b80\u79f0", "\u80a1\u7968\u540d\u79f0"],
+                )
                 or parts.code
             ),
+            "row": latest_row,
+            "source": self.name,
+        }
+
+    def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
+        raw_payload = self.get_stock_financial_summary_raw(symbol)
+        if raw_payload is None:
+            return None
+
+        parts = parse_symbol(symbol)
+        latest_row = raw_payload["row"]
+        return FinancialSummary(
+            symbol=parts.canonical,
+            name=raw_payload["name"] or parts.code,
             report_period=_parse_flexible_date(
                 _pick_first_value(
                     latest_row,
-                    ["REPORT_DATE", "REPORT_PERIOD", "NOTICE_DATE", "报告期", "报告日期"],
+                    ["REPORT_DATE", "REPORT_PERIOD", "NOTICE_DATE", _COL_REPORT_PERIOD, _COL_REPORT_DATE],
                 )
             ),
-            revenue=(
-                _pick_first_float_v2(
-                    latest_row,
-                    ["TOTAL_OPERATE_INCOME", "OPERATE_INCOME", "TOTAL_REVENUE", "营业总收入", "营业收入"],
-                )
-                or _pick_first_float_by_key_fragments(
-                    latest_row,
-                    ["TOTALOPERATEINCOME", "OPERATEINCOME", "TOTALREVENUE", "营业总收入", "营业收入", "营收"],
-                )
+            revenue=_pick_first_float_by_key_fragments(
+                latest_row,
+                ["TOTALOPERATEINCOME", "OPERATEINCOME", "TOTALREVENUE", "\u8425\u4e1a\u603b\u6536\u5165", "\u8425\u4e1a\u6536\u5165", "\u8425\u6536"],
             ),
-            revenue_yoy=(
-                _pick_first_float_v2(
-                    latest_row,
-                    [
-                        "YSTZ",
-                        "TOTAL_OPERATE_INCOME_YOY",
-                        "OPERATE_INCOME_YOY",
-                        "营业总收入同比增长",
-                        "营业收入同比增长",
-                    ],
-                )
-                or _pick_first_float_by_key_fragments(
-                    latest_row,
-                    ["YSTZ", "INCOMEYOY", "收入同比", "营收同比", "营业总收入同比", "营业收入同比"],
-                )
+            revenue_yoy=_pick_first_float_by_key_fragments(
+                latest_row,
+                ["YSTZ", "INCOMEYOY", "\u6536\u5165\u540c\u6bd4", "\u8425\u6536\u540c\u6bd4", "\u8425\u4e1a\u603b\u6536\u5165\u540c\u6bd4", "\u8425\u4e1a\u6536\u5165\u540c\u6bd4"],
             ),
-            net_profit=(
-                _pick_first_float_v2(
-                    latest_row,
-                    ["PARENT_NETPROFIT", "NETPROFIT", "NET_INCOME", "归母净利润", "净利润"],
-                )
-                or _pick_first_float_by_key_fragments(
-                    latest_row,
-                    ["PARENTNETPROFIT", "NETPROFIT", "NETINCOME", "归母净利润", "净利润", "母公司股东的净利润"],
-                )
+            net_profit=_pick_first_float_by_key_fragments(
+                latest_row,
+                ["PARENTNETPROFIT", "NETPROFIT", "NETINCOME", "\u5f52\u6bcd\u51c0\u5229\u6da6", "\u51c0\u5229\u6da6"],
             ),
-            net_profit_yoy=(
-                _pick_first_float_v2(
-                    latest_row,
-                    ["SJLTZ", "NETPROFIT_YOY", "PARENT_NETPROFIT_YOY", "归母净利润同比增长", "净利润同比增长"],
-                )
-                or _pick_first_float_by_key_fragments(
-                    latest_row,
-                    ["SJLTZ", "PROFITYOY", "净利润同比", "归母净利润同比"],
-                )
+            net_profit_yoy=_pick_first_float_by_key_fragments(
+                latest_row,
+                ["SJLTZ", "PROFITYOY", "\u51c0\u5229\u6da6\u540c\u6bd4", "\u5f52\u6bcd\u51c0\u5229\u6da6\u540c\u6bd4"],
             ),
-            roe=(
-                _pick_first_float_v2(
-                    latest_row,
-                    ["ROE_WEIGHT", "WEIGHTAVG_ROE", "ROE", "净资产收益率", "加权净资产收益率"],
-                )
-                or _pick_first_float_by_key_fragments(
-                    latest_row,
-                    ["ROE", "净资产收益率", "加权净资产收益率"],
-                )
+            roe=_pick_first_float_by_key_fragments(
+                latest_row,
+                ["ROE", "\u51c0\u8d44\u4ea7\u6536\u76ca\u7387", "\u52a0\u6743\u51c0\u8d44\u4ea7\u6536\u76ca\u7387"],
             ),
-            gross_margin=(
-                _pick_first_float_v2(latest_row, ["XSMLL", "GROSS_MARGIN", "销售毛利率", "毛利率"])
-                or _pick_first_float_by_key_fragments(latest_row, ["GROSSMARGIN", "销售毛利率", "毛利率"])
+            gross_margin=_pick_first_float_by_key_fragments(
+                latest_row,
+                ["GROSSMARGIN", "\u9500\u552e\u6bdb\u5229\u7387", "\u6bdb\u5229\u7387"],
             ),
-            debt_ratio=(
-                _pick_first_float_v2(latest_row, ["ZCFZL", "DEBT_RATIO", "资产负债率"])
-                or _pick_first_float_by_key_fragments(latest_row, ["DEBTRATIO", "资产负债率", "负债率"])
+            debt_ratio=_pick_first_float_by_key_fragments(
+                latest_row,
+                ["DEBTRATIO", "\u8d44\u4ea7\u8d1f\u503a\u7387", "\u8d1f\u503a\u7387"],
             ),
-            eps=(
-                _pick_first_float_v2(latest_row, ["BASIC_EPS", "EPSJB", "EPS", "基本每股收益", "每股收益"])
-                or _pick_first_float_by_key_fragments(latest_row, ["BASICEPS", "EPS", "每股收益"])
+            eps=_pick_first_float_by_key_fragments(
+                latest_row,
+                ["BASICEPS", "EPS", "\u6bcf\u80a1\u6536\u76ca"],
             ),
-            bps=(
-                _pick_first_float_v2(latest_row, ["BPS", "每股净资产"])
-                or _pick_first_float_by_key_fragments(latest_row, ["BPS", "每股净资产"])
+            bps=_pick_first_float_by_key_fragments(
+                latest_row,
+                ["BPS", "\u6bcf\u80a1\u51c0\u8d44\u4ea7"],
             ),
             source=self.name,
         )
 
     def _ensure_available(self) -> None:
-        """在 AKShare 不可用时抛出统一错误。"""
         if not self.is_available():
             raise ProviderError("AKShare is not installed or unavailable.")
 
 
 def _get_akshare_module() -> Any:
-    """按需导入并返回 AKShare 模块。"""
     try:
         return importlib.import_module("akshare")
-    except Exception as exc:  # pragma: no cover - depends on local environment
+    except Exception as exc:  # pragma: no cover
         raise ProviderError("AKShare is not installed or unavailable.") from exc
 
 
 def _format_akshare_date(value: Optional[date]) -> str:
-    """格式化 AKShare 查询日期。"""
     if value is None:
         return ""
     return value.strftime("%Y%m%d")
 
 
 def _format_akshare_adjustment_mode(value: str) -> str:
-    """把内部复权口径映射为 AKShare 参数。"""
     normalized = value.strip().lower()
     if normalized == "raw":
         return ""
     if normalized in {"qfq", "hfq"}:
         return normalized
     raise ProviderError(
-        "Unsupported adjustment mode for AKShare: {value}".format(value=value),
+        "Unsupported adjustment mode for AKShare: {value}".format(value=value)
     )
 
 
 def _parse_compact_date(value: Any) -> Optional[date]:
-    """解析类似 20010531 的紧凑日期。"""
     text = _as_optional_string(value)
     if text is None:
         return None
-
     try:
         return datetime.strptime(text, "%Y%m%d").date()
     except ValueError:
@@ -466,119 +372,70 @@ def _parse_compact_date(value: Any) -> Optional[date]:
 
 
 def _parse_flexible_date(value: Any) -> Optional[date]:
-    """解析 provider 日期字段。"""
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-
     text = _as_optional_string(value)
     if text is None:
         return None
 
-    for pattern in ("%Y-%m-%d", "%Y%m%d", "%Y-%m-%d %H:%M:%S"):
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"):
         try:
-            return datetime.strptime(text, pattern).date()
+            return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
-
     return None
 
 
 def _as_optional_string(value: Any) -> Optional[str]:
-    """将 provider 字段转换为清洗后的字符串。"""
-    if _is_missing(value):
+    if value is None:
         return None
-
     text = str(value).strip()
-    if text == "":
+    if text in {"", "--", "nan", "None"}:
         return None
     return text
 
 
 def _as_optional_float(value: Any) -> Optional[float]:
-    """将 provider 字段转换为浮点数。"""
-    if _is_missing(value):
+    text = _as_optional_string(value)
+    if text is None:
         return None
 
+    normalized = (
+        text.replace(",", "")
+        .replace("%", "")
+        .replace("\u5143", "")
+        .replace("\u80a1", "")
+    )
     try:
-        return float(value)
+        parsed = float(normalized)
     except (TypeError, ValueError):
         return None
-
-
-def _is_missing(value: Any) -> bool:
-    """判断 provider 字段是否应视为缺失值。"""
-    if value is None:
-        return True
-    if isinstance(value, float) and math.isnan(value):
-        return True
-    return False
-
-
-def _select_latest_financial_row(frame: Any) -> Optional[dict[str, Any]]:
-    """从财务指标表中选出最新报告期记录。"""
-    if frame is None or frame.empty:
+    if math.isnan(parsed):
         return None
-
-    rows: list[dict[str, Any]] = frame.to_dict(orient="records")
-    if not rows:
-        return None
-
-    def _sort_key(row: dict[str, Any]) -> tuple[int, str]:
-        report_date = _parse_flexible_date(
-            _pick_first_value(row, ["REPORT_DATE", "REPORT_PERIOD", "报告期"]),
-        )
-        if report_date is None:
-            return (0, "")
-        return (1, report_date.isoformat())
-
-    return sorted(rows, key=_sort_key, reverse=True)[0]
+    return parsed
 
 
-def _pick_first_value(row: dict[str, Any], keys: list[str]) -> Any:
-    """按候选字段顺序读取首个非空值。"""
-    for key in keys:
-        if key not in row:
-            continue
-        value = row.get(key)
-        if not _is_missing(value) and value != "":
-            return value
+def _pick_first_value(row: dict[str, Any], candidates: list[str]) -> Any:
+    for key in candidates:
+        if key in row and _as_optional_string(row[key]) is not None:
+            return row[key]
     return None
 
 
-def _pick_first_string(row: dict[str, Any], keys: list[str]) -> Optional[str]:
-    """按候选字段顺序读取首个非空字符串。"""
-    return _as_optional_string(_pick_first_value(row, keys))
-
-
-def _pick_first_float(row: dict[str, Any], keys: list[str]) -> Optional[float]:
-    """按候选字段顺序读取首个数值。"""
-    return _as_optional_float(_pick_first_value(row, keys))
-
-
-def _normalize_field_key(key: Any) -> str:
-    text = str(key or "").strip()
-    if text == "":
-        return ""
-    text = re.sub(r"[\s_\-./:：%()（）\[\]【】]+", "", text)
-    return text.upper()
+def _pick_first_string(row: dict[str, Any], candidates: list[str]) -> Optional[str]:
+    value = _pick_first_value(row, candidates)
+    return _as_optional_string(value)
 
 
 def _pick_first_string_by_key_fragments(
     row: dict[str, Any],
     fragments: list[str],
 ) -> Optional[str]:
-    normalized_fragments = [_normalize_field_key(item) for item in fragments if item]
-    for raw_key, raw_value in row.items():
-        normalized_key = _normalize_field_key(raw_key)
-        if normalized_key == "":
-            continue
-        if not any(fragment and fragment in normalized_key for fragment in normalized_fragments):
-            continue
-        parsed = _as_optional_string(raw_value)
-        if parsed:
-            return parsed
+    normalized_fragments = [_normalize_key(fragment) for fragment in fragments]
+    for key, value in row.items():
+        normalized_key = _normalize_key(key)
+        if any(fragment in normalized_key for fragment in normalized_fragments):
+            text = _as_optional_string(value)
+            if text is not None:
+                return text
     return None
 
 
@@ -586,88 +443,58 @@ def _pick_first_float_by_key_fragments(
     row: dict[str, Any],
     fragments: list[str],
 ) -> Optional[float]:
-    normalized_fragments = [_normalize_field_key(item) for item in fragments if item]
-    for raw_key, raw_value in row.items():
-        normalized_key = _normalize_field_key(raw_key)
-        if normalized_key == "":
-            continue
-        if not any(fragment and fragment in normalized_key for fragment in normalized_fragments):
-            continue
-        parsed = _as_optional_float_v2(raw_value)
-        if parsed is not None:
-            return parsed
+    normalized_fragments = [_normalize_key(fragment) for fragment in fragments]
+    for key, value in row.items():
+        normalized_key = _normalize_key(key)
+        if any(fragment in normalized_key for fragment in normalized_fragments):
+            parsed = _as_optional_float(value)
+            if parsed is not None:
+                return parsed
     return None
 
 
-def _pick_first_float_v2(row: dict[str, Any], keys: list[str]) -> Optional[float]:
-    return _as_optional_float_v2(_pick_first_value(row, keys))
+def _normalize_key(value: Any) -> str:
+    text = _as_optional_string(value)
+    if text is None:
+        return ""
+    return re.sub(r"[\s_\-:/()（）%]", "", text).upper()
 
 
-def _as_optional_float_v2(value: Any) -> Optional[float]:
-    """覆盖旧实现：支持百分号、千分位和中文金额单位。"""
-    if _is_missing(value):
+def _select_latest_financial_row(frame: Any) -> Optional[dict[str, Any]]:
+    if frame is None or getattr(frame, "empty", True):
         return None
 
-    if isinstance(value, str):
-        text = value.strip()
-        if text == "":
-            return None
-        text = text.replace(",", "").replace("%", "")
-        multiplier = 1.0
-        if text.endswith("亿"):
-            multiplier = 100000000.0
-            text = text[:-1]
-        elif text.endswith("万"):
-            multiplier = 10000.0
-            text = text[:-1]
-        text = text.strip()
-        if text == "":
-            return None
-        try:
-            return float(text) * multiplier
-        except ValueError:
-            return None
-
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _select_latest_financial_row_v2(frame: Any) -> Optional[dict[str, Any]]:
-    """覆盖旧实现：补充报告期候选字段，避免字段名漂移。"""
-    if frame is None or frame.empty:
-        return None
-
-    rows: list[dict[str, Any]] = frame.to_dict(orient="records")
+    rows: list[dict[str, Any]] = [dict(row) for _, row in frame.iterrows()]
     if not rows:
         return None
 
-    def _sort_key(row: dict[str, Any]) -> tuple[int, str]:
+    def sort_key(row: dict[str, Any]) -> tuple[date, int]:
         report_date = _parse_flexible_date(
             _pick_first_value(
                 row,
-                ["REPORT_DATE", "REPORT_PERIOD", "NOTICE_DATE", "报告期", "报告日期"],
-            ),
+                ["REPORT_DATE", "REPORT_PERIOD", "NOTICE_DATE", _COL_REPORT_PERIOD, _COL_REPORT_DATE],
+            )
+        ) or date(1900, 1, 1)
+        non_empty_count = sum(
+            1 for value in row.values() if _as_optional_string(value) is not None
         )
-        if report_date is None:
-            return (0, "")
-        return (1, report_date.isoformat())
+        return (report_date, non_empty_count)
 
-    return sorted(rows, key=_sort_key, reverse=True)[0]
+    rows.sort(key=sort_key, reverse=True)
+    return rows[0]
 
 
-def _is_transient_akshare_error(exc: Exception) -> bool:
-    """判断是否属于可重试网络错误。"""
-    text = str(exc).lower()
-    markers = [
-        "remotedisconnected",
+def _is_transient_akshare_error(error: Exception) -> bool:
+    message = "{error_type}:{message}".format(
+        error_type=type(error).__name__,
+        message=str(error),
+    ).lower()
+    transient_markers = (
         "connection aborted",
-        "connectionerror",
-        "protocolerror",
+        "remote disconnected",
         "read timed out",
-        "max retries exceeded",
-        "temporarily unavailable",
+        "timed out",
+        "temporary failure",
         "connection reset",
-    ]
-    return any(marker in text for marker in markers)
+    )
+    return any(marker in message for marker in transient_markers)

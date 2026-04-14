@@ -24,6 +24,7 @@ from app.schemas.debate import DebateReviewProgress, DebateReviewReport
 from app.schemas.decision_brief import DecisionBrief
 from app.schemas.factor import FactorSnapshot
 from app.schemas.intraday import TriggerSnapshot
+from app.schemas.market_context import StockClassificationSnapshot
 from app.schemas.market_data import (
     DailyBarResponse,
     IntradayBarResponse,
@@ -31,8 +32,11 @@ from app.schemas.market_data import (
     TimelineResponse,
     UniverseResponse,
 )
-from app.schemas.market_context import StockClassificationSnapshot
-from app.schemas.research_inputs import AnnouncementListResponse, FinancialSummary
+from app.schemas.research_inputs import (
+    AnnouncementListResponse,
+    FinancialReportIndexResponse,
+    FinancialSummary,
+)
 from app.schemas.review import StockReviewReport
 from app.schemas.technical import TechnicalSnapshot
 from app.schemas.workspace import WorkspaceBundleResponse
@@ -162,6 +166,23 @@ def get_stock_financial_summary(
     return service.get_stock_financial_summary(symbol)
 
 
+@router.get(
+    "/{symbol}/financial-reports-index",
+    response_model=FinancialReportIndexResponse,
+)
+def get_financial_report_indexes(
+    symbol: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    force_refresh: bool = Query(default=False),
+    service: MarketDataService = Depends(get_market_data_service),
+) -> FinancialReportIndexResponse:
+    return service.get_financial_report_indexes(
+        symbol,
+        limit=limit,
+        force_refresh=force_refresh,
+    )
+
+
 @router.get("/{symbol}/technical", response_model=TechnicalSnapshot)
 def get_technical_snapshot(
     symbol: str,
@@ -197,7 +218,7 @@ def get_stock_review_report(
     if as_of_date is not None:
         raise HTTPException(
             status_code=400,
-            detail="指定 as_of_date 时，当前 review-report 仅支持读取已有日级快照，暂不支持历史重算。",
+            detail="指定 as_of_date 时，当前 review-report 仅支持读取已存在的日级快照，暂不支持历史重算。",
         )
     computed = service.get_stock_review_report(symbol)
     saved = review_report_daily.save(symbol, computed)
@@ -246,7 +267,7 @@ def get_debate_review_report(
     if as_of_date is not None:
         raise HTTPException(
             status_code=400,
-            detail="指定 as_of_date 时，当前 debate-review 仅支持读取已有日级快照，暂不支持历史重算。",
+            detail="指定 as_of_date 时，当前 debate-review 仅支持读取已存在的日级快照，暂不支持历史重算。",
         )
     try:
         report = service.get_debate_review_report(

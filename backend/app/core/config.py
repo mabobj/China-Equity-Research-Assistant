@@ -94,11 +94,13 @@ class Settings:
     enable_akshare: bool
     enable_baostock: bool
     enable_cninfo: bool
+    tushare_enabled: bool
     enable_mootdx: bool
     enable_tdx_api: bool
     enable_eastmoney: bool
     mootdx_tdx_dir: Optional[Path]
     tdx_api_base_url: Optional[str]
+    tushare_token: Optional[str]
     screener_lookback_days: int
     screener_progress_log_interval: int
     data_refresh_daily_bar_lookback_days: int
@@ -143,6 +145,10 @@ def get_settings() -> Settings:
         enable_akshare=_read_bool_env("ENABLE_AKSHARE", default=True),
         enable_baostock=_read_bool_env("ENABLE_BAOSTOCK", default=True),
         enable_cninfo=_read_bool_env("ENABLE_CNINFO", default=True),
+        tushare_enabled=(
+            _read_bool_env("TUSHARE_ENABLED", default=False)
+            or _read_bool_env("ENABLE_TUSHARE", default=False)
+        ),
         enable_mootdx=_read_bool_env("ENABLE_MOOTDX", default=False),
         enable_tdx_api=_read_bool_env("ENABLE_TDX_API", default=True),
         enable_eastmoney=_read_bool_env("ENABLE_EASTMONEY", default=True),
@@ -153,6 +159,7 @@ def get_settings() -> Settings:
         ),
         tdx_api_base_url=_read_optional_env("TDX_API_BASE_URL")
         or "http://192.168.1.105:8080/",
+        tushare_token=_read_optional_env("TUSHARE_TOKEN"),
         screener_lookback_days=_read_int_env("SCREENER_LOOKBACK_DAYS", default=400),
         screener_progress_log_interval=_read_int_env(
             "SCREENER_PROGRESS_LOG_INTERVAL",

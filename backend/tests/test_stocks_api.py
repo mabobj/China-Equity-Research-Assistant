@@ -51,7 +51,12 @@ from app.schemas.market_data import (
     UniverseItem,
     UniverseResponse,
 )
-from app.schemas.research_inputs import AnnouncementListResponse, FinancialSummary
+from app.schemas.research_inputs import (
+    AnnouncementListResponse,
+    FinancialReportIndexItem,
+    FinancialReportIndexResponse,
+    FinancialSummary,
+)
 from app.schemas.review import (
     BullBearCase,
     EventView,
@@ -181,6 +186,28 @@ class StubMarketDataService:
             debt_ratio=30.0,
             eps=2.5,
             source="stub",
+        )
+
+    def get_financial_report_indexes(
+        self,
+        symbol: str,
+        limit: int = 20,
+        force_refresh: bool = False,
+    ) -> FinancialReportIndexResponse:
+        return FinancialReportIndexResponse(
+            symbol="600519.SH",
+            count=1,
+            items=[
+                FinancialReportIndexItem(
+                    symbol="600519.SH",
+                    report_period=date(2025, 12, 31),
+                    report_type="annual",
+                    title="2025 Annual Report",
+                    publish_date=date(2026, 3, 28),
+                    source="cninfo",
+                    url="https://example.com/report.pdf",
+                )
+            ],
         )
 
     def get_stock_announcements(
@@ -588,6 +615,20 @@ def test_get_stock_profile_route_returns_structured_payload() -> None:
     assert response.status_code == 200
     assert response.json()["symbol"] == "600519.SH"
     assert response.json()["name"] == "Kweichow Moutai"
+
+    app.dependency_overrides.clear()
+
+
+def test_financial_report_indexes_route_returns_structured_payload() -> None:
+    app.dependency_overrides[get_market_data_service] = lambda: StubMarketDataService()
+
+    response = client.get("/stocks/600519/financial-reports-index")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600519.SH"
+    assert payload["count"] == 1
+    assert payload["items"][0]["report_type"] == "annual"
 
     app.dependency_overrides.clear()
 

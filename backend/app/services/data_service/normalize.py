@@ -1,4 +1,4 @@
-"""集中管理 symbol、日期与行情单位标准化。"""
+"""Centralized normalization helpers for symbols, dates, units, and bars."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from datetime import date, datetime
 import math
 import re
-from typing import Any, Iterable, Literal
+from typing import Any, Iterable, Literal, Mapping
 
 from app.schemas.market_data import DailyBar
 from app.services.data_service.exceptions import InvalidSymbolError
 
-ProviderName = Literal["akshare", "baostock", "cninfo", "mootdx", "tdx_api"]
+ProviderName = Literal["akshare", "baostock", "cninfo", "mootdx", "tdx_api", "tushare"]
 Exchange = Literal["SH", "SZ"]
 BoardType = Literal["main_board", "chinext", "star_market", "unknown"]
 
@@ -19,19 +19,29 @@ _CANONICAL_PATTERN = re.compile(r"^(?P<code>\d{6})\.(?P<exchange>SH|SZ)$")
 _PREFIX_PATTERN = re.compile(r"^(?P<exchange>sh|sz)(?P<code>\d{6})$", re.IGNORECASE)
 _RAW_CODE_PATTERN = re.compile(r"^\d{6}$")
 _BAOSTOCK_PATTERN = re.compile(r"^(?P<exchange>sh|sz)\.(?P<code>\d{6})$", re.IGNORECASE)
-_TDX_PREFIXED_PATTERN = re.compile(r"^(?P<exchange>sh|sz)(?P<code>\d{6})$", re.IGNORECASE)
+
+_REPORT_PERIOD_PATTERNS: tuple[tuple[re.Pattern[str], tuple[int, int] | None], ...] = (
+    (re.compile(r"^(?P<year>\d{4})\s*[-/ ]?Q1$", re.IGNORECASE), (3, 31)),
+    (re.compile(r"^(?P<year>\d{4})\s*[-/ ]?Q2$", re.IGNORECASE), (6, 30)),
+    (re.compile(r"^(?P<year>\d{4})\s*[-/ ]?Q3$", re.IGNORECASE), (9, 30)),
+    (re.compile(r"^(?P<year>\d{4})\s*[-/ ]?Q4$", re.IGNORECASE), (12, 31)),
+    (re.compile(r"^(?P<year>\d{4})\s*年报$"), (12, 31)),
+    (re.compile(r"^(?P<year>\d{4})\s*(?:半年度报告|半年报|中报)$"), (6, 30)),
+    (re.compile(r"^(?P<year>\d{4})\s*(?:第一季度报告|一季报)$"), (3, 31)),
+    (re.compile(r"^(?P<year>\d{4})\s*(?:第三季度报告|三季报)$"), (9, 30)),
+)
 
 
 @dataclass(frozen=True)
 class SymbolParts:
-    """标准化后的代码拆分结果。"""
+    """Normalized stock symbol parts."""
 
     code: str
     exchange: Exchange
 
     @property
     def canonical(self) -> str:
-        return "{code}.{exchange}".format(code=self.code, exchange=self.exchange)
+        return f"{self.code}.{self.exchange}"
 
     @property
     def akshare_symbol(self) -> str:
@@ -39,17 +49,11 @@ class SymbolParts:
 
     @property
     def baostock_symbol(self) -> str:
-        return "{exchange}.{code}".format(
-            exchange=self.exchange.lower(),
-            code=self.code,
-        )
+        return f"{self.exchange.lower()}.{self.code}"
 
     @property
     def prefixed_symbol(self) -> str:
-        return "{exchange}{code}".format(
-            exchange=self.exchange.lower(),
-            code=self.code,
-        )
+        return f"{self.exchange.lower()}{self.code}"
 
     @property
     def cninfo_symbol(self) -> str:
@@ -63,14 +67,18 @@ class SymbolParts:
     def tdx_api_symbol(self) -> str:
         return self.prefixed_symbol
 
+    @property
+    def tushare_symbol(self) -> str:
+        return self.canonical
+
 
 def normalize_symbol(symbol: str) -> str:
-    """把用户输入统一成 canonical symbol。"""
+    """Normalize any supported symbol format into canonical form."""
     return parse_symbol(symbol).canonical
 
 
 def parse_symbol(symbol: str) -> SymbolParts:
-    """解析股票代码并统一为系统内部格式。"""
+    """Parse stock symbol into normalized parts."""
     cleaned = symbol.strip()
     if not cleaned:
         raise InvalidSymbolError("Symbol cannot be empty.")
@@ -101,13 +109,13 @@ def parse_symbol(symbol: str) -> SymbolParts:
         return SymbolParts(code=cleaned, exchange=_infer_exchange(cleaned))
 
     raise InvalidSymbolError(
-        "Invalid symbol '{symbol}'. Expected formats like 600519, "
-        "600519.SH, sh600519, sz000001, or sh.600519.".format(symbol=symbol),
+        "Invalid symbol '{symbol}'. Expected formats like 600519, 600519.SH, "
+        "sh600519, sz000001, or sh.600519.".format(symbol=symbol),
     )
 
 
 def convert_symbol_for_provider(symbol: str, provider: ProviderName) -> str:
-    """把 canonical symbol 转换为 provider 所需格式。"""
+    """Convert canonical symbol into provider-specific format."""
     parts = parse_symbol(symbol)
     if provider == "akshare":
         return parts.akshare_symbol
@@ -119,13 +127,15 @@ def convert_symbol_for_provider(symbol: str, provider: ProviderName) -> str:
         return parts.mootdx_symbol
     if provider == "tdx_api":
         return parts.tdx_api_symbol
+    if provider == "tushare":
+        return parts.tushare_symbol
     raise InvalidSymbolError(
         "Unsupported provider symbol conversion: {provider}".format(provider=provider),
     )
 
 
 def infer_board_from_symbol(symbol: str) -> BoardType:
-    """根据 canonical symbol 推断上市板块。"""
+    """Infer board type from canonical symbol."""
     parts = parse_symbol(symbol)
     if parts.exchange == "SH" and parts.code.startswith("688"):
         return "star_market"
@@ -137,12 +147,12 @@ def infer_board_from_symbol(symbol: str) -> BoardType:
 
 
 def canonical_symbol_from_provider_symbol(symbol: str) -> str:
-    """把 provider 风格代码转换回 canonical symbol。"""
+    """Convert provider-style symbol back into canonical symbol."""
     return normalize_symbol(symbol)
 
 
 def normalize_provider_name(provider: str) -> str:
-    """统一 provider 名称别名。"""
+    """Normalize provider aliases into stable internal names."""
     normalized = provider.strip().lower()
     aliases = {
         "akshare_api": "akshare",
@@ -156,7 +166,7 @@ def normalize_provider_name(provider: str) -> str:
 
 
 def parse_provider_date(value: Any) -> date | None:
-    """把 provider 日期值统一解析为 date。"""
+    """Parse provider date input into a date object."""
     if value is None:
         return None
     if isinstance(value, date) and not isinstance(value, datetime):
@@ -172,7 +182,10 @@ def parse_provider_date(value: Any) -> date | None:
             return datetime.strptime(text, pattern).date()
         except ValueError:
             continue
-    chinese_match = re.match(r"^(?P<year>\d{4})年(?P<month>\d{1,2})月(?P<day>\d{1,2})日$", text)
+    chinese_match = re.match(
+        r"^(?P<year>\d{4})年(?P<month>\d{1,2})月(?P<day>\d{1,2})日?$",
+        text,
+    )
     if chinese_match is not None:
         return date(
             int(chinese_match.group("year")),
@@ -183,7 +196,7 @@ def parse_provider_date(value: Any) -> date | None:
 
 
 def parse_provider_datetime(value: Any) -> datetime | None:
-    """把 provider 日期时间值统一解析为 datetime。"""
+    """Parse provider datetime input into a datetime object."""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -209,7 +222,7 @@ def parse_provider_datetime(value: Any) -> datetime | None:
 
 
 def normalize_price_to_yuan(value: float | None, *, source: str) -> float | None:
-    """把价格统一为元。"""
+    """Normalize quote price into yuan."""
     if value is None:
         return None
     if normalize_provider_name(source) == "tdx_api":
@@ -218,7 +231,7 @@ def normalize_price_to_yuan(value: float | None, *, source: str) -> float | None
 
 
 def normalize_volume_to_shares(value: float | None, *, source: str) -> float | None:
-    """把成交量统一为股。"""
+    """Normalize traded volume into shares."""
     if value is None:
         return None
     normalized_source = normalize_provider_name(source)
@@ -228,7 +241,7 @@ def normalize_volume_to_shares(value: float | None, *, source: str) -> float | N
 
 
 def normalize_amount_to_yuan(value: float | None, *, source: str) -> float | None:
-    """把成交额统一为元。"""
+    """Normalize turnover amount into yuan."""
     if value is None:
         return None
     if normalize_provider_name(source) == "tdx_api":
@@ -236,120 +249,233 @@ def normalize_amount_to_yuan(value: float | None, *, source: str) -> float | Non
     return value
 
 
-def normalize_adjustment_mode(
-    value: str | None,
-    *,
-    source: str,
-) -> Literal["raw", "qfq", "hfq"]:
-    """统一 provider 的复权口径表达。"""
-    normalized_source = normalize_provider_name(source)
-    raw_value = (value or "").strip().lower()
-    if raw_value in {"", "raw", "none", "3"}:
-        return "raw"
-    if raw_value in {"qfq", "forward", "2"}:
-        return "qfq"
-    if raw_value in {"hfq", "backward", "1"}:
-        return "hfq"
-    if normalized_source in {"tdx_api", "mootdx", "akshare", "baostock"}:
-        return "raw"
-    return "raw"
+def normalize_financial_amount_to_yuan(value: float | None) -> float | None:
+    """Normalize financial amount fields into yuan."""
+    return value
 
 
-def normalize_trading_status(value: str | None) -> str | None:
-    """统一交易状态表达。"""
+def normalize_financial_percent(value: float | None) -> float | None:
+    """Normalize financial ratio fields into percentage points."""
     if value is None:
         return None
-    normalized = value.strip().lower()
-    if normalized in {"", "unknown", "none"}:
+    if value != 0 and -1.0 < value < 1.0:
+        return value * 100.0
+    return value
+
+
+def normalize_financial_report_period(value: Any) -> date | None:
+    """Normalize financial report period into the unified date form."""
+    if value is None:
         return None
-    if normalized in {"active", "normal", "trading"}:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+
+    text = str(value).strip()
+    if text == "":
+        return None
+
+    upper_text = text.upper()
+    for pattern, month_day in _REPORT_PERIOD_PATTERNS:
+        match = pattern.fullmatch(text) or pattern.fullmatch(upper_text)
+        if match is not None and month_day is not None:
+            return date(int(match.group("year")), month_day[0], month_day[1])
+
+    return parse_provider_date(text)
+
+
+def normalize_financial_report_type(
+    value: Any,
+    *,
+    report_period: date | None = None,
+) -> str:
+    """Normalize financial report type into q1/half/q3/annual/ttm/unknown."""
+    if value is not None:
+        normalized = str(value).strip().lower()
+        mapping = {
+            "q1": "q1",
+            "quarter1": "q1",
+            "first_quarter": "q1",
+            "half": "half",
+            "h1": "half",
+            "semiannual": "half",
+            "half_year": "half",
+            "q3": "q3",
+            "quarter3": "q3",
+            "third_quarter": "q3",
+            "annual": "annual",
+            "year": "annual",
+            "yearly": "annual",
+            "ttm": "ttm",
+            "unknown": "unknown",
+            "一季报": "q1",
+            "第一季度报告": "q1",
+            "半年报": "half",
+            "半年度报告": "half",
+            "中报": "half",
+            "三季报": "q3",
+            "第三季度报告": "q3",
+            "年报": "annual",
+        }
+        if normalized in mapping:
+            return mapping[normalized]
+        if "ttm" in normalized or "滚动" in normalized:
+            return "ttm"
+
+    if report_period is None:
+        return "unknown"
+    month_day = (report_period.month, report_period.day)
+    if month_day == (3, 31):
+        return "q1"
+    if month_day == (6, 30):
+        return "half"
+    if month_day == (9, 30):
+        return "q3"
+    if month_day == (12, 31):
+        return "annual"
+    return "unknown"
+
+
+def normalize_adjustment_mode(value: Any, *, source: str | None = None) -> str:
+    """Normalize adjustment mode into raw/qfq/hfq."""
+    if value is None:
+        return "raw"
+    normalized = str(value).strip().lower()
+    mapping = {
+        "": "raw",
+        "0": "raw",
+        "3": "raw",
+        "raw": "raw",
+        "none": "raw",
+        "1": "hfq",
+        "hfq": "hfq",
+        "2": "qfq",
+        "qfq": "qfq",
+    }
+    return mapping.get(normalized, "raw")
+
+
+def normalize_trading_status(value: Any) -> str | None:
+    """Normalize trading status labels."""
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if normalized in {"", "none", "unknown"}:
+        return None
+    if normalized in {"trading", "trade", "normal", "active"}:
         return "normal"
-    if normalized in {"suspend", "suspended", "halt"}:
+    if normalized in {"halt", "halted", "suspend", "suspended", "停牌"}:
         return "suspended"
+    if normalized in {"delist", "delisted", "退市"}:
+        return "delisted"
+    if normalized in {"st", "*st"}:
+        return "special_treatment"
     return normalized
 
 
 def normalize_corporate_action_flags(value: Any) -> list[str]:
-    """统一公司行为标记表达。"""
+    """Normalize corporate action flags into a stable unique list."""
     if value is None:
         return []
     if isinstance(value, str):
-        parts = [item.strip().lower() for item in re.split(r"[,;|]", value) if item.strip()]
-        return list(dict.fromkeys(parts))
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
-        normalized_items = [
-            str(item).strip().lower()
-            for item in value
-            if str(item).strip()
-        ]
-        return list(dict.fromkeys(normalized_items))
-    return [str(value).strip().lower()] if str(value).strip() else []
+        candidates = [item.strip() for item in value.split(",")]
+    elif isinstance(value, Iterable):
+        candidates = [str(item).strip() for item in value]
+    else:
+        candidates = [str(value).strip()]
+    normalized: list[str] = []
+    for item in candidates:
+        if not item:
+            continue
+        lowered = item.lower()
+        if lowered not in normalized:
+            normalized.append(lowered)
+    return normalized
 
 
 def normalize_daily_bar_rows(
-    rows: Iterable[DailyBar],
+    rows: Iterable[DailyBar | Mapping[str, Any]],
     *,
-    symbol: str | None = None,
-    default_source: str | None = None,
+    symbol: str,
+    default_source: str,
 ) -> list[DailyBar]:
-    """把 provider 返回的日线统一为内部单位与 canonical symbol。"""
-    normalized_rows: list[DailyBar] = []
-    fallback_symbol = normalize_symbol(symbol) if symbol else None
+    """Normalize provider bar rows into unified DailyBar objects."""
+    canonical_symbol = normalize_symbol(symbol)
+    normalized_bars: list[DailyBar] = []
     for row in rows:
-        row_source = normalize_provider_name(row.source or default_source or "unknown")
-        canonical_symbol = fallback_symbol or normalize_symbol(row.symbol)
-        normalized_rows.append(
+        if isinstance(row, DailyBar):
+            source = row.source or default_source
+            normalized_bars.append(
+                row.model_copy(
+                    update={
+                        "symbol": canonical_symbol,
+                        "open": normalize_price_to_yuan(row.open, source=source),
+                        "high": normalize_price_to_yuan(row.high, source=source),
+                        "low": normalize_price_to_yuan(row.low, source=source),
+                        "close": normalize_price_to_yuan(row.close, source=source),
+                        "volume": normalize_volume_to_shares(row.volume, source=source),
+                        "amount": normalize_amount_to_yuan(row.amount, source=source),
+                        "adjustment_mode": normalize_adjustment_mode(
+                            row.adjustment_mode,
+                            source=source,
+                        ),
+                        "trading_status": normalize_trading_status(row.trading_status),
+                        "corporate_action_flags": normalize_corporate_action_flags(
+                            row.corporate_action_flags,
+                        ),
+                        "source": normalize_provider_name(source),
+                    }
+                )
+            )
+            continue
+
+        row_mapping = dict(row)
+        source = normalize_provider_name(str(row_mapping.get("source") or default_source))
+        trade_date = parse_provider_date(row_mapping.get("trade_date") or row_mapping.get("date"))
+        if trade_date is None:
+            continue
+        normalized_bars.append(
             DailyBar(
                 symbol=canonical_symbol,
-                trade_date=parse_provider_date(row.trade_date) or row.trade_date,
-                open=normalize_price_to_yuan(_to_optional_float(row.open), source=row_source),
-                high=normalize_price_to_yuan(_to_optional_float(row.high), source=row_source),
-                low=normalize_price_to_yuan(_to_optional_float(row.low), source=row_source),
-                close=normalize_price_to_yuan(_to_optional_float(row.close), source=row_source),
-                volume=normalize_volume_to_shares(
-                    _to_optional_float(row.volume),
-                    source=row_source,
-                ),
-                amount=normalize_amount_to_yuan(_to_optional_float(row.amount), source=row_source),
+                trade_date=trade_date,
+                open=normalize_price_to_yuan(_coerce_float(row_mapping.get("open")), source=source),
+                high=normalize_price_to_yuan(_coerce_float(row_mapping.get("high")), source=source),
+                low=normalize_price_to_yuan(_coerce_float(row_mapping.get("low")), source=source),
+                close=normalize_price_to_yuan(_coerce_float(row_mapping.get("close")), source=source),
+                volume=normalize_volume_to_shares(_coerce_float(row_mapping.get("volume")), source=source),
+                amount=normalize_amount_to_yuan(_coerce_float(row_mapping.get("amount")), source=source),
                 adjustment_mode=normalize_adjustment_mode(
-                    getattr(row, "adjustment_mode", None),
-                    source=row_source,
+                    row_mapping.get("adjustment_mode"),
+                    source=source,
                 ),
-                trading_status=normalize_trading_status(
-                    getattr(row, "trading_status", None),
-                ),
+                trading_status=normalize_trading_status(row_mapping.get("trading_status")),
                 corporate_action_flags=normalize_corporate_action_flags(
-                    getattr(row, "corporate_action_flags", None),
+                    row_mapping.get("corporate_action_flags"),
                 ),
-                source=row_source,
+                source=source,
             )
         )
-    return normalized_rows
+    return sorted(normalized_bars, key=lambda item: item.trade_date)
 
 
-def _to_optional_float(value: Any) -> float | None:
+def _coerce_float(value: Any) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        if isinstance(value, float) and math.isnan(value):
-            return None
-        return float(value)
+        parsed = float(value)
+        return None if math.isnan(parsed) else parsed
     text = str(value).strip().replace(",", "")
     if text == "":
         return None
     try:
-        return float(text)
+        parsed = float(text)
     except ValueError:
         return None
+    return None if math.isnan(parsed) else parsed
 
 
 def _infer_exchange(code: str) -> Exchange:
-    if code.startswith(("5", "6", "9")):
+    if code.startswith(("5", "6", "9")) or code.startswith("688"):
         return "SH"
-    if code.startswith(("0", "1", "2", "3")):
-        return "SZ"
-    raise InvalidSymbolError(
-        "Unable to infer exchange for symbol '{code}'. Please include .SH or .SZ.".format(
-            code=code,
-        ),
-    )
+    return "SZ"

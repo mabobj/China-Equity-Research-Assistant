@@ -1,4 +1,6 @@
-"""CNINFO provider，用于公告列表拉取。"""
+"""CNINFO provider for announcements and periodic report indexes."""
+
+from __future__ import annotations
 
 from datetime import date, datetime
 from functools import lru_cache
@@ -7,10 +9,22 @@ from typing import Any, Optional
 import httpx
 
 from app.schemas.market_data import DailyBar, StockProfile, UniverseItem
-from app.schemas.research_inputs import AnnouncementItem, FinancialSummary
+from app.schemas.research_inputs import (
+    AnnouncementItem,
+    FinancialReportIndexItem,
+    FinancialSummary,
+)
 from app.services.data_service.exceptions import ProviderError
-from app.services.data_service.normalize import convert_symbol_for_provider, parse_symbol
-from app.services.data_service.providers.base import ANNOUNCEMENT_CAPABILITY
+from app.services.data_service.normalize import (
+    convert_symbol_for_provider,
+    normalize_financial_report_period,
+    normalize_financial_report_type,
+    parse_symbol,
+)
+from app.services.data_service.providers.base import (
+    ANNOUNCEMENT_CAPABILITY,
+    FINANCIAL_REPORT_INDEX_CAPABILITY,
+)
 
 _CNINFO_BASE_URL = "https://www.cninfo.com.cn"
 _CNINFO_HEADERS = {
@@ -31,20 +45,18 @@ _CNINFO_HEADERS = {
 
 
 class CninfoProvider:
-    """基于 CNINFO 的公告 provider。"""
+    """Provider backed by the official CNINFO disclosure index."""
 
     name = "cninfo"
-    capabilities = (ANNOUNCEMENT_CAPABILITY,)
+    capabilities = (ANNOUNCEMENT_CAPABILITY, FINANCIAL_REPORT_INDEX_CAPABILITY)
 
     def is_available(self) -> bool:
-        """CNINFO provider 不依赖额外三方包，默认可用。"""
         return True
 
     def get_unavailable_reason(self) -> Optional[str]:
         return None
 
     def get_stock_profile(self, symbol: str) -> Optional[StockProfile]:
-        """当前 provider 不负责股票基础信息。"""
         return None
 
     def get_daily_bars(
@@ -53,11 +65,9 @@ class CninfoProvider:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> list[DailyBar]:
-        """当前 provider 不负责日线行情。"""
         return []
 
     def get_stock_universe(self) -> list[UniverseItem]:
-        """当前 provider 不负责基础股票池。"""
         return []
 
     def get_stock_announcements(
@@ -67,14 +77,74 @@ class CninfoProvider:
         end_date: date,
         limit: int = 20,
     ) -> list[AnnouncementItem]:
-        """获取单只股票公告列表。"""
         parts = parse_symbol(symbol)
         stock_code = convert_symbol_for_provider(symbol, "cninfo")
         org_id = self._get_org_id(stock_code)
+        rows = self._query_announcements(
+            stock_code=stock_code,
+            org_id=org_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            category="",
+            searchkey="",
+        )
+
+        items: list[AnnouncementItem] = []
+        for raw_item in rows:
+            mapped = self._map_announcement_item(parts.canonical, stock_code, raw_item)
+            if mapped is not None:
+                items.append(mapped)
+        return items[: max(limit, 1)]
+
+    def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
+        return None
+
+    def get_financial_report_indexes(
+        self,
+        symbol: str,
+        limit: int = 20,
+    ) -> list[FinancialReportIndexItem]:
+        parts = parse_symbol(symbol)
+        stock_code = convert_symbol_for_provider(symbol, "cninfo")
+        org_id = self._get_org_id(stock_code)
+        end_date = date.today()
+        start_date = date(end_date.year - 3, 1, 1)
+        rows = self._query_announcements(
+            stock_code=stock_code,
+            org_id=org_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            category="category_ndbg_szsh;",
+            searchkey="年度报告 半年度报告 第一季度报告 第三季度报告",
+        )
+
+        items: list[FinancialReportIndexItem] = []
+        for raw_item in rows:
+            mapped = self._map_financial_report_index_item(
+                parts.canonical,
+                stock_code,
+                raw_item,
+            )
+            if mapped is not None:
+                items.append(mapped)
+        return items[: max(limit, 1)]
+
+    def _query_announcements(
+        self,
+        *,
+        stock_code: str,
+        org_id: str,
+        start_date: date,
+        end_date: date,
+        limit: int,
+        category: str,
+        searchkey: str,
+    ) -> list[dict[str, Any]]:
         page_size = min(max(limit, 1), 30)
         max_items = max(limit, 1)
-        items: list[AnnouncementItem] = []
-
+        items: list[dict[str, Any]] = []
         try:
             with httpx.Client(
                 headers=_CNINFO_HEADERS,
@@ -89,26 +159,18 @@ class CninfoProvider:
                         "column": "szse",
                         "tabName": "fulltext",
                         "plate": "",
-                        "stock": "{code},{org_id}".format(
-                            code=stock_code,
-                            org_id=org_id,
-                        ),
-                        "searchkey": "",
+                        "stock": f"{stock_code},{org_id}",
+                        "searchkey": searchkey,
                         "secid": "",
-                        "category": "",
+                        "category": category,
                         "trade": "",
-                        "seDate": "{start}~{end}".format(
-                            start=start_date.isoformat(),
-                            end=end_date.isoformat(),
-                        ),
+                        "seDate": f"{start_date.isoformat()}~{end_date.isoformat()}",
                         "sortName": "",
                         "sortType": "",
                         "isHLtitle": "true",
                     }
                     response = client.post(
-                        "{base}/new/hisAnnouncement/query".format(
-                            base=_CNINFO_BASE_URL,
-                        ),
+                        f"{_CNINFO_BASE_URL}/new/hisAnnouncement/query",
                         data=payload,
                     )
                     response.raise_for_status()
@@ -116,43 +178,24 @@ class CninfoProvider:
                     page_items = data.get("announcements", [])
                     if not isinstance(page_items, list) or not page_items:
                         break
-
-                    for raw_item in page_items:
-                        mapped_item = self._map_announcement_item(
-                            parts.canonical,
-                            stock_code,
-                            raw_item,
-                        )
-                        if mapped_item is not None:
-                            items.append(mapped_item)
-                        if len(items) >= max_items:
-                            break
-
+                    items.extend(page_items)
                     if len(page_items) < page_size:
                         break
                     page_num += 1
-        except httpx.HTTPError as exc:  # pragma: no cover - 依赖外部网络
-            raise ProviderError("CNINFO failed to load announcements.") from exc
-        except ValueError as exc:  # pragma: no cover - 依赖外部响应
-            raise ProviderError("CNINFO returned an invalid announcements payload.") from exc
-        except Exception as exc:  # pragma: no cover - 兜底保护
-            raise ProviderError("CNINFO failed to parse announcements payload.") from exc
-
+        except httpx.HTTPError as exc:  # pragma: no cover - network
+            raise ProviderError("CNINFO failed to load disclosure indexes.") from exc
+        except ValueError as exc:  # pragma: no cover - payload
+            raise ProviderError("CNINFO returned an invalid disclosure payload.") from exc
+        except Exception as exc:  # pragma: no cover - guard
+            raise ProviderError("CNINFO failed to parse disclosure payload.") from exc
         return items[:max_items]
 
-    def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
-        """当前 provider 不负责财务摘要。"""
-        return None
-
     def _get_org_id(self, stock_code: str) -> str:
-        """获取股票对应的 CNINFO 机构编号。"""
         org_map = _get_cninfo_org_id_map()
         org_id = org_map.get(stock_code)
         if org_id is None:
             raise ProviderError(
-                "CNINFO could not resolve orgId for symbol {symbol}.".format(
-                    symbol=stock_code,
-                ),
+                f"CNINFO could not resolve orgId for symbol {stock_code}."
             )
         return org_id
 
@@ -161,32 +204,23 @@ class CninfoProvider:
         symbol: str,
         stock_code: str,
         raw_item: dict[str, Any],
-    ) -> Optional[AnnouncementItem]:
-        """将 CNINFO 原始公告记录映射为统一结构。"""
+    ) -> AnnouncementItem | None:
         title = _as_optional_string(raw_item.get("announcementTitle"))
         publish_date = _parse_cninfo_publish_date(raw_item.get("announcementTime"))
         announcement_id = _as_optional_string(raw_item.get("announcementId"))
         org_id = _as_optional_string(raw_item.get("orgId"))
-
         if title is None or publish_date is None or announcement_id is None or org_id is None:
             return None
-
         announcement_type = (
             _as_optional_string(raw_item.get("announcementTypeName"))
             or _as_optional_string(raw_item.get("announcementType"))
             or _as_optional_string(raw_item.get("adjunctType"))
-            or "未分类"
+            or "other"
         )
         url = (
-            "{base}/new/disclosure/detail?stockCode={stock_code}"
-            "&announcementId={announcement_id}&orgId={org_id}"
-            "&announcementTime={announcement_time}"
-        ).format(
-            base=_CNINFO_BASE_URL,
-            stock_code=stock_code,
-            announcement_id=announcement_id,
-            org_id=org_id,
-            announcement_time=publish_date.isoformat(),
+            f"{_CNINFO_BASE_URL}/new/disclosure/detail?stockCode={stock_code}"
+            f"&announcementId={announcement_id}&orgId={org_id}"
+            f"&announcementTime={publish_date.isoformat()}"
         )
         return AnnouncementItem(
             symbol=symbol,
@@ -197,22 +231,52 @@ class CninfoProvider:
             url=url,
         )
 
+    def _map_financial_report_index_item(
+        self,
+        symbol: str,
+        stock_code: str,
+        raw_item: dict[str, Any],
+    ) -> FinancialReportIndexItem | None:
+        title = _as_optional_string(raw_item.get("announcementTitle"))
+        publish_date = _parse_cninfo_publish_date(raw_item.get("announcementTime"))
+        announcement_id = _as_optional_string(raw_item.get("announcementId"))
+        org_id = _as_optional_string(raw_item.get("orgId"))
+        if title is None or publish_date is None or announcement_id is None or org_id is None:
+            return None
+        report_period = normalize_financial_report_period(title)
+        report_type = normalize_financial_report_type(title, report_period=report_period)
+        if report_type == "unknown":
+            return None
+        url = (
+            f"{_CNINFO_BASE_URL}/new/disclosure/detail?stockCode={stock_code}"
+            f"&announcementId={announcement_id}&orgId={org_id}"
+            f"&announcementTime={publish_date.isoformat()}"
+        )
+        return FinancialReportIndexItem(
+            symbol=symbol,
+            report_period=report_period,
+            report_type=report_type,
+            title=title,
+            publish_date=publish_date,
+            source=self.name,
+            url=url,
+        )
+
 
 @lru_cache
 def _get_cninfo_org_id_map() -> dict[str, str]:
-    """缓存股票代码到 CNINFO orgId 的映射。"""
     try:
         with httpx.Client(
             headers=_CNINFO_HEADERS,
             follow_redirects=True,
             timeout=15.0,
         ) as client:
-            response = client.get("{base}/new/data/szse_stock.json".format(base=_CNINFO_BASE_URL))
+            response = client.get(f"{_CNINFO_BASE_URL}/new/data/szse_stock.json")
             response.raise_for_status()
             data = response.json()
-    except httpx.HTTPError as exc:  # pragma: no cover - 依赖外部网络
+    except httpx.HTTPError as exc:  # pragma: no cover - network
         raise ProviderError("CNINFO failed to load stock metadata.") from exc
-    except ValueError as exc:  # pragma: no cover - 依赖外部响应
+    except ValueError as exc:  # pragma: no cover - payload
         raise ProviderError("CNINFO returned an invalid stock metadata payload.") from exc
 
     stock_list = data.get("stockList", [])
@@ -227,14 +291,12 @@ def _get_cninfo_org_id_map() -> dict[str, str]:
 
 
 def _parse_cninfo_publish_date(value: Any) -> Optional[date]:
-    """解析 CNINFO 公告时间字段。"""
     if value is None:
         return None
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
         return value
-
     try:
         timestamp = int(value)
     except (TypeError, ValueError):
@@ -247,15 +309,12 @@ def _parse_cninfo_publish_date(value: Any) -> Optional[date]:
             except ValueError:
                 continue
         return None
-
     return datetime.fromtimestamp(timestamp / 1000).date()
 
 
 def _as_optional_string(value: Any) -> Optional[str]:
-    """将 provider 字段转换为清洗后的字符串。"""
     if value is None:
         return None
-
     text = str(value).strip()
     if text == "":
         return None

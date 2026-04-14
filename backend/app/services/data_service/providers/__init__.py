@@ -5,6 +5,7 @@ from app.services.data_service.providers.baostock_provider import BaostockProvid
 from app.services.data_service.providers.cninfo_provider import CninfoProvider
 from app.services.data_service.providers.mootdx_provider import MootdxProvider
 from app.services.data_service.providers.tdx_api_provider import TdxApiProvider
+from app.services.data_service.providers.tushare_provider import TushareProvider
 
 __all__ = [
     "AkshareProvider",
@@ -12,4 +13,5 @@ __all__ = [
     "CninfoProvider",
     "MootdxProvider",
     "TdxApiProvider",
+    "TushareProvider",
 ]

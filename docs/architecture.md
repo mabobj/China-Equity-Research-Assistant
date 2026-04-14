@@ -344,3 +344,42 @@
 - 首屏读取链路减负；
 - 结构化日志与诊断增强；
 - 后续再在稳定前提下做受控提速。
+
+## 10. 财务数据源分层与真相源架构位
+
+围绕 `financial_summary`，当前架构已经正式收口为四层：
+
+1. 官方披露原文索引层  
+   使用 `CNINFO` 定期报告索引作为真相源接口位，只保存：
+   - `symbol`
+   - `report_period`
+   - `report_type`
+   - `title`
+   - `publish_date`
+   - `url`
+   - `source`
+
+2. 本地结构化财务快照层  
+   统一清洗后的 `FinancialSummary` 落袋到本地 `financial_reports`，作为主链优先读取对象。
+
+3. 结构化主源 / 回退层  
+   当前优先级为：
+   - `tushare`（启用时）
+   - `baostock`
+   - `akshare`
+
+4. 下游消费层  
+   `market_data_service.get_stock_financial_summary()` 对外只输出统一后的 `FinancialSummary`，不暴露 provider 原始字段。
+
+本轮明确不做：
+- PDF 全量解析；
+- XBRL 批量入库；
+- 财报正文 NLP；
+- 基于财务源重构 research / strategy / screener 逻辑。
+
+这一步的目的不是把财务链做成“大而全”的财报系统，而是先建立：
+- 真相源接口位；
+- 统一字段口径；
+- 统一质量判断；
+- 可解释 fallback；
+- 本地结构化落袋。

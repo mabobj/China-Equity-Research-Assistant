@@ -12,7 +12,11 @@ from urllib.parse import parse_qs, urlparse
 import duckdb
 
 from app.schemas.market_data import DailyBar, StockProfile, UniverseItem
-from app.schemas.research_inputs import AnnouncementItem, FinancialSummary
+from app.schemas.research_inputs import (
+    AnnouncementItem,
+    FinancialReportIndexItem,
+    FinancialSummary,
+)
 
 DATASET_DAILY_BARS = "daily_bars"
 DATASET_ANNOUNCEMENTS = "announcements"
@@ -553,6 +557,76 @@ class LocalMarketDataStore:
             ],
         )
 
+    def get_financial_report_indexes(
+        self,
+        symbol: str,
+        *,
+        limit: int = 20,
+    ) -> list[FinancialReportIndexItem]:
+        rows = self._fetchall(
+            """
+            SELECT
+                symbol,
+                report_period,
+                report_type,
+                title,
+                publish_date,
+                source,
+                url
+            FROM financial_report_indexes
+            WHERE symbol = ?
+            ORDER BY publish_date DESC, report_period DESC, title
+            LIMIT ?
+            """,
+            [symbol, limit],
+        )
+        return [
+            FinancialReportIndexItem(
+                symbol=row["symbol"],
+                report_period=row["report_period"],
+                report_type=row["report_type"],
+                title=row["title"],
+                publish_date=row["publish_date"],
+                source=row["source"],
+                url=row["url"],
+            )
+            for row in rows
+        ]
+
+    def replace_financial_report_indexes(
+        self,
+        symbol: str,
+        items: list[FinancialReportIndexItem],
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM financial_report_indexes WHERE symbol = ?",
+                [symbol],
+            )
+            if not items:
+                return
+            connection.executemany(
+                """
+                INSERT INTO financial_report_indexes (
+                    symbol, report_period, report_type, title, publish_date,
+                    source, url, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    [
+                        item.symbol,
+                        item.report_period,
+                        item.report_type,
+                        item.title,
+                        item.publish_date,
+                        item.source,
+                        item.url,
+                        datetime.now(timezone.utc),
+                    ]
+                    for item in items
+                ],
+            )
+
     def is_range_covered(
         self,
         dataset_type: str,
@@ -863,6 +937,20 @@ class LocalMarketDataStore:
                 """
             )
             self._ensure_financial_report_columns(connection)
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS financial_report_indexes (
+                    symbol TEXT NOT NULL,
+                    report_period DATE,
+                    report_type TEXT,
+                    title TEXT NOT NULL,
+                    publish_date DATE NOT NULL,
+                    source TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+                """
+            )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS range_sync_state (

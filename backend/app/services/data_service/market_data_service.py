@@ -33,6 +33,8 @@ from app.schemas.provider import (
 from app.schemas.research_inputs import (
     AnnouncementItem,
     AnnouncementListResponse,
+    FinancialReportIndexItem,
+    FinancialReportIndexResponse,
     FinancialSummary,
 )
 from app.services.common.text_normalization import normalize_display_text
@@ -47,6 +49,15 @@ from app.services.data_service.exceptions import (
     InvalidRequestError,
     ProviderError,
 )
+from app.services.data_service.financial_mapping import (
+    map_akshare_financial_payload,
+    map_baostock_financial_payload,
+    map_tushare_financial_payload,
+)
+from app.services.data_service.financial_quality import (
+    compare_financial_summary_consistency,
+    evaluate_financial_summary_quality,
+)
 from app.services.data_service.normalize import normalize_daily_bar_rows
 from app.services.data_service.normalize import normalize_symbol
 from app.services.data_service.provider_policy import (
@@ -58,6 +69,7 @@ from app.services.data_service.provider_registry import ProviderRegistry
 from app.services.data_service.providers.base import (
     ANNOUNCEMENT_CAPABILITY,
     DAILY_BAR_CAPABILITY,
+    FINANCIAL_REPORT_INDEX_CAPABILITY,
     FINANCIAL_SUMMARY_CAPABILITY,
     INTRADAY_BAR_CAPABILITY,
     PROFILE_CAPABILITY,
@@ -704,6 +716,7 @@ class MarketDataService:
         allow_remote_sync: bool,
     ) -> FinancialSummary:
         canonical_symbol = normalize_symbol(symbol)
+        as_of_date = resolve_daily_analysis_as_of_date()
         logger.debug(
             "market_data.financial_summary.start symbol=%s canonical_symbol=%s",
             symbol,
@@ -720,7 +733,7 @@ class MarketDataService:
                     source_mode=cached_summary.source_mode or "local",
                     freshness_mode=cached_summary.freshness_mode or "cache_preferred",
                     provider_used=cached_summary.provider_used or cached_summary.source,
-                as_of_date=cached_summary.as_of_date or resolve_daily_analysis_as_of_date(),
+                    as_of_date=cached_summary.as_of_date or as_of_date,
                 )
                 logger.debug(
                     "market_data.financial_summary.cache_hit symbol=%s source=%s",
@@ -764,18 +777,18 @@ class MarketDataService:
                 fallback_reason=None,
                 source_mode="local_only",
                 freshness_mode="cache_miss_remote_sync_disabled",
-                as_of_date=resolve_daily_analysis_as_of_date(),
+                as_of_date=as_of_date,
             )
 
         fetched = self._load_stock_financial_summary_from_providers(canonical_symbol)
         cleaned = clean_financial_summary(
             symbol=canonical_symbol,
-            rows=[fetched.summary],
-                as_of_date=resolve_daily_analysis_as_of_date(),
-            default_source=fetched.provider_name,
-            provider_used=fetched.provider_name,
-            fallback_applied=False,
-            fallback_reason=None,
+            rows=[fetched.summary_row],
+            as_of_date=as_of_date,
+            default_source=fetched.provider_used,
+            provider_used=fetched.provider_used,
+            fallback_applied=fetched.fallback_applied,
+            fallback_reason=fetched.fallback_reason,
             source_mode="provider_only",
             freshness_mode="force_refreshed" if force_refresh else "provider_fetch",
         )
@@ -790,8 +803,14 @@ class MarketDataService:
             cleaning_summary=cleaned.cleaning_summary,
             source_mode="provider_only",
             freshness_mode="force_refreshed" if force_refresh else "provider_fetch",
-            provider_used=fetched.provider_name,
+            provider_used=fetched.provider_used,
             as_of_date=cleaned.summary.as_of_date,
+        )
+        summary = summary.model_copy(
+            update={
+                "fallback_applied": fetched.fallback_applied,
+                "fallback_reason": fetched.fallback_reason,
+            }
         )
         if self._local_store is not None:
             self._local_store.upsert_stock_financial_summary(summary)
@@ -813,6 +832,44 @@ class MarketDataService:
             symbol,
             force_refresh=force_refresh,
             allow_remote_sync=allow_remote_sync,
+        )
+
+    def get_financial_report_indexes(
+        self,
+        symbol: str,
+        *,
+        limit: int = 20,
+        force_refresh: bool = False,
+    ) -> FinancialReportIndexResponse:
+        canonical_symbol = normalize_symbol(symbol)
+        if limit <= 0:
+            raise InvalidRequestError("limit must be greater than 0.")
+
+        if not force_refresh and self._local_store is not None:
+            cached_items = self._local_store.get_financial_report_indexes(
+                canonical_symbol,
+                limit=limit,
+            )
+            if cached_items:
+                return FinancialReportIndexResponse(
+                    symbol=canonical_symbol,
+                    count=len(cached_items),
+                    items=cached_items,
+                )
+
+        items = self._load_financial_report_indexes_from_providers(
+            canonical_symbol,
+            limit=limit,
+        )
+        if self._local_store is not None and items:
+            self._local_store.replace_financial_report_indexes(
+                canonical_symbol,
+                items,
+            )
+        return FinancialReportIndexResponse(
+            symbol=canonical_symbol,
+            count=len(items),
+            items=items,
         )
 
     def refresh_stock_profile(self, symbol: str) -> StockProfile:
@@ -922,7 +979,11 @@ class MarketDataService:
         return len(items)
 
     def refresh_stock_financial_summary(self, symbol: str) -> FinancialSummary:
-        return self._get_stock_financial_summary(symbol, force_refresh=True)
+        return self._get_stock_financial_summary(
+            symbol,
+            force_refresh=True,
+            allow_remote_sync=True,
+        )
 
     def get_provider_capability_reports(self) -> list[ProviderCapabilityReport]:
         return self._provider_registry.get_capability_reports()
@@ -1407,10 +1468,24 @@ class MarketDataService:
         providers = self._iter_available_providers(FINANCIAL_SUMMARY_CAPABILITY)
         last_error = None
         provider_errors: list[str] = []
+        selected_summary: dict[str, object] | None = None
+        selected_provider_name: str | None = None
+        consistency_warnings: list[str] = []
+        attempted_provider_names: list[str] = []
 
         for provider in providers:
+            attempted_provider_names.append(provider.name)
             try:
-                summary = provider.get_stock_financial_summary(symbol)
+                raw_method = getattr(provider, "get_stock_financial_summary_raw", None)
+                if callable(raw_method):
+                    raw_payload = raw_method(symbol)
+                    summary = _map_financial_payload_for_provider(
+                        provider_name=provider.name,
+                        symbol=symbol,
+                        payload=raw_payload,
+                    )
+                else:
+                    summary = provider.get_stock_financial_summary(symbol)
             except ProviderError as exc:
                 last_error = exc
                 provider_errors.append("{provider}: {message}".format(provider=provider.name, message=str(exc)))
@@ -1428,10 +1503,54 @@ class MarketDataService:
                 )
                 continue
             if summary is not None:
-                return _FinancialSummaryFetchResult(
-                    summary=summary,
-                    provider_name=provider.name,
+                summary_payload = (
+                    summary.model_dump()
+                    if isinstance(summary, FinancialSummary)
+                    else dict(summary)
                 )
+                quality_status, missing_fields, warning_messages = (
+                    evaluate_financial_summary_quality(summary_payload)
+                )
+                summary_payload["quality_status"] = quality_status
+                summary_payload["missing_fields"] = missing_fields
+                summary_payload["cleaning_warnings"] = warning_messages
+                summary_payload["provider_used"] = provider.name
+                if selected_summary is None:
+                    selected_summary = summary_payload
+                    selected_provider_name = provider.name
+                    continue
+                consistency_warnings.extend(
+                    compare_financial_summary_consistency(selected_summary, summary_payload),
+                )
+                break
+
+        if selected_summary is not None and selected_provider_name is not None:
+            warning_messages = list(
+                dict.fromkeys(
+                    [
+                        *list(selected_summary.get("cleaning_warnings", [])),
+                        *consistency_warnings,
+                    ]
+                )
+            )
+            selected_summary["cleaning_warnings"] = warning_messages
+            if warning_messages and selected_summary.get("quality_status") == "ok":
+                selected_summary["quality_status"] = "warning"
+            return _FinancialSummaryFetchResult(
+                summary_row=selected_summary,
+                provider_name=selected_provider_name,
+                provider_used=selected_provider_name,
+                fallback_applied=selected_provider_name != attempted_provider_names[0],
+                fallback_reason=(
+                    " -> ".join(provider_errors)
+                    if provider_errors
+                    else (
+                        "primary_provider_empty_result"
+                        if selected_provider_name != attempted_provider_names[0]
+                        else None
+                    )
+                ),
+            )
 
         if last_error is not None:
             raise ProviderError(
@@ -1443,6 +1562,47 @@ class MarketDataService:
         raise DataNotFoundError(
             "No financial summary found for symbol {symbol}.".format(symbol=symbol),
         )
+
+    def _load_financial_report_indexes_from_providers(
+        self,
+        symbol: str,
+        *,
+        limit: int,
+    ) -> list[FinancialReportIndexItem]:
+        providers = self._iter_available_providers(FINANCIAL_REPORT_INDEX_CAPABILITY)
+        last_error = None
+        provider_errors: list[str] = []
+
+        for provider in providers:
+            try:
+                items = provider.get_financial_report_indexes(symbol, limit=limit)
+            except ProviderError as exc:
+                last_error = exc
+                provider_errors.append("{provider}: {message}".format(provider=provider.name, message=str(exc)))
+                continue
+            except Exception as exc:  # pragma: no cover
+                last_error = ProviderError(
+                    "{provider} failed to load financial report indexes.".format(provider=provider.name),
+                )
+                provider_errors.append(
+                    "{provider}: {error_type}: {message}".format(
+                        provider=provider.name,
+                        error_type=type(exc).__name__,
+                        message=str(exc),
+                    )
+                )
+                continue
+            if items:
+                return items[:limit]
+
+        if last_error is not None:
+            raise ProviderError(
+                "Failed to load financial report indexes for {symbol} from data providers. Details: {details}".format(
+                    symbol=symbol,
+                    details=" | ".join(provider_errors) if provider_errors else str(last_error),
+                ),
+            ) from last_error
+        return []
 
     def _iter_available_providers(
         self,
@@ -1647,8 +1807,38 @@ class _DailyBarsFetchResult:
 
 @dataclass(frozen=True)
 class _FinancialSummaryFetchResult:
-    summary: FinancialSummary
+    summary_row: dict[str, object]
     provider_name: str
+    provider_used: str
+    fallback_applied: bool
+    fallback_reason: str | None
+
+
+def _map_financial_payload_for_provider(
+    *,
+    provider_name: str,
+    symbol: str,
+    payload: object,
+) -> dict[str, object] | None:
+    if payload is None:
+        return None
+    if isinstance(payload, FinancialSummary):
+        return payload.model_dump()
+    if not isinstance(payload, dict):
+        raise ProviderError(
+            "Unsupported financial payload returned by provider '{provider}'.".format(
+                provider=provider_name,
+            )
+        )
+
+    if provider_name == "tushare":
+        return map_tushare_financial_payload(symbol, payload)
+    if provider_name == "baostock":
+        return map_baostock_financial_payload(symbol, payload)
+    if provider_name == "akshare":
+        return map_akshare_financial_payload(symbol, payload)
+
+    return dict(payload)
 
 
 def _normalize_financial_summary_response(
@@ -1663,15 +1853,12 @@ def _normalize_financial_summary_response(
     normalized_warnings = list(summary.cleaning_warnings)
     normalized_missing_fields = list(summary.missing_fields)
     normalized_coerced_fields = list(summary.coerced_fields)
-    quality_status: str | None = summary.quality_status
     report_type = summary.report_type
     normalized_name = normalize_display_text(summary.name) or summary.name
     if cleaning_summary is not None:
         normalized_warnings.extend(cleaning_summary.warning_messages)
         normalized_missing_fields.extend(cleaning_summary.missing_fields)
         normalized_coerced_fields.extend(cleaning_summary.coerced_fields)
-        if quality_status is None:
-            quality_status = cleaning_summary.quality_status
 
     if report_type is None and summary.report_period is not None:
         inferred_report_type = _infer_financial_report_type_from_period(summary.report_period)
@@ -1691,12 +1878,23 @@ def _normalize_financial_summary_response(
     deduped_coerced_fields = list(
         dict.fromkeys(item for item in normalized_coerced_fields if item),
     )
-
-    quality_status = _resolve_financial_quality_status(
-        summary=summary,
-        existing_status=quality_status,
-        missing_fields=deduped_missing_fields,
-        warning_messages=deduped_warnings,
+    quality_status, recomputed_missing_fields, quality_warnings = (
+        evaluate_financial_summary_quality(
+            {
+                **summary.model_dump(),
+                "report_type": report_type,
+            }
+        )
+    )
+    deduped_missing_fields = list(
+        dict.fromkeys(
+            [*deduped_missing_fields, *recomputed_missing_fields],
+        ),
+    )
+    deduped_warnings = list(
+        dict.fromkeys(
+            [*deduped_warnings, *quality_warnings],
+        ),
     )
 
     return summary.model_copy(
@@ -1745,76 +1943,6 @@ def _recompute_financial_missing_fields(summary: FinancialSummary) -> list[str]:
         if value is None:
             missing.append(field_name)
     return missing
-
-
-def _resolve_financial_quality_status(
-    *,
-    summary: FinancialSummary,
-    existing_status: str | None,
-    missing_fields: list[str],
-    warning_messages: list[str],
-) -> str:
-    key_missing_fields = {
-        "revenue",
-        "revenue_yoy",
-        "net_profit",
-        "net_profit_yoy",
-        "roe",
-    }
-    missing_set = set(missing_fields)
-    key_missing_count = len(key_missing_fields & missing_set)
-    total_missing_count = len(missing_set)
-    secondary_fields = ("gross_margin", "debt_ratio", "eps", "bps")
-    secondary_available_count = sum(
-        1 for field_name in secondary_fields if getattr(summary, field_name) is not None
-    )
-    has_any_value = any(
-        getattr(summary, field_name) is not None
-        for field_name in (
-            "revenue",
-            "revenue_yoy",
-            "net_profit",
-            "net_profit_yoy",
-            "roe",
-            "gross_margin",
-            "debt_ratio",
-            "eps",
-            "bps",
-        )
-    )
-    has_warning = bool(warning_messages)
-
-    inferred_status = "ok"
-    if not has_any_value:
-        inferred_status = "degraded"
-        if summary.report_period is None and summary.report_type in {None, "unknown"}:
-            inferred_status = "failed"
-    elif key_missing_count >= 5 or total_missing_count >= 6:
-        if secondary_available_count >= 3 and summary.report_period is not None:
-            inferred_status = "warning"
-            warning_messages.append("core_financial_fields_missing_use_secondary_metrics")
-        else:
-            inferred_status = "degraded"
-    elif key_missing_count > 0 or total_missing_count > 0 or has_warning:
-        inferred_status = "warning"
-
-    if existing_status is None:
-        return inferred_status
-    if existing_status == "failed":
-        return existing_status
-    if (
-        existing_status == "degraded"
-        and inferred_status == "warning"
-        and "core_financial_fields_missing_use_secondary_metrics" in warning_messages
-    ):
-        return "warning"
-    if inferred_status == "failed":
-        return "degraded"
-    if existing_status == "degraded" or inferred_status == "degraded":
-        return "degraded"
-    if existing_status == "warning" or inferred_status == "warning":
-        return "warning"
-    return "ok"
 
 
 def _parse_optional_date(value: Optional[str], field_name: str) -> Optional[date]:

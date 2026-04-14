@@ -1,4 +1,6 @@
-"""数据 provider capability 协议。"""
+"""Data provider capability protocols."""
+
+from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from datetime import date, datetime
@@ -11,13 +13,18 @@ from app.schemas.market_data import (
     TimelinePoint,
     UniverseItem,
 )
-from app.schemas.research_inputs import AnnouncementItem, FinancialSummary
+from app.schemas.research_inputs import (
+    AnnouncementItem,
+    FinancialReportIndexItem,
+    FinancialSummary,
+)
 
 PROFILE_CAPABILITY = "profile"
 DAILY_BAR_CAPABILITY = "daily_bars"
 UNIVERSE_CAPABILITY = "universe"
 ANNOUNCEMENT_CAPABILITY = "announcements"
 FINANCIAL_SUMMARY_CAPABILITY = "financial_summary"
+FINANCIAL_REPORT_INDEX_CAPABILITY = "financial_reports_index"
 INTRADAY_BAR_CAPABILITY = "intraday_bars"
 TIMELINE_CAPABILITY = "timeline"
 
@@ -26,38 +33,34 @@ MarketDataCapability = str
 
 @runtime_checkable
 class ProviderBase(Protocol):
-    """所有 provider 共享的最小协议。"""
+    """Shared minimum provider protocol."""
 
     name: str
     capabilities: tuple[MarketDataCapability, ...]
 
     def is_available(self) -> bool:
-        """返回当前 provider 是否可用。"""
+        """Return whether provider is currently available."""
 
     def get_unavailable_reason(self) -> Optional[str]:
-        """返回 provider 不可用时的原因。"""
+        """Return a stable unavailable reason when not available."""
 
 
 @runtime_checkable
 class SessionScopedProvider(Protocol):
-    """支持批量会话复用的 provider 协议。"""
+    """Provider protocol for reusable batch sessions."""
 
     def session_scope(self) -> AbstractContextManager[None]:
-        """返回 provider 会话上下文。"""
+        """Return a provider-scoped session context."""
 
 
 @runtime_checkable
 class ProfileProvider(ProviderBase, Protocol):
-    """基础信息 provider。"""
-
     def get_stock_profile(self, symbol: str) -> Optional[StockProfile]:
-        """获取单只股票基础信息。"""
+        """Load a stock profile."""
 
 
 @runtime_checkable
 class DailyBarProvider(ProviderBase, Protocol):
-    """日线行情 provider。"""
-
     def get_daily_bars(
         self,
         symbol: str,
@@ -65,21 +68,17 @@ class DailyBarProvider(ProviderBase, Protocol):
         end_date: Optional[date] = None,
         adjustment_mode: str = "raw",
     ) -> list[DailyBar]:
-        """获取单只股票日线。"""
+        """Load daily bars."""
 
 
 @runtime_checkable
 class UniverseProvider(ProviderBase, Protocol):
-    """股票池 provider。"""
-
     def get_stock_universe(self) -> list[UniverseItem]:
-        """获取基础股票池。"""
+        """Load the stock universe."""
 
 
 @runtime_checkable
 class AnnouncementProvider(ProviderBase, Protocol):
-    """公告列表 provider。"""
-
     def get_stock_announcements(
         self,
         symbol: str,
@@ -87,21 +86,27 @@ class AnnouncementProvider(ProviderBase, Protocol):
         end_date: date,
         limit: int = 20,
     ) -> list[AnnouncementItem]:
-        """获取公告列表。"""
+        """Load stock announcements."""
 
 
 @runtime_checkable
 class FinancialSummaryProvider(ProviderBase, Protocol):
-    """财务摘要 provider。"""
-
     def get_stock_financial_summary(self, symbol: str) -> Optional[FinancialSummary]:
-        """获取基础财务摘要。"""
+        """Load a structured financial summary."""
+
+
+@runtime_checkable
+class FinancialReportIndexProvider(ProviderBase, Protocol):
+    def get_financial_report_indexes(
+        self,
+        symbol: str,
+        limit: int = 20,
+    ) -> list[FinancialReportIndexItem]:
+        """Load periodic report index items."""
 
 
 @runtime_checkable
 class IntradayBarProvider(ProviderBase, Protocol):
-    """分钟线 provider。"""
-
     def get_intraday_bars(
         self,
         symbol: str,
@@ -110,19 +115,17 @@ class IntradayBarProvider(ProviderBase, Protocol):
         end_datetime: Optional[datetime] = None,
         limit: Optional[int] = None,
     ) -> list[IntradayBar]:
-        """获取单只股票分钟线。"""
+        """Load intraday bars."""
 
 
 @runtime_checkable
 class TimelineProvider(ProviderBase, Protocol):
-    """分时线 provider。"""
-
     def get_timeline(
         self,
         symbol: str,
         limit: Optional[int] = None,
     ) -> list[TimelinePoint]:
-        """获取单只股票分时线。"""
+        """Load intraday timeline points."""
 
 
 class MarketDataProvider(
@@ -133,11 +136,12 @@ class MarketDataProvider(
     FinancialSummaryProvider,
     Protocol,
 ):
-    """兼容旧版 MarketDataService 的大协议。"""
+    """Backward-compatible composite provider protocol."""
 
 
 def infer_provider_capabilities(provider: object) -> tuple[MarketDataCapability, ...]:
-    """从 provider 对象推断其已实现的 capability。"""
+    """Infer provider capabilities from an implementation object."""
+
     explicit_capabilities = getattr(provider, "capabilities", None)
     if explicit_capabilities:
         return tuple(str(item) for item in explicit_capabilities)
@@ -153,6 +157,8 @@ def infer_provider_capabilities(provider: object) -> tuple[MarketDataCapability,
         inferred.append(ANNOUNCEMENT_CAPABILITY)
     if hasattr(provider, "get_stock_financial_summary"):
         inferred.append(FINANCIAL_SUMMARY_CAPABILITY)
+    if hasattr(provider, "get_financial_report_indexes"):
+        inferred.append(FINANCIAL_REPORT_INDEX_CAPABILITY)
     if hasattr(provider, "get_intraday_bars"):
         inferred.append(INTRADAY_BAR_CAPABILITY)
     if hasattr(provider, "get_timeline"):

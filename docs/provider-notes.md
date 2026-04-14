@@ -1,242 +1,154 @@
-# Provider 使用说明与长期约束
+# Provider 使用说明
 
-本文不是单纯的 provider 列表，而是回答三个问题：
+本文档回答三件事：
 
-1. 当前项目的数据源优先级是什么
-2. 为什么这样排
-3. 从长期因子主线看，数据底座还缺什么
+1. 当前项目各数据域的 provider 优先级是什么
+2. 每个 provider 在架构中的职责是什么
+3. 从长期因子主线看，哪些 provider 只是补充，哪些 provider 承担真相源或主链角色
 
 ## 1. 当前 provider 优先级
 
-当前项目默认优先级已经收敛为：
+### daily_bars
 
-- `tdx-api > mootdx > AKShare > BaoStock`
+- `tdx_api -> mootdx -> akshare -> baostock`
 
-补充规则：
+说明：
 
-- 公告正式披露以 `CNINFO` 为准
-- `mootdx` 只在新鲜度与完整性检查通过时作为本地高速历史源使用
-- `AKShare` 主要承担补充型、结构化研究型数据
-- `BaoStock` 主要承担稳定兜底
+- `tdx_api` 是当前日线主链。
+- `mootdx` 是本地高速历史源，但必须通过新鲜度和尾段完整性检查。
+- `akshare` 与 `baostock` 只承担后续 fallback。
 
-## 2. 各 provider 当前定位
+### universe
 
-### 2.1 tdx-api
+- `tdx_api -> akshare -> baostock`
+
+### profile
+
+- `tdx_api -> akshare -> baostock -> cninfo`
+
+### announcements
+
+- `cninfo -> akshare`
+
+### financial_summary
+
+- `local_financial_store -> tushare -> baostock -> akshare`
+
+说明：
+
+- `local_financial_store` 是本地结构化财务快照优先层。
+- `tushare` 是可选启用的结构化主源。
+- `baostock` 是免费结构化 fallback。
+- `akshare` 已降级为最后级补充源，不再作为默认财务主源。
+
+### financial_reports_index
+
+- `cninfo`
+
+说明：
+
+- 该能力用于“官方披露原文索引”。
+- 当前只保存报告索引、报告期、报告类型、发布时间和下载链接。
+- 本轮不做 PDF/XBRL 正文解析。
+
+## 2. 各 provider 的职责
+
+### tdx_api
 
 定位：
 
-- 本地主数据源
-- 优先承担股票池、搜索、日线、行情等稳定链路
+- 本地 HTTP 主数据源
+- 负责股票池、搜索、日线、部分行情主链
 
-当前建议优先覆盖：
-
-- 股票池 / 股票代码表
-- 日线 / K 线
-- quote
-- 能稳定映射时再接 profile
-
-### 2.2 mootdx
+### mootdx
 
 定位：
 
 - 本地高速历史源
-- 适合批量历史读取、离线研究、回测输入
+- 适合离线、批量、历史回看场景
 
-使用前提：
+约束：
 
-- 最后一根 bar 日期满足 freshness
-- 最近请求区间尾段完整
-- 字段和单位通过标准化验证
+- 不能绕过 freshness / validity 检查直接当作永远可信主源
 
-### 2.3 AKShare
+### tushare
+
+定位：
+
+- 可选启用的结构化财务主源
+- 主要服务财务摘要统一口径
+
+约束：
+
+- 需要显式配置 `TUSHARE_ENABLED=true`
+- 需要 `TUSHARE_TOKEN`
+- 不可用时不能阻塞整条财务链
+
+### baostock
+
+定位：
+
+- 免费结构化 fallback
+- 承担历史补洞和稳定兜底
+
+### akshare
 
 定位：
 
 - 结构化补充源
-- 研究型与补全型数据源
+- 继续服务部分研究型或补洞型场景
 
-使用原则：
+约束：
 
-- 不适合高频核心链路
-- 需要本地落盘、频率控制、错误预算和 fallback
+- 不再承担默认财务主源角色
+- 财务数据必须先过统一 mapping / normalize / quality
 
-### 2.4 BaoStock
-
-定位：
-
-- 稳定兜底源
-- 用于行情与基础资料 fallback
-
-使用原则：
-
-- 不承担项目长期主数据源角色
-- 但保留作为稳定 fallback 的工程价值
-
-### 2.5 CNINFO
+### cninfo
 
 定位：
 
-- 正式披露真相源
+- 正式披露信息真相源
+- 当前承担公告索引与财务定期报告索引能力
 
-使用范围：
+约束：
 
-- 公告索引
-- 定期报告与临时公告官方来源
+- 本轮只做索引层，不做正文解析层
 
-## 3. 当前已完成的收口
+## 3. 当前制度化规则
 
-目前 provider 体系已经完成的关键收口包括：
+当前代码中已经集中收口的规则包括：
 
 - symbol normalize 与 provider symbol convert 集中管理
-- 日线单位标准化统一到“元 / 股”
-- `tdx-api` 已进入优先级主链路
-- `mootdx` 已纳入本地历史源路径
-- `provider_used / fallback_applied / fallback_reason` 已能向上游暴露
-- provider 能力矩阵与健康度策略已集中到独立策略层：
-  - capability 级优先顺序不再散落在 `market_data_service`
-  - 已明确哪些数据域允许 stale fallback
-  - 已明确哪些数据域要求本地持久化
-  - provider 报告已能区分“主用数据域 / fallback 数据域 / 需本地落盘数据域”
+- 单位标准化集中管理
+- capability 级 provider 优先级集中到 policy 层
+- `provider_used / fallback_applied / fallback_reason` 统一暴露
+- 允许 stale fallback 的数据域和要求本地持久化的数据域，已经进入 capability policy
 
-## 4. 从长期方向看，数据底座仍需补齐的有限问题
+## 4. 财务链的特别说明
 
-这里强调的是“有限问题”，不是无休止优化。
+财务数据本轮明确分成三层：
 
-### 4.1 数据域仍然偏窄
+1. 真相源层
+   - `cninfo` 的定期报告索引
+2. 结构化摘要层
+   - `local_financial_store`
+   - `tushare`
+   - `baostock`
+   - `akshare`
+3. 下游消费层
+   - `research / strategy / screener / factor system`
 
-当前 provider 体系主要服务：
+这意味着：
 
-- 单票资料
-- 行情 bars
-- 财务摘要
-- 公告索引
+- 官方披露原文索引是校准源，不是当前直接返回 `financial-summary` 的正文解析源
+- 统一财务字段只能从清洗后的结构化摘要进入下游
+- 不允许把 provider 原始字段直接透传到 API 或研究链
 
-长期因子主线还需要逐步具备：
+## 5. 长期方向下的边界
 
-- 指数 / 基准
-- 行业 / 板块分类
-- 市场广度
-- 风格暴露
-- 风险代理变量
+当前最重要的不是继续无边界扩 provider，而是：
 
-这些不是本轮全部实现，而是必须纳入数据底座路线图。
-
-### 4.2 点时一致性需要进一步工程化
-
-长期因子验证要求：
-
-- 任意 `symbol + as_of_date` 都能重建当时可见输入
-- provider fallback 不会破坏点时一致性
-- 训练、预测、回测共享统一数据边界
-
-当前已有 `as_of_date` 和日级快照，但还没有完全形成“样本级可重建”的严格体系。
-
-### 4.3 复权与公司行为口径要继续集中
-
-长期因子与回测无法回避：
-
-- 原始价 / 前复权 / 后复权
-- 分红送转
-- 停牌
-- ST / 退市
-- 缺失交易段
-
-当前已具备部分标准化，但还需要继续往“统一规则而非局部处理”推进。
-
-### 4.4 数据血缘和版本追踪还不够
-
-长期上应能清楚回答：
-
-- 这份数据来自哪个 provider
-- 是否发生 fallback
-- 用了哪次落盘产物
-- 是否能在后续重建
-
-当前 runtime 可见性已有基础，但 dataset 级血缘能力仍需继续补齐。
-
-### 4.5 provider 能力矩阵需要进一步制度化
-
-长期方向下，应该更明确地定义：
-
-- 哪个 provider 覆盖哪个数据域
-- 哪些数据域允许 stale fallback
-- 哪些数据域必须本地落盘
-- 哪些数据域只能作为补充或兜底
-
-## 5. 当前已落地的制度化规则
-
-当前代码中已经把下列规则收拢为集中策略，而不是继续散落在 service 条件分支里：
-
-- `daily_bars`：`tdx-api -> mootdx -> akshare -> baostock`
-- `intraday_bars / timeline`：`tdx-api -> mootdx -> akshare -> baostock`
-- `universe`：`tdx-api -> akshare -> baostock`
-- `profile`：`tdx-api -> akshare -> baostock -> cninfo`
-- `announcements`：`cninfo -> akshare`
-- `financial_summary`：`akshare -> baostock`
-
-同时，当前已明确的健康度边界是：
-
-- `daily_bars` 允许在远端失败时回退到已落盘本地快照
-- `profile / universe` 允许使用本地缓存兜底
-- `announcements / financial_summary / intraday / timeline` 默认不接受 stale fallback
-- `daily_bars / universe / profile / announcements / financial_summary` 要求本地持久化
-- `intraday / timeline` 当前以在线可用性优先，不强制本地持久化
-
-此外，当前后端已经提供最小只读诊断接口：
-
-- `GET /providers/capabilities`：查看 capability 级策略矩阵
-- `GET /providers/health`：查看全部 capability 的健康状态
-- `GET /providers/health/{capability}`：查看单个 capability 的诊断摘要
-
-这些接口只服务于联调、排障和后续监控接入，不面向业务主链路直接消费。
-
-这意味着 provider 策略现在已经从“经验写法”进入“制度化口径”，后续包 2 / 包 3 / 包 4 会在这套矩阵上继续展开，而不是重新各写一套规则。
-
-## 5. 当前最合理的改进边界
-
-为了符合长期方向、又不过度发散，后续数据底座建议只盯下面几件事：
-
-1. 把当前关键数据域继续做成点时可重建的数据产品
-2. 把复权、公司行为、交易状态口径继续集中化
-3. 把 provider 能力矩阵和健康度做成明确规则
-4. 为长期特征与标签构建准备更稳定的输入层
-
-不建议做的事：
-
-- 无边界扩 provider 数量
-- 在多个 service 里继续散落单位和字段转换
-- 先做复杂新闻、正文、AI 总结，而忽略输入层稳定性
-
-## 6. 当前推荐数据域路由
-
-### 股票池 / 搜索
-
-- `tdx-api -> AKShare -> BaoStock`
-
-### 日线 / K 线
-
-- `tdx-api -> mootdx -> AKShare -> BaoStock`
-
-### quote
-
-- `tdx-api -> mootdx(如稳定) -> AKShare`
-
-### 财务摘要
-
-- `AKShare -> BaoStock`
-
-### 公告索引
-
-- `CNINFO -> AKShare`
-
-## 7. 结论
-
-当前阶段最重要的不是“接更多源”，而是：
-
-- 把 `tdx-api` 真正稳定地作为本地主链
-- 把 `mootdx` 真正稳定地作为本地高速历史源
-- 把 `AKShare` 约束成结构化补充源
-- 把 `BaoStock` 固定成稳定兜底源
-- 把 `CNINFO` 固定成正式披露真相源
-
-在这个基础上，后续因子发现、验证、组合与监控系统才有稳定的数据底座。
+1. 保持 provider 职责清晰
+2. 保持 capability policy 集中
+3. 继续增强本地结构化快照的可追溯性
+4. 为后续因子发现、验证、组合与监控系统提供稳定底座

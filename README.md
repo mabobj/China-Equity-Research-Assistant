@@ -265,3 +265,24 @@ npm.cmd run test:smoke
 3. `docs/current_phase.md`
 4. `docs/taskbook-v2.1.md`
 5. `README.md`
+
+## 11. 财务数据源分层策略
+当前财务摘要主链已收口为：
+
+- 官方披露原文索引：`CNINFO`
+- 本地结构化财务快照：`financial_reports`
+- 结构化主源：`Tushare`（可选启用）
+- 免费 fallback：`BaoStock`
+- 最后级补充源：`AKShare`
+
+补充说明：
+
+- `AKShare` 不再作为默认财务主源，只承担最后级补洞和临时 fallback。
+- `Tushare` 通过 `TUSHARE_ENABLED=true` 与 `TUSHARE_TOKEN=...` 启用；未启用时链路自动退化为 `local -> baostock -> akshare`。
+- 官方披露原文本轮只做“报告索引 + 下载链接”接口位，不做 PDF/XBRL 正文解析。
+- 财务摘要内部统一口径字段包括：
+  - `revenue / net_profit`：单位统一为“元”
+  - `roe / debt_ratio / revenue_yoy / net_profit_yoy / gross_margin`：统一为百分数
+  - `eps / bps`：统一为元/股
+  - `report_period`：`YYYY-MM-DD`
+  - `report_type`：`q1 / half / q3 / annual / ttm / unknown`

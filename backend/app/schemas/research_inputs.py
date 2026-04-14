@@ -86,3 +86,27 @@ class FinancialSummary(BaseModel):
     source_mode: Optional[str] = None
     freshness_mode: Optional[str] = None
     as_of_date: Optional[date] = None
+
+
+class FinancialReportIndexItem(BaseModel):
+    """Structured periodic financial report index item."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    report_period: Optional[date] = None
+    report_type: Optional[FinancialReportType] = None
+    title: str
+    publish_date: date
+    source: str
+    url: Optional[str] = None
+
+
+class FinancialReportIndexResponse(BaseModel):
+    """Periodic financial report index response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    count: int = Field(ge=0)
+    items: list[FinancialReportIndexItem]
