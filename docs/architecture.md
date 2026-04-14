@@ -383,3 +383,124 @@
 - 统一质量判断；
 - 可解释 fallback；
 - 本地结构化落袋。
+## 11. 数据血缘与版本追踪架构位
+
+围绕 `v2.2` 的包 4，当前系统已经正式引入一层独立的 lineage 能力，用来回答：
+
+- 这条 `daily bars / financial summary / announcements / market context` 来自哪个 provider、哪一天、哪种 freshness/source mode。
+- 这版 feature / label / prediction / evaluation 使用了哪些上游数据版本。
+- 这次 `workspace-bundle` 的关键模块各自依赖了哪一版日级产物。
+
+### 11.1 统一 schema
+
+当前统一采用：
+
+- `LineageSourceRef`
+- `LineageDependency`
+- `LineageMetadata`
+
+并在 workspace 层补充：
+
+- `WorkspaceLineageItem`
+- `LineageSummary`
+
+它们的职责分工是：
+
+- `LineageSourceRef`：描述一个直接上游来源
+- `LineageDependency`：描述当前产物与上游来源的角色关系
+- `LineageMetadata`：描述单个数据产物自身的版本与直接依赖
+- `LineageSummary`：描述面向 UI / bundle 的模块级血缘摘要
+
+### 11.2 数据产品层
+
+当前所有日级数据产品已经统一携带：
+
+- `dataset_version`
+- `provider_used`
+- `warning_messages`
+- `lineage_metadata`
+
+其中日级数据产品的默认版本规则统一为：
+
+- `{dataset}:{as_of_date}:{symbol-or-global}:v1`
+
+这一步的意义在于：
+
+- 日级快照不再只是“有 payload”
+- 它同时成为后续 feature / label / prediction 的可追溯上游引用
+
+### 11.3 预测与评估链
+
+当前以下链条已经统一接入 lineage service：
+
+- `dataset_service`
+- `label_service`
+- `prediction_service`
+- `backtest_service`
+- `evaluation_service`
+
+当前这些对象除了保留原有版本字段外，还统一补齐：
+
+- `dataset_version`
+- `generated_at`
+- `schema_version`
+- `dependencies`
+- `lineage_metadata`
+
+原则锁定如下：
+
+- 保留原有 `feature_version / label_version / model_version`
+- `run_id` 继续只是运行标识，不替代 dataset version
+- `lineage_metadata.dependencies` 只记录真正被本次运行使用的直接上游
+
+### 11.4 本地 lineage repository
+
+当前系统已经新增轻量本地登记簿：
+
+- `dataset_lineage_records`
+
+用途是：
+
+- 记录 feature / label / prediction / backtest / evaluation 的 lineage metadata
+- 记录关键日级产物的 lineage 摘要
+- 提供只读查询，不参与主业务流程决策
+
+这一步的目标不是建设一个大型外部元数据平台，而是先把当前仓库内部的“版本与依赖说明”收成稳定能力。
+
+### 11.5 Workspace 与诊断接口
+
+当前 `workspace-bundle` 已新增：
+
+- `lineage_summary`
+
+用于输出：
+
+- `daily_bars_daily`
+- `announcements_daily`
+- `financial_summary_daily`
+- `factor_snapshot_daily`
+- `review_report_daily`
+- `strategy_plan_daily`
+- `debate_review_daily`
+- `decision_brief_daily`
+- `predictive_snapshot`
+
+对应的只读 lineage 诊断接口包括：
+
+- `GET /lineage/datasets`
+- `GET /lineage/datasets/{dataset}/{dataset_version}`
+- `GET /datasets/features/{dataset_version}/lineage`
+- `GET /datasets/labels/{label_version}/lineage`
+- `GET /predictions/{symbol}/lineage`
+- `GET /stocks/{symbol}/workspace-lineage`
+
+### 11.6 当前边界
+
+当前 lineage 架构位仍然保持克制：
+
+- 只记录直接上游依赖
+- 不做递归依赖图展开
+- 不做新的前端展示重构
+- 不引入新的调度系统、消息队列或外部元数据仓库
+
+这保证了当前包 4 是“底层可用、后续可扩”的工程能力，而不是过早建设过重的平台层。

@@ -286,3 +286,52 @@ npm.cmd run test:smoke
   - `eps / bps`：统一为元/股
   - `report_period`：`YYYY-MM-DD`
   - `report_type`：`q1 / half / q3 / annual / ttm / unknown`
+## 12. 数据血缘与版本追踪
+
+当前项目已经完成包 4 的主链落地，目标是把零散存在的：
+
+- `as_of_date`
+- `generated_at`
+- `feature_version`
+- `label_version`
+- `model_version`
+- `provider_used`
+
+统一收口成可落袋、可查询、可回溯的数据血缘体系。
+
+当前已落地的能力包括：
+
+- 统一 lineage schema：
+  - `LineageSourceRef`
+  - `LineageDependency`
+  - `LineageMetadata`
+  - `LineageListResponse`
+  - `WorkspaceLineageItem`
+  - `LineageSummary`
+- 日级数据产品统一携带：
+  - `dataset_version`
+  - `provider_used`
+  - `warning_messages`
+  - `lineage_metadata`
+- `feature / label / prediction / backtest / evaluation` 已统一接入 lineage metadata
+- 本地 `dataset_lineage_records` 登记簿已落地
+- `workspace-bundle` 已新增模块级 `lineage_summary`
+
+当前可用的只读 lineage 诊断接口：
+
+- `GET /lineage/datasets`
+- `GET /lineage/datasets/{dataset}/{dataset_version}`
+- `GET /datasets/features/{dataset_version}/lineage`
+- `GET /datasets/labels/{label_version}/lineage`
+- `GET /predictions/{symbol}/lineage`
+- `GET /stocks/{symbol}/workspace-lineage`
+
+当前边界：
+
+- 只记录直接上游依赖，不做递归依赖图展开
+- 不做前端 lineage 展示重构
+- 不引入新的外部元数据仓库
+
+如需查看当前包 4 的阶段说明，见：
+
+- [数据血缘与版本追踪包状态说明](docs/lineage-package-v1.md)
