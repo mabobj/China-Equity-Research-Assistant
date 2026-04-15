@@ -2,8 +2,6 @@
 
 from typing import Optional
 
-import pandas as pd
-
 from app.schemas.market_data import DailyBar
 from app.schemas.technical import (
     BollingerSnapshot,
@@ -19,7 +17,11 @@ from app.services.data_service.exceptions import (
 )
 from app.services.data_service.market_data_service import MarketDataService
 from app.services.data_service.normalize import normalize_symbol
-from app.services.feature_service.indicators import add_indicators, latest_optional_float
+from app.services.feature_service.indicators import (
+    add_indicators,
+    build_price_frame_from_bars,
+    latest_optional_float,
+)
 from app.services.feature_service.levels import detect_support_resistance
 from app.services.feature_service.trend import evaluate_trend
 from app.services.feature_service.volatility import evaluate_volatility_state
@@ -63,7 +65,7 @@ class TechnicalAnalysisService:
                 ),
             )
 
-        frame = _build_price_frame(bars)
+        frame = build_price_frame_from_bars(bars)
         if len(frame) < 30:
             raise InsufficientDataError(
                 "技术分析至少需要 30 根有效日线数据，当前只有 {count} 根。".format(
@@ -131,41 +133,6 @@ class TechnicalAnalysisService:
             support_level=support_level,
             resistance_level=resistance_level,
         )
-
-
-def _build_price_frame(bars: list[DailyBar]) -> pd.DataFrame:
-    """将日线 bars 转成技术分析使用的 DataFrame。"""
-    rows = []
-    for bar in bars:
-        rows.append(
-            {
-                "trade_date": pd.Timestamp(bar.trade_date),
-                "open": bar.open,
-                "high": bar.high,
-                "low": bar.low,
-                "close": bar.close,
-                "volume": bar.volume,
-                "amount": bar.amount,
-            }
-        )
-
-    frame = pd.DataFrame(rows)
-    if frame.empty:
-        return frame
-
-    frame = frame.sort_values("trade_date").drop_duplicates(
-        subset=["trade_date"],
-        keep="last",
-    )
-    for column in ("open", "high", "low", "close", "volume", "amount"):
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
-
-    frame = frame.dropna(
-        subset=["trade_date", "high", "low", "close"],
-    ).reset_index(drop=True)
-    return frame
-
-
 def _safe_ratio(
     numerator: Optional[float],
     denominator: Optional[float],

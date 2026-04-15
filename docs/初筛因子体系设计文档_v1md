@@ -1,0 +1,767 @@
+# 初筛因子体系设计文档 v1
+
+## 1. 文档目标
+
+本文档用于定义 A 股项目中“初筛”模块的因子体系、数据分层、存储策略与实现边界。
+
+目标不是直接预测“明天一定上涨的股票”，而是：
+
+- 用最少、最稳、最便宜的数据
+- 在全市场范围内稳定运行
+- 每天盘后稳定产出一批“值得继续深度筛选”的股票
+- 为后续深度筛选、研究报告、交易策略提供高质量候选池
+
+---
+
+## 2. 初筛的产品定位
+
+### 2.1 初筛解决什么问题
+
+初筛只解决一个问题：
+
+**从全市场中，找出当前结构健康、可交易、值得继续看的股票。**
+
+它不直接解决以下问题：
+
+- 不直接给最终买卖结论
+- 不直接输出完整研究报告
+- 不直接输出完整交易策略
+- 不直接做财务深度判断
+- 不直接做公告/新闻深度解读
+
+### 2.2 初筛与深度筛选的分工
+
+#### 初筛
+负责：
+- 压缩股票池
+- 过滤不可交易或无意义样本
+- 找出趋势/结构/活跃度较好的候选
+
+#### 深度筛选
+负责：
+- 财务质量判断
+- 公告/事件判断
+- 板块与行业相对强弱判断
+- 交易计划生成
+- 风险点与失效条件判断
+
+### 2.3 初筛的设计原则
+
+1. 因子原子化
+2. 依赖低、稳定性高
+3. 支持全市场批量运行
+4. 高召回，低误杀
+5. 输出可解释
+6. 运行结果可保存、可追溯、可复盘
+
+---
+
+## 3. 总体分层设计
+
+初筛链路拆成四层：
+
+```text
+原始数据
+  -> 过程数据
+  -> 原子因子
+  -> 复合因子 / 规则结果
+  -> 初筛名单
+```
+
+### 3.1 原始数据
+直接来自 provider 的最基础数据。
+
+### 3.2 过程数据
+由原始数据计算得出的中间指标，不直接作为最终判断结果，但为因子提供输入。
+
+### 3.3 原子因子
+每个因子只表达一个清晰事实。
+
+### 3.4 复合因子
+由多个原子因子组合，用于表达更高层含义。
+
+### 3.5 初筛结果
+根据硬过滤、原子因子、复合因子组合后输出：
+
+- BUY_CANDIDATE
+- WATCHLIST
+- AVOID
+
+---
+
+## 4. 初筛最小原始数据集
+
+为了保证初筛稳定产出，第一版只依赖以下原始数据。
+
+### 4.1 股票主数据
+
+字段建议：
+
+- symbol
+- name
+- market
+- board
+- list_date
+- list_status
+- is_st
+- is_suspended
+- industry
+- latest_trade_date
+
+用途：
+
+- 可交易性过滤
+- ST 过滤
+- 上市时间过滤
+- 板块/市场归类
+- 前端展示基本信息
+
+### 4.2 日线行情数据
+
+字段建议：
+
+- trade_date
+- open
+- high
+- low
+- close
+- volume
+- amount
+
+用途：
+
+- 趋势判断
+- 波动判断
+- 支撑压力判断
+- 流动性判断
+- 所有技术过程数据计算
+
+### 4.3 可选异常标记
+
+字段建议：
+
+- abnormal_price_flag
+- abnormal_volume_flag
+- data_gap_flag
+
+用途：
+
+- 排除明显脏数据
+- 标记不适合进入初筛的样本
+
+---
+
+## 5. 过程数据设计
+
+以下过程数据由原始数据计算得到，建议保存。
+
+### 5.1 趋势类过程数据
+
+- ma5
+- ma10
+- ma20
+- ma60
+- ma120
+- ma20_slope
+- ma60_slope
+- close_percentile_60d
+- return_20d
+- return_60d
+
+### 5.2 波动类过程数据
+
+- atr20
+- atr20_pct
+- range_20d
+- volatility_20d
+
+### 5.3 流动性类过程数据
+
+- volume_avg_5d
+- volume_avg_20d
+- amount_avg_5d
+- amount_avg_20d
+- volume_ratio_1d_20d
+- amount_ratio_1d_20d
+
+### 5.4 结构位置类过程数据
+
+- rolling_high_20
+- rolling_low_20
+- rolling_high_60
+- rolling_low_60
+- support_level
+- resistance_level
+- distance_to_support_pct
+- distance_to_resistance_pct
+
+### 5.5 切面过程数据
+
+- amount_rank_pct
+- return_20d_rank_pct
+- trend_score_rank_pct
+- atr_pct_rank_pct
+- industry_relative_strength_rank_pct
+
+---
+
+## 6. 原子因子设计
+
+原子因子应该遵循：
+- 单一含义
+- 单一计算逻辑
+- 单一依赖
+- 可单独存储与回测
+
+以下给出推荐的第一版原子因子。
+
+---
+
+## 7. 硬过滤原子因子
+
+这类因子用于准入判断，而不是打分。
+
+### 7.1 is_tradeable
+定义：
+- 当前不是停牌
+- 近 N 个交易日存在有效成交
+- 数据不存在重大缺失
+
+类型：
+- bool
+
+### 7.2 is_non_st
+定义：
+- 名称中不包含 ST / *ST
+
+类型：
+- bool
+
+### 7.3 listed_age_ok
+定义：
+- 上市交易日数量 >= 最低阈值，例如 60 或 120 个交易日
+
+类型：
+- bool
+
+### 7.4 price_range_ok
+定义：
+- 最新收盘价在允许区间内
+
+类型：
+- bool
+
+### 7.5 liquidity_ok
+定义：
+- 20 日平均成交额达到最低要求
+
+类型：
+- bool
+
+### 7.6 data_integrity_ok
+定义：
+- 过程数据可正常计算
+- 日线长度足够
+- 无明显异常 OHLCV
+
+类型：
+- bool
+
+---
+
+## 8. 趋势结构原子因子
+
+### 8.1 price_above_ma20
+定义：
+- close > ma20
+
+类型：
+- bool
+
+### 8.2 price_above_ma60
+定义：
+- close > ma60
+
+类型：
+- bool
+
+### 8.3 ma_alignment_short
+定义：
+- ma5 > ma10 > ma20
+
+类型：
+- bool
+
+### 8.4 ma_alignment_mid
+定义：
+- ma10 > ma20 > ma60
+
+类型：
+- bool
+
+### 8.5 ma20_slope_positive
+定义：
+- ma20_slope > 0
+
+类型：
+- bool
+
+### 8.6 ma60_slope_positive
+定义：
+- ma60_slope > 0
+
+类型：
+- bool
+
+### 8.7 trend_strength_percentile
+定义：
+- close 在过去 60 日价格区间中的分位数
+
+类型：
+- float
+- 范围：0~1
+
+### 8.8 return_20d_positive
+定义：
+- 20 日收益率 > 0
+
+类型：
+- bool
+
+---
+
+## 9. 位置与形态原子因子
+
+### 9.1 near_breakout
+定义：
+- 当前价接近过去 20 日或 60 日高点
+
+类型：
+- bool
+
+### 9.2 pullback_to_ma20
+定义：
+- 整体趋势向上，但当前价回踩 ma20 附近
+
+类型：
+- bool
+
+### 9.3 pullback_to_ma10
+定义：
+- 整体趋势向上，但当前价回踩 ma10 附近
+
+类型：
+- bool
+
+### 9.4 close_near_support
+定义：
+- 当前价离支撑位较近
+
+类型：
+- bool
+
+### 9.5 not_too_close_to_resistance
+定义：
+- 当前价距离压力位仍有合理空间
+
+类型：
+- bool
+
+### 9.6 structure_not_broken
+定义：
+- 未跌破关键均线/支撑位
+- 最近未出现明显结构破坏
+
+类型：
+- bool
+
+---
+
+## 10. 活跃度与风险原子因子
+
+### 10.1 amount_20d_rank_pct
+定义：
+- 20 日平均成交额在全市场中的分位数
+
+类型：
+- float
+- 范围：0~1
+
+### 10.2 volume_expansion
+定义：
+- 最新成交量相对 20 日均量显著提升
+
+类型：
+- bool
+
+### 10.3 amount_expansion
+定义：
+- 最新成交额相对 20 日均额显著提升
+
+类型：
+- bool
+
+### 10.4 atr_pct_ok
+定义：
+- atr20_pct 处于可接受范围内，不是极端高波动
+
+类型：
+- bool
+
+### 10.5 volatility_state_ok
+定义：
+- 波动状态不是 high risk
+
+类型：
+- bool
+
+### 10.6 liquidity_rank_ok
+定义：
+- 成交额切面分位数达到最低阈值
+
+类型：
+- bool
+
+---
+
+## 11. 切面因子与连续切面因子
+
+### 11.1 是否需要保存切面因子
+
+答案：需要。
+
+原因：
+
+1. 切面因子描述的是“相对市场位置”
+2. 适合全市场排序
+3. 能提升初筛的稳定性和可比较性
+4. 能进一步派生出连续性因子
+
+### 11.2 推荐保存的日切面因子
+
+- amount_rank_pct
+- return_20d_rank_pct
+- trend_score_rank_pct
+- atr_pct_rank_pct
+- industry_relative_strength_rank_pct
+
+### 11.3 多日连续切面结果是否可作为因子
+
+答案：可以，而且很有价值。
+
+因为连续切面结果本质上表达的是“持续性”，比单日因子更稳定。
+
+### 11.4 推荐的连续切面因子
+
+#### trend_rank_persistence_5d
+定义：
+- 过去 5 天 trend_score_rank_pct 连续位于前 20%
+
+#### amount_rank_improving_3d
+定义：
+- 过去 3 天 amount_rank_pct 连续改善
+
+#### rs_persistence_5d
+定义：
+- 过去 5 天行业/个股相对强弱持续较高
+
+#### volatility_compression_streak
+定义：
+- 波动分位数连续多日收缩
+
+#### breakout_pressure_building
+定义：
+- 多日接近压力位但未明显回落
+
+---
+
+## 12. 复合因子设计
+
+复合因子由原子因子组合而成，不直接从原始数据计算。
+
+### 12.1 tradability_score
+由以下原子因子组合：
+- is_tradeable
+- is_non_st
+- listed_age_ok
+- price_range_ok
+- liquidity_ok
+- data_integrity_ok
+
+用途：
+- 判断是否具备进入初筛的资格
+
+### 12.2 trend_quality_score
+由以下原子因子组合：
+- price_above_ma20
+- price_above_ma60
+- ma_alignment_short
+- ma_alignment_mid
+- ma20_slope_positive
+- ma60_slope_positive
+- trend_strength_percentile
+- return_20d_positive
+
+用途：
+- 判断趋势结构质量
+
+### 12.3 setup_readiness_score
+由以下原子因子组合：
+- near_breakout
+- pullback_to_ma20
+- pullback_to_ma10
+- close_near_support
+- not_too_close_to_resistance
+- structure_not_broken
+
+用途：
+- 判断是否处在“值得继续观察/进入深筛”的位置
+
+### 12.4 participation_score
+由以下原子因子组合：
+- amount_20d_rank_pct
+- volume_expansion
+- amount_expansion
+- liquidity_rank_ok
+- rs_persistence_5d
+
+用途：
+- 判断是否存在市场参与度
+
+### 12.5 risk_control_score
+由以下原子因子组合：
+- atr_pct_ok
+- volatility_state_ok
+- structure_not_broken
+- volatility_compression_streak
+
+用途：
+- 判断是否处于可接受风险状态
+
+---
+
+## 13. 初筛结果生成逻辑
+
+### 13.1 结果类别
+
+- BUY_CANDIDATE
+- WATCHLIST
+- AVOID
+
+### 13.2 推荐判定逻辑
+
+#### AVOID
+满足以下任一情况：
+- 硬过滤因子不通过
+- 数据完整性不足
+- 流动性不够
+- 波动过高且结构破坏
+
+#### WATCHLIST
+满足：
+- 可交易
+- 趋势质量中等及以上
+- 位置尚可，但未到最好时点
+- 或者趋势良好但接近压力位等待确认
+
+#### BUY_CANDIDATE
+满足：
+- 可交易
+- 趋势质量较高
+- 位置合理（回踩或接近突破）
+- 风险可控
+- 参与度较好
+
+### 13.3 初筛不是最终买点判断
+
+BUY_CANDIDATE 的含义不是“直接买入”，而是：
+- 值得进入深度筛选
+- 值得进入次级研究链路
+- 值得生成进一步策略计划
+
+---
+
+## 14. 输出字段设计
+
+建议 ScreenerCandidate 至少包含：
+
+- symbol
+- name
+- as_of_date
+- list_type
+- rank
+- screener_score
+- tradability_score
+- trend_quality_score
+- setup_readiness_score
+- participation_score
+- risk_control_score
+- trend_state
+- latest_close
+- support_level
+- resistance_level
+- reason_codes
+- short_reason
+
+其中：
+
+### 14.1 reason_codes
+建议使用固定枚举，例如：
+
+- UPTREND_PULLBACK
+- UPTREND_NEAR_BREAKOUT
+- GOOD_LIQUIDITY
+- LOW_LIQUIDITY
+- HIGH_VOLATILITY
+- DATA_INCOMPLETE
+- TOO_CLOSE_TO_RESISTANCE
+- STRUCTURE_BROKEN
+
+### 14.2 short_reason
+建议为模板化短句，不使用 LLM 长文。
+
+---
+
+## 15. 数据表设计建议
+
+### 15.1 symbol_master_daily
+保存股票主数据快照。
+
+### 15.2 bars_daily_compact
+保存初筛所需压缩日线数据。
+
+### 15.3 screener_process_daily
+保存过程数据，例如均线、ATR、rolling high/low、支撑压力等。
+
+### 15.4 screener_atomic_factors_daily
+保存原子因子结果。
+
+### 15.5 screener_composite_factors_daily
+保存复合因子结果。
+
+### 15.6 screener_candidates_daily
+保存最终初筛结果。
+
+### 15.7 screener_cross_section_daily
+保存切面排名与连续性切面因子。
+
+---
+
+## 16. 哪些内容不进入初筛
+
+以下内容一律不作为初筛硬依赖：
+
+- 财务摘要
+- 公告列表
+- 公告正文
+- 新闻与情绪
+- LLM 研究结果
+- debate review
+- strategy plan
+- workspace bundle
+- 实时行情
+- 筹码分布
+
+这些内容留给深度筛选阶段。
+
+---
+
+## 17. 初筛运行方式建议
+
+初筛必须改为“盘后预计算”模式。
+
+### 推荐链路
+
+```text
+每日盘后
+  -> 更新 symbol_master_daily
+  -> 更新 bars_daily_compact
+  -> 生成 screener_process_daily
+  -> 生成 screener_atomic_factors_daily
+  -> 生成 screener_composite_factors_daily
+  -> 生成 screener_candidates_daily
+  -> 前端/API 只读结果
+```
+
+### 不推荐链路
+
+```text
+用户点击初筛
+  -> 运行时逐只拉数据
+  -> 逐只算指标
+  -> 逐只算因子
+  -> 实时生成结果
+```
+
+原因：
+- 慢
+- 易超时
+- 易重复请求
+- 易被限流
+- 结果不稳定
+
+---
+
+## 18. 实现优先级建议
+
+### Phase 1：最小可用初筛
+只做：
+- 股票主数据
+- 压缩日线
+- 硬过滤因子
+- 趋势结构因子
+- 基础输出列表
+
+### Phase 2：增强版初筛
+加入：
+- 支撑/压力
+- 活跃度因子
+- 切面因子
+- 连续切面因子
+
+### Phase 3：与深筛衔接
+加入：
+- top candidates 推送深筛
+- 初筛结果绑定 deep review 工作流
+- 初筛与深筛联动展示
+
+---
+
+## 19. 成功标准
+
+一个“有实际价值、可实际产出”的初筛产品，至少应满足：
+
+1. 过去 20 个交易日中大多数交易日都能成功产出
+2. 每日盘后在固定时间内完成
+3. 结果结构稳定、可保存、可复用
+4. 不依赖财务/公告/LLM 才能运行
+5. 每只候选都有明确的固定原因
+6. 可以直接驱动后续深筛
+
+---
+
+## 20. 总结
+
+初筛最重要的不是“聪明”，而是：
+
+- 稳
+- 快
+- 省
+- 可解释
+- 可持续产出
+
+本设计文档建议采用：
+
+**主数据 + 日线 + 过程数据 + 原子因子 + 复合因子 + 固定规则输出**
+
+来构建第一版初筛产品。
+
+在这个框架下：
+
+- 原子因子要尽量简单
+- 复合因子要由原子因子组合
+- 切面因子要保存
+- 多日连续切面结果应当作为独立因子使用
+- 财务、公告、新闻、LLM 等复杂输入后置到深度筛选阶段
+
+这样才能把初筛真正做成一个有实际价值的产品。

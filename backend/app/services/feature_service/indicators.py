@@ -5,6 +5,8 @@ from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 
+from app.schemas.market_data import DailyBar
+
 
 def add_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     """为日线数据添加基础技术指标列。"""
@@ -33,6 +35,40 @@ def add_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     data["volume_ma5"] = _rolling_mean(data["volume"], window=5)
     data["volume_ma20"] = _rolling_mean(data["volume"], window=20)
     return data
+
+
+def build_price_frame_from_bars(bars: list[DailyBar]) -> pd.DataFrame:
+    """Convert normalized daily bars into a sorted numeric price frame."""
+
+    rows = []
+    for bar in bars:
+        rows.append(
+            {
+                "trade_date": pd.Timestamp(bar.trade_date),
+                "open": bar.open,
+                "high": bar.high,
+                "low": bar.low,
+                "close": bar.close,
+                "volume": bar.volume,
+                "amount": bar.amount,
+            }
+        )
+
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+
+    frame = frame.sort_values("trade_date").drop_duplicates(
+        subset=["trade_date"],
+        keep="last",
+    )
+    for column in ("open", "high", "low", "close", "volume", "amount"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    frame = frame.dropna(
+        subset=["trade_date", "high", "low", "close"],
+    ).reset_index(drop=True)
+    return frame
 
 
 def _rolling_mean(series: pd.Series, window: int) -> pd.Series:

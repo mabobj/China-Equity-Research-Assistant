@@ -8,18 +8,13 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.evidence import EvidenceRef
+from app.schemas.screener_factors import (
+    LegacyScreenerListType,
+    QualityStatus,
+    ScreenerActionNow,
+    ScreenerListType,
+)
 from app.schemas.strategy import PriceRange
-
-
-LegacyScreenerListType = Literal["BUY_CANDIDATE", "WATCHLIST", "AVOID"]
-ScreenerListType = Literal[
-    "READY_TO_BUY",
-    "WATCH_PULLBACK",
-    "WATCH_BREAKOUT",
-    "RESEARCH_ONLY",
-    "AVOID",
-]
-QualityStatus = Literal["ok", "warning", "degraded", "failed"]
 
 
 class ScreenerCandidate(BaseModel):
@@ -49,13 +44,7 @@ class ScreenerCandidate(BaseModel):
     rule_version: Optional[str] = None
     rule_summary: Optional[str] = None
     headline_verdict: Optional[str] = None
-    action_now: Optional[Literal[
-        "BUY_NOW",
-        "WAIT_PULLBACK",
-        "WAIT_BREAKOUT",
-        "RESEARCH_ONLY",
-        "AVOID",
-    ]] = None
+    action_now: Optional[ScreenerActionNow] = None
     evidence_hints: list[str] = Field(default_factory=list)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list)
     bars_quality: Optional[QualityStatus] = None
@@ -170,13 +159,7 @@ class ScreenerSymbolResult(BaseModel):
     calculated_at: datetime
     rule_version: str
     rule_summary: str
-    action_now: Optional[Literal[
-        "BUY_NOW",
-        "WAIT_PULLBACK",
-        "WAIT_BREAKOUT",
-        "RESEARCH_ONLY",
-        "AVOID",
-    ]] = None
+    action_now: Optional[ScreenerActionNow] = None
     headline_verdict: Optional[str] = None
     evidence_hints: list[str] = Field(default_factory=list)
     fail_reason: Optional[str] = None
