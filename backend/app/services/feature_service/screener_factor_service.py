@@ -27,6 +27,7 @@ from app.services.data_service.normalize import normalize_symbol
 from app.services.feature_service.indicators import (
     add_indicators,
     build_price_frame_from_bars,
+    clamp_score,
     latest_optional_float,
 )
 
@@ -90,6 +91,19 @@ class ScreenerFactorService:
             raw_inputs=raw_inputs,
             as_of_date=as_of_date,
         )
+        cross_section_factors = ScreenerCrossSectionFactors(
+            industry_bucket=industry,
+            trend_score_raw=_build_trend_score_raw(
+                atomic_factors=atomic_factors,
+                process_metrics=process_metrics,
+            ),
+            trend_persistence_5d=_compute_trend_persistence_5d(enriched),
+            liquidity_persistence_5d=_compute_liquidity_persistence_5d(enriched),
+            breakout_readiness_persistence_5d=_compute_breakout_readiness_persistence_5d(
+                enriched,
+            ),
+            volatility_regime_stability=_compute_volatility_regime_stability(enriched),
+        )
 
         return ScreenerFactorSnapshot(
             symbol=canonical_symbol,
@@ -106,7 +120,7 @@ class ScreenerFactorService:
             raw_inputs=raw_inputs,
             process_metrics=process_metrics,
             atomic_factors=atomic_factors,
-            cross_section_factors=ScreenerCrossSectionFactors(),
+            cross_section_factors=cross_section_factors,
             warning_messages=list(warning_messages or []),
         )
 
@@ -245,6 +259,23 @@ def _build_atomic_factors(
         is_st_risk=raw_inputs.is_st,
         is_suspended_risk=raw_inputs.is_suspended,
     )
+
+
+def _build_trend_score_raw(
+    *,
+    atomic_factors: ScreenerAtomicFactors,
+    process_metrics: ScreenerProcessMetrics,
+) -> float:
+    percentile = process_metrics.close_percentile_60d
+    percentile_score = 0.0 if percentile is None else max(0.0, min(1.0, percentile)) * 15.0
+    score = 0.0
+    score += 25.0 if atomic_factors.close_above_ma20 else 0.0
+    score += 20.0 if atomic_factors.close_above_ma60 else 0.0
+    score += 20.0 if atomic_factors.ma20_above_ma60 else 0.0
+    score += 10.0 if atomic_factors.ma20_slope_positive else 0.0
+    score += 10.0 if atomic_factors.ma60_slope_positive else 0.0
+    score += percentile_score
+    return float(clamp_score(score))
 
 
 def _infer_trend_state_basic(
@@ -390,3 +421,50 @@ def _atr(frame: pd.DataFrame, window: int) -> pd.Series:
         adjust=False,
         min_periods=window,
     ).mean()
+
+
+def _compute_trend_persistence_5d(frame: pd.DataFrame) -> Optional[float]:
+    subset = frame.tail(5).copy()
+    if len(subset) < 5:
+        return None
+    flags = (
+        (subset["close"] > subset["ma20"])
+        & (subset["close"] > subset["ma60"])
+        & (subset["ma20"] > subset["ma60"])
+        & (subset["ma20_slope"] >= 0.0)
+        & (subset["ma60_slope"] >= 0.0)
+    )
+    return float(flags.mean())
+
+
+def _compute_liquidity_persistence_5d(frame: pd.DataFrame) -> Optional[float]:
+    subset = frame.tail(5).copy()
+    if len(subset) < 5:
+        return None
+    flags = subset["avg_amount_20d"] >= 20_000_000.0
+    return float(flags.fillna(False).mean())
+
+
+def _compute_breakout_readiness_persistence_5d(frame: pd.DataFrame) -> Optional[float]:
+    subset = frame.tail(5).copy()
+    if len(subset) < 5:
+        return None
+    flags = (
+        subset["distance_to_resistance_pct"].between(0.0, 2.5, inclusive="both")
+        & subset["return_20d"].fillna(0.0).ge(0.0)
+    )
+    return float(flags.fillna(False).mean())
+
+
+def _compute_volatility_regime_stability(frame: pd.DataFrame) -> Optional[float]:
+    subset = frame.tail(5).copy()
+    if len(subset) < 5:
+        return None
+    latest_state = _classify_atr_pct_state(latest_optional_float(subset.iloc[-1].get("atr20_pct")))
+    states = [
+        _classify_atr_pct_state(latest_optional_float(row.get("atr20_pct")))
+        for _, row in subset.iterrows()
+    ]
+    if latest_state is None:
+        return None
+    return float(sum(1 for state in states if state == latest_state) / len(states))

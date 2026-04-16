@@ -8,10 +8,14 @@
 
 - `包 1：Schema 与字段口径收口包`：已完成第一版落地。
 - `包 2：过程指标与原子因子包`：已完成第一阶段落地。
+- `包 3：横截面与连续性因子包`：已完成第一阶段落地。
 - 已新增 `screener_factors` 专用 schema，并将初筛 `list_type / v2_list_type / quality_status` 类型口径收口到统一定义。
 - 已新增 `ScreenerFactorService`，可基于日线 bars 输出 `ScreenerProcessMetrics`、`ScreenerAtomicFactors` 与 `ScreenerFactorSnapshot`。
 - 已补齐 MA、slope、ATR20、收益率、区间位置、流动性、支撑/压力距离等过程指标计算。
 - 已补齐趋势、波动、流动性、新股/ST/停牌风险等原子因子判断。
+- 已新增 `CrossSectionFactorService`，可对同批次 `ScreenerFactorSnapshot` 进行横截面 rank enrichment。
+- 已补齐 `trend_score_raw`、`amount_rank_pct`、`return_20d_rank_pct`、`trend_score_rank_pct`、`atr_pct_rank_pct`、`industry_relative_strength_rank_pct`。
+- 已补齐 `trend_persistence_5d`、`liquidity_persistence_5d`、`breakout_readiness_persistence_5d`、`volatility_regime_stability`。
 - 已补充最小 schema 测试，后续包将在此基础上继续推进过程指标、原子因子、横截面因子与复合打分实现。
 
 本任务书同时遵循以下项目约束：
@@ -463,6 +467,16 @@
 ### 目标
 
 实现“同日同池比较”的核心能力。
+
+### 当前进度
+
+- 已完成第一阶段：
+  - 单票连续性指标已在 `ScreenerFactorService` 内落地
+  - 同批次 rank enrichment 已在 `CrossSectionFactorService` 内落地
+  - 已补充单元测试并完成最小回归
+- 下一阶段将进入：
+  - 与初筛 pipeline 的结果对象衔接
+  - 为包 4 的复合打分与候选分桶做结构准备
 
 ### 交付物
 
