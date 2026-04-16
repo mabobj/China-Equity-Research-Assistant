@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Literal, Optional
 
 from app.schemas.market_data import DailyBar, DailyBarResponse, UniverseItem
 from app.schemas.research_inputs import FinancialSummary
+from app.schemas.screener_factors import ScreenerFactorSnapshot
 from app.schemas.screener import ScreenerCandidate, ScreenerRunResponse
 from app.services.data_service.exceptions import DataServiceError
 from app.services.data_service.market_data_service import MarketDataService
@@ -22,6 +23,7 @@ from app.services.screener_service.filters import (
 )
 from app.services.screener_service.scoring import (
     score_factor_snapshot,
+    score_screener_factor_snapshot,
     score_technical_snapshot,
 )
 from app.services.screener_service.texts import normalize_candidate_display_fields
@@ -29,10 +31,14 @@ from app.services.screener_service.universe import load_scan_universe
 
 if TYPE_CHECKING:
     from app.services.factor_service.snapshot import FactorSnapshotService
+    from app.services.feature_service.screener_factor_service import ScreenerFactorService
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )
     from app.services.prediction_service.prediction_service import PredictionService
+    from app.services.screener_service.cross_section_factor_service import (
+        CrossSectionFactorService,
+    )
 
 logger = logging.getLogger(__name__)
 _RULE_VERSION = "screener_workflow_v1"
@@ -54,6 +60,8 @@ class ScreenerPipeline:
         market_data_service: MarketDataService,
         technical_analysis_service: TechnicalAnalysisService,
         factor_snapshot_service: Optional[FactorSnapshotService] = None,
+        screener_factor_service: Optional["ScreenerFactorService"] = None,
+        cross_section_factor_service: Optional["CrossSectionFactorService"] = None,
         prediction_service: Optional["PredictionService"] = None,
         lookback_days: int = 400,
         progress_log_interval: int = 100,
@@ -67,6 +75,8 @@ class ScreenerPipeline:
         self._market_data_service = market_data_service
         self._technical_analysis_service = technical_analysis_service
         self._factor_snapshot_service = factor_snapshot_service
+        self._screener_factor_service = screener_factor_service
+        self._cross_section_factor_service = cross_section_factor_service
         self._prediction_service = prediction_service
         self._lookback_days = max(lookback_days, 180)
         self._progress_log_interval = max(progress_log_interval, 1)
@@ -105,6 +115,7 @@ class ScreenerPipeline:
             scanned_symbols = len(scan_items)
             candidates: list[ScreenerCandidate] = []
             failed_placeholders: list[ScreenerCandidate] = []
+            prepared_candidates: list[_PreparedCandidate] = []
             latest_as_of_date: Optional[date] = None
             skipped_symbols = 0
             lookback_start_date = (
@@ -142,6 +153,8 @@ class ScreenerPipeline:
                     else:
                         if scan_result.failed_placeholder is not None:
                             failed_placeholders.append(scan_result.failed_placeholder)
+                        if scan_result.prepared_candidate is not None:
+                            prepared_candidates.append(scan_result.prepared_candidate)
                         if scan_result.candidate is not None:
                             candidates.append(scan_result.candidate)
                         if latest_as_of_date is None or scan_result.as_of_date > latest_as_of_date:
@@ -188,6 +201,8 @@ class ScreenerPipeline:
                         else:
                             if scan_result.failed_placeholder is not None:
                                 failed_placeholders.append(scan_result.failed_placeholder)
+                            if scan_result.prepared_candidate is not None:
+                                prepared_candidates.append(scan_result.prepared_candidate)
                             if scan_result.candidate is not None:
                                 candidates.append(scan_result.candidate)
                             if latest_as_of_date is None or scan_result.as_of_date > latest_as_of_date:
@@ -201,6 +216,13 @@ class ScreenerPipeline:
                             started_at=started_at,
                             run_context=run_context,
                         )
+
+        if prepared_candidates:
+            candidates.extend(
+                self._build_candidates_from_prepared(
+                    prepared_candidates=prepared_candidates,
+                )
+            )
 
         ready_to_buy_candidates = _rank_candidates(
             [item for item in candidates if item.v2_list_type == "READY_TO_BUY"],
@@ -425,6 +447,54 @@ class ScreenerPipeline:
             force_refresh=force_refresh,
         )
         announcement_elapsed_ms = int((perf_counter() - announcement_started_at) * 1000)
+        screener_factor_snapshot = None
+        if self._screener_factor_service is not None:
+            screener_factor_snapshot = self._screener_factor_service.build_snapshot_from_bars(
+                symbol=item.symbol,
+                bars=daily_bars,
+                name=item.name,
+                list_status=item.status,
+                provider_used=_resolve_provider_used(daily_bars_response),
+                source_mode=getattr(daily_bars_response, "source_mode", None),
+                freshness_mode=getattr(daily_bars_response, "freshness_mode", None),
+            )
+
+        if screener_factor_snapshot is not None:
+            prediction_started_at = perf_counter()
+            prediction_snapshot = self._try_get_prediction_snapshot(
+                symbol=item.symbol,
+                as_of_date=technical_snapshot.as_of_date,
+            )
+            prediction_elapsed_ms = int((perf_counter() - prediction_started_at) * 1000)
+            logger.info(
+                "event=screener.symbol.completed run_id=%s workflow=%s symbol=%s elapsed_ms=%s bars_elapsed_ms=%s financial_elapsed_ms=%s announcement_elapsed_ms=%s prediction_elapsed_ms=%s outcome=prepared_candidate bars_quality=%s financial_quality=%s announcement_quality=%s",
+                run_id,
+                workflow_name,
+                item.symbol,
+                int((perf_counter() - symbol_started_at) * 1000),
+                bars_elapsed_ms,
+                financial_elapsed_ms,
+                announcement_elapsed_ms,
+                prediction_elapsed_ms,
+                bars_quality,
+                financial_quality,
+                announcement_quality,
+            )
+            return _ScanResult(
+                as_of_date=technical_snapshot.as_of_date,
+                candidate=None,
+                failed_placeholder=None,
+                prepared_candidate=_PreparedCandidate(
+                    item=item,
+                    technical_snapshot=technical_snapshot,
+                    screener_factor_snapshot=screener_factor_snapshot,
+                    prediction_snapshot=prediction_snapshot,
+                    bars_quality=bars_quality,
+                    financial_quality=financial_quality,
+                    announcement_quality=announcement_quality,
+                ),
+            )
+
         if self._factor_snapshot_service is not None:
             factor_snapshot = self._factor_snapshot_service.build_from_inputs(
                 FactorBuildInputs(
@@ -490,7 +560,52 @@ class ScreenerPipeline:
             as_of_date=technical_snapshot.as_of_date,
             candidate=candidate,
             failed_placeholder=None,
+            prepared_candidate=None,
         )
+
+    def _build_candidates_from_prepared(
+        self,
+        *,
+        prepared_candidates: list["_PreparedCandidate"],
+    ) -> list[ScreenerCandidate]:
+        snapshots = [item.screener_factor_snapshot for item in prepared_candidates]
+        if self._cross_section_factor_service is not None:
+            enriched_snapshots = self._cross_section_factor_service.enrich_snapshots(snapshots)
+        else:
+            enriched_snapshots = snapshots
+        snapshot_by_symbol = {
+            snapshot.symbol: snapshot for snapshot in enriched_snapshots
+        }
+
+        built_candidates: list[ScreenerCandidate] = []
+        for prepared in prepared_candidates:
+            screener_factor_snapshot = snapshot_by_symbol[prepared.item.symbol]
+            score_result = score_screener_factor_snapshot(
+                screener_factor_snapshot=screener_factor_snapshot,
+                technical_snapshot=prepared.technical_snapshot,
+            )
+            quality_gate = _apply_quality_gate(
+                origin_v2_list_type=score_result.v2_list_type,
+                origin_screener_score=score_result.screener_score,
+                bars_quality=prepared.bars_quality,
+                financial_quality=prepared.financial_quality,
+                announcement_quality=prepared.announcement_quality,
+            )
+            candidate = _build_candidate(
+                item=prepared.item,
+                technical_snapshot=prepared.technical_snapshot,
+                score_result=score_result,
+                prediction_snapshot=prepared.prediction_snapshot,
+                target_v2_list_type=quality_gate.target_v2_list_type,
+                target_screener_score=quality_gate.target_screener_score,
+                bars_quality=prepared.bars_quality,
+                financial_quality=prepared.financial_quality,
+                announcement_quality=prepared.announcement_quality,
+                quality_penalty_applied=quality_gate.quality_penalty_applied,
+                quality_note=quality_gate.quality_note,
+            )
+            built_candidates.append(candidate)
+        return built_candidates
 
     def _try_get_prediction_snapshot(self, *, symbol: str, as_of_date: date):
         if self._prediction_service is None:
@@ -568,6 +683,20 @@ class _ScanResult:
     as_of_date: date
     candidate: Optional[ScreenerCandidate]
     failed_placeholder: Optional[ScreenerCandidate]
+    prepared_candidate: Optional["_PreparedCandidate"] = None
+
+
+@dataclass(frozen=True)
+class _PreparedCandidate:
+    """Prepared screener candidate awaiting batch-level enrichment and scoring."""
+
+    item: UniverseItem
+    technical_snapshot: object
+    screener_factor_snapshot: ScreenerFactorSnapshot
+    prediction_snapshot: object
+    bars_quality: _QUALITY_STATUS
+    financial_quality: _QUALITY_STATUS
+    announcement_quality: _QUALITY_STATUS
 
 
 @dataclass(frozen=True)
@@ -709,6 +838,15 @@ def _resolve_as_of_date(response: DailyBarResponse) -> date:
     if response.bars:
         return response.bars[-1].trade_date
     return date.today()
+
+
+def _resolve_provider_used(response: DailyBarResponse) -> Optional[str]:
+    provider_used = getattr(response, "provider_used", None)
+    if provider_used is not None:
+        return str(provider_used)
+    if response.bars and response.bars[-1].source:
+        return response.bars[-1].source
+    return None
 
 
 def _build_failed_placeholder_for_bars(
