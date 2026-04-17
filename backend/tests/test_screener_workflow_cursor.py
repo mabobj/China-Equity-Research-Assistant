@@ -11,6 +11,7 @@ from app.schemas.screener import ScreenerRunResponse
 from app.schemas.workflow import ScreenerWorkflowRunRequest
 from app.services.data_products.base import DataProductResult
 from app.services.data_products.catalog import SCREENER_SNAPSHOT_DAILY
+from app.services.lineage_service.utils import build_lineage_metadata
 from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
 from app.services.workflow_runtime.executor import WorkflowExecutor
 
@@ -64,6 +65,36 @@ class _StubScreenerSnapshotDaily:
         )
 
 
+class _StubScreenerSelectionSnapshotDaily:
+    def __init__(self) -> None:
+        self.save_calls = 0
+
+    def save(self, *, run_date, params, payload: ScreenerRunResponse, lineage_metadata=None):
+        self.save_calls += 1
+        return DataProductResult(
+            dataset="screener_selection_snapshot_daily",
+            symbol=params.workflow_name,
+            as_of_date=run_date,
+            payload=payload,
+            freshness_mode="computed",
+            source_mode="snapshot",
+            updated_at=datetime.now(timezone.utc),
+            lineage_metadata=(
+                lineage_metadata.model_dump(mode="json")
+                if hasattr(lineage_metadata, "model_dump")
+                else lineage_metadata
+            ),
+        )
+
+
+class _StubLineageService:
+    def __init__(self) -> None:
+        self.register_calls = 0
+
+    def register_data_product(self, result) -> None:
+        self.register_calls += 1
+
+
 class _StubScreenerPipeline:
     def __init__(self) -> None:
         self.last_scan_symbols: list[str] = []
@@ -75,9 +106,12 @@ class _StubScreenerPipeline:
         force_refresh: bool = False,
         scan_items: Optional[list[UniverseItem]] = None,
         total_symbols_override: Optional[int] = None,
+        run_context: Optional[dict[str, object]] = None,
     ) -> ScreenerRunResponse:
         selected = scan_items or []
         self.last_scan_symbols = [item.symbol for item in selected]
+        if isinstance(run_context, dict):
+            run_context.setdefault("screener_factor_snapshot_refs", [])
         return ScreenerRunResponse(
             as_of_date=date(2026, 3, 30),
             freshness_mode="computed",
@@ -109,7 +143,9 @@ def test_screener_workflow_before_1700_exhausted_returns_empty(monkeypatch, tmp_
     definition = screener_workflow_module.build_screener_workflow_definition(
         screener_pipeline=pipeline,
         screener_snapshot_daily=_StubScreenerSnapshotDaily(),
+        screener_selection_snapshot_daily=_StubScreenerSelectionSnapshotDaily(),
         market_data_service=market_data_service,
+        lineage_service=_StubLineageService(),
     )
     executor = WorkflowExecutor(artifact_store=FileWorkflowArtifactStore(tmp_path))
 
@@ -140,7 +176,9 @@ def test_screener_workflow_after_1700_resets_cursor_and_runs_from_start(
     definition = screener_workflow_module.build_screener_workflow_definition(
         screener_pipeline=pipeline,
         screener_snapshot_daily=_StubScreenerSnapshotDaily(),
+        screener_selection_snapshot_daily=_StubScreenerSelectionSnapshotDaily(),
         market_data_service=market_data_service,
+        lineage_service=_StubLineageService(),
     )
     executor = WorkflowExecutor(artifact_store=FileWorkflowArtifactStore(tmp_path))
 
@@ -204,7 +242,9 @@ def test_screener_workflow_manual_reset_invalidates_same_day_snapshot(
     definition = screener_workflow_module.build_screener_workflow_definition(
         screener_pipeline=pipeline,
         screener_snapshot_daily=snapshot_dataset,
+        screener_selection_snapshot_daily=_StubScreenerSelectionSnapshotDaily(),
         market_data_service=market_data_service,
+        lineage_service=_StubLineageService(),
     )
     executor = WorkflowExecutor(artifact_store=FileWorkflowArtifactStore(tmp_path))
 
@@ -215,6 +255,33 @@ def test_screener_workflow_manual_reset_invalidates_same_day_snapshot(
     assert result.final_output.scanned_symbols == 2
     assert pipeline.last_scan_symbols == ["000001.SZ", "000002.SZ"]
     assert snapshot_dataset.load_calls == 0
+
+
+def test_screener_workflow_persists_selection_snapshot_and_registers_lineage(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _patch_now(monkeypatch, datetime(2026, 3, 30, 17, 5, tzinfo=screener_workflow_module._SHANGHAI_TZ))
+    market_data_service = _StubMarketDataService()
+    pipeline = _StubScreenerPipeline()
+    selection_dataset = _StubScreenerSelectionSnapshotDaily()
+    lineage_service = _StubLineageService()
+    definition = screener_workflow_module.build_screener_workflow_definition(
+        screener_pipeline=pipeline,
+        screener_snapshot_daily=_StubScreenerSnapshotDaily(),
+        screener_selection_snapshot_daily=selection_dataset,
+        market_data_service=market_data_service,
+        lineage_service=lineage_service,
+    )
+    executor = WorkflowExecutor(artifact_store=FileWorkflowArtifactStore(tmp_path))
+
+    result = executor.execute(definition, ScreenerWorkflowRunRequest(batch_size=2))
+
+    assert result.status == "completed"
+    assert result.final_output is not None
+    assert result.final_output.scanned_symbols == 2
+    assert selection_dataset.save_calls == 1
+    assert lineage_service.register_calls == 1
 
 
 def _patch_now(monkeypatch, value: datetime) -> None:

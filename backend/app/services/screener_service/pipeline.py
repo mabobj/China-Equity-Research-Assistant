@@ -105,6 +105,7 @@ class ScreenerPipeline:
     ) -> ScreenerRunResponse:
         started_at = perf_counter()
         run_context = run_context or {}
+        run_context.setdefault("screener_factor_snapshot_refs", [])
         run_id = _stringify_log_value(run_context.get("run_id"))
         workflow_name = _stringify_log_value(run_context.get("workflow_name")) or "screener_run"
         batch_size = _stringify_log_value(run_context.get("batch_size"))
@@ -625,6 +626,7 @@ class ScreenerPipeline:
                 symbol=prepared.item.symbol,
                 snapshot=evaluated_snapshot,
                 params=snapshot_params,
+                run_context=run_context,
             )
             candidate = _build_candidate(
                 item=prepared.item,
@@ -649,6 +651,7 @@ class ScreenerPipeline:
         symbol: str,
         snapshot: ScreenerFactorSnapshot,
         params,
+        run_context: dict[str, object],
     ) -> None:
         if self._screener_factor_snapshot_daily is None:
             return
@@ -660,6 +663,11 @@ class ScreenerPipeline:
             )
             if self._lineage_service is not None:
                 self._lineage_service.register_data_product(saved)
+            snapshot_refs = run_context.setdefault("screener_factor_snapshot_refs", [])
+            if isinstance(snapshot_refs, list):
+                snapshot_refs.append(
+                    _build_lineage_ref_payload(saved)
+                )
         except Exception:
             logger.exception(
                 "event=screener.factor_snapshot.persist_failed symbol=%s dataset_version=%s",
@@ -1149,6 +1157,19 @@ def _int_or_none(value: object | None) -> int | None:
         return int(str(value))
     except (TypeError, ValueError):
         return None
+
+
+def _build_lineage_ref_payload(result) -> dict[str, object]:
+    return {
+        "dataset": result.dataset,
+        "dataset_version": result.dataset_version,
+        "symbol": result.symbol,
+        "as_of_date": result.as_of_date,
+        "provider_used": result.provider_used,
+        "source_mode": result.source_mode,
+        "freshness_mode": result.freshness_mode,
+        "updated_at": result.updated_at,
+    }
 
 
 def _build_screener_factor_snapshot_params(

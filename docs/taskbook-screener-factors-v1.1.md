@@ -12,6 +12,7 @@
 - `包 4：复合打分与候选分桶包`：已完成第一阶段落地。
 - `包 4：复合打分与候选分桶包`：已完成第二阶段落地。
 - `包 5：快照落袋与血缘登记包`：已完成第一阶段落地。
+- `包 5：快照落袋与血缘登记包`：已完成第二阶段落地。
 - 已新增 `screener_factors` 专用 schema，并将初筛 `list_type / v2_list_type / quality_status` 类型口径收口到统一定义。
 - 已新增 `ScreenerFactorService`，可基于日线 bars 输出 `ScreenerProcessMetrics`、`ScreenerAtomicFactors` 与 `ScreenerFactorSnapshot`。
 - 已补齐 MA、slope、ATR20、收益率、区间位置、流动性、支撑/压力距离等过程指标计算。
@@ -27,6 +28,10 @@
 - 已新增 `ScreenerFactorSnapshotDailyDataset`，用于按日、按运行上下文持久化单票初筛因子快照。
 - 已在 `ScreenerPipeline` 中接入 `screener_factor_snapshot_daily + lineage_service`，在候选生成后自动落袋并登记血缘。
 - 已补齐单票初筛因子快照 round-trip 测试与 pipeline 侧保存/登记测试。
+- 已新增 `ScreenerSelectionSnapshotDailyDataset`，用于按批次保存初筛候选选择结果快照。
+- 已在 `screener_workflow` 中为批次级 selection snapshot 建立基于 `screener_factor_snapshot_daily` 的直接血缘依赖。
+- 已新增 `/screener/diagnostics/selection-lineage/latest` 与 `/screener/diagnostics/factor-lineage/{symbol}` 只读诊断接口。
+- 已补齐 selection snapshot round-trip、workflow 落袋/登记、screener 诊断路由测试。
 - 已补充最小 schema 测试，后续包将在此基础上继续推进过程指标、原子因子、横截面因子与复合打分实现。
 
 本任务书同时遵循以下项目约束：

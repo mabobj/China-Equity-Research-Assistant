@@ -1,18 +1,20 @@
 """选股器路由。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.dependencies import (
+    get_lineage_service,
     get_market_data_service,
     get_deep_screener_pipeline,
     get_screener_batch_service,
     get_screener_pipeline,
     get_workflow_runtime_service,
 )
+from app.schemas.lineage import LineageMetadata
 from app.schemas.screener import (
     ScreenerCursorResetResponse,
     DeepScreenerRunResponse,
@@ -111,6 +113,50 @@ def get_active_screener_run(
     return workflow_runtime_service.get_latest_running_detail(
         workflow_name="screener_run"
     )
+
+
+@router.get(
+    "/diagnostics/selection-lineage/latest",
+    response_model=LineageMetadata,
+)
+def get_latest_selection_lineage(
+    as_of_date: Optional[date] = Query(default=None),
+    lineage_service: Any = Depends(get_lineage_service),
+) -> LineageMetadata:
+    response = lineage_service.list_dataset_lineage(
+        dataset="screener_selection_snapshot_daily",
+        as_of_date=as_of_date,
+        limit=1,
+    )
+    if response.count == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="Screener selection lineage not found.",
+        )
+    return response.items[0]
+
+
+@router.get(
+    "/diagnostics/factor-lineage/{symbol}",
+    response_model=LineageMetadata,
+)
+def get_latest_factor_lineage(
+    symbol: str,
+    as_of_date: Optional[date] = Query(default=None),
+    lineage_service: Any = Depends(get_lineage_service),
+) -> LineageMetadata:
+    response = lineage_service.list_dataset_lineage(
+        dataset="screener_factor_snapshot_daily",
+        symbol=symbol,
+        as_of_date=as_of_date,
+        limit=1,
+    )
+    if response.count == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="Screener factor lineage not found.",
+        )
+    return response.items[0]
 
 
 @router.get("/batches/{batch_id}", response_model=ScreenerBatchDetailResponse)

@@ -7,12 +7,14 @@ from datetime import date, datetime, timezone
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import (
+    get_lineage_service,
     get_market_data_service,
     get_screener_batch_service,
     get_screener_pipeline,
     get_workflow_runtime_service,
 )
 from app.main import app
+from app.schemas.lineage import LineageListResponse
 from app.schemas.screener import (
     ScreenerBatchRecord,
     ScreenerCandidate,
@@ -20,6 +22,7 @@ from app.schemas.screener import (
     ScreenerSymbolResult,
 )
 from app.schemas.workflow import WorkflowRunDetailResponse
+from app.services.lineage_service.utils import build_lineage_metadata
 
 
 class StubScreenerPipeline:
@@ -186,6 +189,32 @@ class StubWorkflowRuntimeService:
         )
 
 
+class StubLineageService:
+    def __init__(self) -> None:
+        self.selection_metadata = build_lineage_metadata(
+            dataset="screener_selection_snapshot_daily",
+            dataset_version="screener_selection_snapshot_daily:2026-04-17:screener_run:v1",
+            as_of_date=date(2026, 4, 17),
+            symbol="screener_run",
+            dependencies=[],
+        )
+        self.factor_metadata = build_lineage_metadata(
+            dataset="screener_factor_snapshot_daily",
+            dataset_version="screener_factor_snapshot_daily:2026-04-17:600519.SH:v1",
+            as_of_date=date(2026, 4, 17),
+            symbol="600519.SH",
+            dependencies=[],
+        )
+
+    def list_dataset_lineage(self, *, dataset=None, symbol=None, as_of_date=None, limit=50):
+        items = []
+        if dataset == "screener_selection_snapshot_daily":
+            items = [self.selection_metadata]
+        if dataset == "screener_factor_snapshot_daily" and symbol == "600519.SH":
+            items = [self.factor_metadata]
+        return LineageListResponse(count=len(items), items=items)
+
+
 def test_run_screener_route_returns_structured_payload() -> None:
     app.dependency_overrides[get_screener_pipeline] = lambda: StubScreenerPipeline()
 
@@ -257,6 +286,29 @@ def test_screener_active_run_route_returns_running_detail() -> None:
     assert payload["run_id"] == "run-screener-001"
     assert payload["status"] == "running"
     assert payload["input_summary"]["batch_size"] == 50
+
+    app.dependency_overrides.clear()
+
+
+def test_screener_selection_lineage_diagnostics_route_returns_latest_record() -> None:
+    app.dependency_overrides[get_lineage_service] = lambda: StubLineageService()
+
+    response = client.get("/screener/diagnostics/selection-lineage/latest")
+
+    assert response.status_code == 200
+    assert response.json()["dataset"] == "screener_selection_snapshot_daily"
+
+    app.dependency_overrides.clear()
+
+
+def test_screener_factor_lineage_diagnostics_route_returns_latest_record() -> None:
+    app.dependency_overrides[get_lineage_service] = lambda: StubLineageService()
+
+    response = client.get("/screener/diagnostics/factor-lineage/600519.SH")
+
+    assert response.status_code == 200
+    assert response.json()["symbol"] == "600519.SH"
+    assert response.json()["dataset"] == "screener_factor_snapshot_daily"
 
     app.dependency_overrides.clear()
 

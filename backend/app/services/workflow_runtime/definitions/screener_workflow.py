@@ -11,11 +11,21 @@ from zoneinfo import ZoneInfo
 
 from app.schemas.screener import ScreenerRunResponse
 from app.schemas.workflow import ScreenerWorkflowRunRequest
+from app.services.data_products.catalog import SCREENER_SELECTION_SNAPSHOT_DAILY
 from app.services.data_products.datasets.screener_snapshot_daily import (
     ScreenerSnapshotDailyDataset,
     ScreenerSnapshotParams,
 )
+from app.services.data_products.datasets.screener_selection_snapshot_daily import (
+    ScreenerSelectionSnapshotDailyDataset,
+)
 from app.services.data_service.market_data_service import MarketDataService
+from app.services.lineage_service.lineage_service import LineageService
+from app.services.lineage_service.utils import (
+    build_dependency,
+    build_lineage_metadata,
+    build_source_ref,
+)
 from app.services.screener_service.pipeline import ScreenerPipeline
 from app.services.screener_service.texts import ensure_chinese_short_reason
 from app.services.screener_service.universe import load_scan_universe
@@ -46,11 +56,15 @@ class ScreenerWorkflowDefinitionBuilder:
         self,
         screener_pipeline: ScreenerPipeline,
         screener_snapshot_daily: ScreenerSnapshotDailyDataset,
+        screener_selection_snapshot_daily: ScreenerSelectionSnapshotDailyDataset,
         market_data_service: MarketDataService,
+        lineage_service: LineageService,
     ) -> None:
         self._screener_pipeline = screener_pipeline
         self._screener_snapshot_daily = screener_snapshot_daily
+        self._screener_selection_snapshot_daily = screener_selection_snapshot_daily
         self._market_data_service = market_data_service
+        self._lineage_service = lineage_service
 
     def build(self) -> WorkflowDefinition:
         return WorkflowDefinition(
@@ -163,19 +177,22 @@ class ScreenerWorkflowDefinitionBuilder:
                 context.set_output("ScreenerRun", payload)
                 return payload
 
+        pipeline_run_context = {
+            "run_id": context.run_id,
+            "workflow_name": context.workflow_name,
+            "batch_size": batch_size,
+            "cursor_start_symbol": selection.cursor_start_symbol,
+            "cursor_start_index": selection.start_index,
+            "reset_trade_date": now.date().isoformat(),
+            "screener_factor_snapshot_refs": [],
+        }
         response = self._screener_pipeline.run_screener(
             max_symbols=request.max_symbols,
             top_n=request.top_n,
             force_refresh=bool(request.force_refresh),
             scan_items=selection.selected_items,
             total_symbols_override=total_symbols,
-            run_context={
-                "run_id": context.run_id,
-                "workflow_name": context.workflow_name,
-                "batch_size": batch_size,
-                "cursor_start_symbol": selection.cursor_start_symbol,
-                "cursor_start_index": selection.start_index,
-            },
+            run_context=pipeline_run_context,
         )
         normalized_response = self._normalize_response(response)
         saved = self._screener_snapshot_daily.save(
@@ -188,12 +205,28 @@ class ScreenerWorkflowDefinitionBuilder:
                 }
             ),
         )
+        selection_saved = self._screener_selection_snapshot_daily.save(
+            run_date=current_date,
+            params=snapshot_params,
+            payload=normalized_response.model_copy(
+                update={
+                    "freshness_mode": normalized_response.freshness_mode or "computed",
+                    "source_mode": normalized_response.source_mode or "pipeline",
+                }
+            ),
+            lineage_metadata=self._build_selection_lineage_metadata(
+                run_date=current_date,
+                params=snapshot_params,
+                run_context=pipeline_run_context,
+            ),
+        )
         payload = saved.payload.model_copy(
             update={
                 "freshness_mode": saved.freshness_mode,
                 "source_mode": saved.source_mode,
             }
         )
+        self._lineage_service.register_data_product(selection_saved)
         self._advance_cursor_after_success(selection.selected_items)
         logger.info(
             "event=screener.run.result_persisted run_id=%s workflow=%s as_of_date=%s scanned_symbols=%s ready_count=%s watch_count=%s avoid_count=%s elapsed_ms=%s",
@@ -382,16 +415,88 @@ class ScreenerWorkflowDefinitionBuilder:
             return False
         return marker == current_date.isoformat()
 
+    def _build_selection_lineage_metadata(
+        self,
+        *,
+        run_date: date,
+        params: ScreenerSnapshotParams,
+        run_context: dict[str, object],
+    ):
+        factor_refs = run_context.get("screener_factor_snapshot_refs")
+        dependencies = []
+        if isinstance(factor_refs, list):
+            for item in factor_refs:
+                if not isinstance(item, dict):
+                    continue
+                dataset = item.get("dataset")
+                dataset_version = item.get("dataset_version")
+                as_of_date = item.get("as_of_date")
+                if not isinstance(dataset, str) or not isinstance(dataset_version, str):
+                    continue
+                if not isinstance(as_of_date, date):
+                    continue
+                dependencies.append(
+                    build_dependency(
+                        "screener_factor_snapshot",
+                        build_source_ref(
+                            dataset=dataset,
+                            dataset_version=dataset_version,
+                            symbol=(
+                                str(item.get("symbol"))
+                                if item.get("symbol") is not None
+                                else None
+                            ),
+                            as_of_date=as_of_date,
+                            provider_used=(
+                                str(item.get("provider_used"))
+                                if item.get("provider_used") is not None
+                                else None
+                            ),
+                            source_mode=(
+                                str(item.get("source_mode"))
+                                if item.get("source_mode") is not None
+                                else None
+                            ),
+                            freshness_mode=(
+                                str(item.get("freshness_mode"))
+                                if item.get("freshness_mode") is not None
+                                else None
+                            ),
+                            updated_at=item.get("updated_at"),
+                        ),
+                    )
+                )
+        dataset_version = (
+            f"{SCREENER_SELECTION_SNAPSHOT_DAILY}:{run_date.isoformat()}:{params.workflow_name}:v1"
+        )
+        warning_messages: list[str] = []
+        if not dependencies:
+            warning_messages.append(
+                "selection snapshot 缺少直接 factor snapshot 依赖记录。"
+            )
+        return build_lineage_metadata(
+            dataset=SCREENER_SELECTION_SNAPSHOT_DAILY,
+            dataset_version=dataset_version,
+            as_of_date=run_date,
+            symbol=params.workflow_name,
+            dependencies=dependencies,
+            warning_messages=warning_messages,
+        )
+
 
 def build_screener_workflow_definition(
     *,
     screener_pipeline: ScreenerPipeline,
     screener_snapshot_daily: ScreenerSnapshotDailyDataset,
+    screener_selection_snapshot_daily: ScreenerSelectionSnapshotDailyDataset,
     market_data_service: MarketDataService,
+    lineage_service: LineageService,
 ) -> WorkflowDefinition:
     """Build the screener workflow definition."""
     return ScreenerWorkflowDefinitionBuilder(
         screener_pipeline=screener_pipeline,
         screener_snapshot_daily=screener_snapshot_daily,
+        screener_selection_snapshot_daily=screener_selection_snapshot_daily,
         market_data_service=market_data_service,
+        lineage_service=lineage_service,
     ).build()

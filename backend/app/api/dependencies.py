@@ -59,6 +59,9 @@ if TYPE_CHECKING:
     from app.services.data_products.datasets.screener_snapshot_daily import (
         ScreenerSnapshotDailyDataset,
     )
+    from app.services.data_products.datasets.screener_selection_snapshot_daily import (
+        ScreenerSelectionSnapshotDailyDataset,
+    )
     from app.services.data_products.datasets.strategy_plan_daily import (
         StrategyPlanDailyDataset,
     )
@@ -589,6 +592,15 @@ def get_screener_snapshot_daily_dataset() -> "ScreenerSnapshotDailyDataset":
 
 
 @lru_cache
+def get_screener_selection_snapshot_daily_dataset() -> "ScreenerSelectionSnapshotDailyDataset":
+    from app.services.data_products.datasets.screener_selection_snapshot_daily import (
+        ScreenerSelectionSnapshotDailyDataset,
+    )
+
+    return ScreenerSelectionSnapshotDailyDataset(repository=get_data_product_repository())
+
+
+@lru_cache
 def get_screener_factor_snapshot_daily_dataset() -> "ScreenerFactorSnapshotDailyDataset":
     from app.services.data_products.datasets.screener_factor_snapshot_daily import (
         ScreenerFactorSnapshotDailyDataset,
@@ -752,6 +764,9 @@ def get_workflow_runtime_service(
     screener_snapshot_daily: "ScreenerSnapshotDailyDataset" = Depends(
         get_screener_snapshot_daily_dataset
     ),
+    screener_selection_snapshot_daily: "ScreenerSelectionSnapshotDailyDataset" = Depends(
+        get_screener_selection_snapshot_daily_dataset
+    ),
     screener_batch_service: "ScreenerBatchService" = Depends(
         get_screener_batch_service
     ),
@@ -796,7 +811,9 @@ def get_workflow_runtime_service(
             build_screener_workflow_definition(
                 screener_pipeline=screener_pipeline,
                 screener_snapshot_daily=screener_snapshot_daily,
+                screener_selection_snapshot_daily=screener_selection_snapshot_daily,
                 market_data_service=get_market_data_service(),
+                lineage_service=get_lineage_service(),
             ),
         )
     )
