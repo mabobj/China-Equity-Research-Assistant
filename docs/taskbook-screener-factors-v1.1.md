@@ -10,6 +10,8 @@
 - `包 2：过程指标与原子因子包`：已完成第一阶段落地。
 - `包 3：横截面与连续性因子包`：已完成第一阶段落地。
 - `包 4：复合打分与候选分桶包`：已完成第一阶段落地。
+- `包 4：复合打分与候选分桶包`：已完成第二阶段落地。
+- `包 5：快照落袋与血缘登记包`：已完成第一阶段落地。
 - 已新增 `screener_factors` 专用 schema，并将初筛 `list_type / v2_list_type / quality_status` 类型口径收口到统一定义。
 - 已新增 `ScreenerFactorService`，可基于日线 bars 输出 `ScreenerProcessMetrics`、`ScreenerAtomicFactors` 与 `ScreenerFactorSnapshot`。
 - 已补齐 MA、slope、ATR20、收益率、区间位置、流动性、支撑/压力距离等过程指标计算。
@@ -20,6 +22,11 @@
 - 已新增 `score_screener_factor_snapshot` 复合打分链路。
 - 已在 `ScreenerPipeline` 中接入“`ScreenerFactorSnapshot` 优先、旧 `FactorSnapshot` 回退”的双轨兼容模式。
 - 已补齐基于新因子快照的打分测试与 pipeline 回归测试。
+- 已支持将 `composite_score / selection_decision` 正式回写到 `ScreenerFactorSnapshot`。
+- 已让 `ScreenerCandidate` 展示字段优先复用快照内的 `selection_decision`。
+- 已新增 `ScreenerFactorSnapshotDailyDataset`，用于按日、按运行上下文持久化单票初筛因子快照。
+- 已在 `ScreenerPipeline` 中接入 `screener_factor_snapshot_daily + lineage_service`，在候选生成后自动落袋并登记血缘。
+- 已补齐单票初筛因子快照 round-trip 测试与 pipeline 侧保存/登记测试。
 - 已补充最小 schema 测试，后续包将在此基础上继续推进过程指标、原子因子、横截面因子与复合打分实现。
 
 本任务书同时遵循以下项目约束：
@@ -509,9 +516,11 @@
   - 保留现有 `FactorSnapshot` 打分链路作为兼容回退
   - `ScreenerPipeline` 已能消费新的初筛因子快照并完成候选分桶
   - 已补充单元测试与 pipeline 回归测试
+- 已完成第二阶段：
+  - 已将 `composite_score / selection_decision` 回写到 `ScreenerFactorSnapshot`
+  - 已让初筛候选结果优先复用快照中的决策摘要
 - 下一阶段将进入：
-  - 将 `composite_score / selection_decision` 回写到 `ScreenerFactorSnapshot`
-  - 让初筛结果对象与快照对象形成更紧的结构关联
+  - 快照落袋、血缘登记与只读诊断能力
 
 ### 交付物
 

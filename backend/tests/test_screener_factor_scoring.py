@@ -11,7 +11,10 @@ from app.schemas.technical import (
 )
 from app.services.feature_service.screener_factor_service import ScreenerFactorService
 from app.services.screener_service.cross_section_factor_service import CrossSectionFactorService
-from app.services.screener_service.scoring import score_screener_factor_snapshot
+from app.services.screener_service.scoring import (
+    apply_score_to_screener_factor_snapshot,
+    score_screener_factor_snapshot,
+)
 
 
 def test_score_screener_factor_snapshot_returns_ready_candidate_for_strong_setup() -> None:
@@ -92,6 +95,21 @@ def test_score_screener_factor_snapshot_returns_ready_candidate_for_strong_setup
     assert result.trigger_score >= 68
     assert result.risk_score <= 55
     assert result.top_positive_factors
+
+    updated_snapshot = apply_score_to_screener_factor_snapshot(
+        screener_factor_snapshot=snapshot,
+        score_result=result,
+        target_v2_list_type=result.v2_list_type,
+        target_screener_score=result.screener_score,
+        quality_penalty_applied=False,
+        quality_note=None,
+    )
+
+    assert updated_snapshot.composite_score is not None
+    assert updated_snapshot.composite_score.v2_list_type == "READY_TO_BUY"
+    assert updated_snapshot.selection_decision is not None
+    assert updated_snapshot.selection_decision.list_type == "BUY_CANDIDATE"
+    assert updated_snapshot.selection_decision.top_positive_factors
 
 
 def _build_bars(

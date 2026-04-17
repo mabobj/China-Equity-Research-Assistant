@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.schemas.factor import FactorSnapshot
-from app.schemas.screener_factors import ScreenerFactorSnapshot
+from app.schemas.screener_factors import (
+    ScreenerCompositeScore,
+    ScreenerFactorSnapshot,
+    ScreenerSelectionDecision,
+)
 from app.schemas.technical import TechnicalSnapshot
 from app.services.factor_service.reason_builder import build_reason_summary
 
@@ -145,6 +149,57 @@ def score_screener_factor_snapshot(
         risk_notes=reasons.risk_notes,
         short_reason=reasons.short_reason,
     )
+
+
+def apply_score_to_screener_factor_snapshot(
+    *,
+    screener_factor_snapshot: ScreenerFactorSnapshot,
+    score_result: ScreenerScoreResult,
+    target_v2_list_type: str,
+    target_screener_score: int,
+    quality_penalty_applied: bool,
+    quality_note: Optional[str],
+) -> ScreenerFactorSnapshot:
+    """Write composite score and decision summary back to the screener factor snapshot."""
+
+    quality_penalty_weight = None
+    if score_result.screener_score > 0:
+        quality_penalty_weight = round(target_screener_score / score_result.screener_score, 4)
+
+    quality_flags: list[str] = []
+    if quality_penalty_applied:
+        quality_flags.append("quality_penalty_applied")
+    if quality_note:
+        quality_flags.append(quality_note)
+
+    updated_snapshot = screener_factor_snapshot.model_copy(
+        update={
+            "composite_score": ScreenerCompositeScore(
+                screener_score=target_screener_score,
+                alpha_score=score_result.alpha_score,
+                trigger_score=score_result.trigger_score,
+                risk_score=score_result.risk_score,
+                list_type=_to_legacy_list_type(target_v2_list_type),
+                v2_list_type=target_v2_list_type,
+                action_now=_to_action_now(target_v2_list_type),
+                quality_penalty_applied=quality_penalty_applied,
+                quality_penalty_weight=quality_penalty_weight,
+            ),
+            "selection_decision": ScreenerSelectionDecision(
+                list_type=_to_legacy_list_type(target_v2_list_type),
+                v2_list_type=target_v2_list_type,
+                action_now=_to_action_now(target_v2_list_type),
+                selection_reasons=score_result.top_positive_factors[:3],
+                exclusion_reasons=score_result.top_negative_factors[:3],
+                top_positive_factors=score_result.top_positive_factors[:3],
+                top_negative_factors=score_result.top_negative_factors[:3],
+                risk_notes=score_result.risk_notes[:3],
+                short_reason=score_result.short_reason,
+                quality_flags=quality_flags,
+            ),
+        }
+    )
+    return updated_snapshot
 
 
 def _classify_v2_list_type(
@@ -400,6 +455,18 @@ def _to_legacy_list_type(v2_list_type: str) -> str:
         return "BUY_CANDIDATE"
     if v2_list_type in {"WATCH_PULLBACK", "WATCH_BREAKOUT", "RESEARCH_ONLY"}:
         return "WATCHLIST"
+    return "AVOID"
+
+
+def _to_action_now(v2_list_type: str) -> str:
+    if v2_list_type == "READY_TO_BUY":
+        return "BUY_NOW"
+    if v2_list_type == "WATCH_PULLBACK":
+        return "WAIT_PULLBACK"
+    if v2_list_type == "WATCH_BREAKOUT":
+        return "WAIT_BREAKOUT"
+    if v2_list_type == "RESEARCH_ONLY":
+        return "RESEARCH_ONLY"
     return "AVOID"
 
 

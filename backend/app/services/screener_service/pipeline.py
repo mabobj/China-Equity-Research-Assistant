@@ -22,6 +22,7 @@ from app.services.screener_service.filters import (
     has_sufficient_daily_bars,
 )
 from app.services.screener_service.scoring import (
+    apply_score_to_screener_factor_snapshot,
     score_factor_snapshot,
     score_screener_factor_snapshot,
     score_technical_snapshot,
@@ -30,11 +31,15 @@ from app.services.screener_service.texts import normalize_candidate_display_fiel
 from app.services.screener_service.universe import load_scan_universe
 
 if TYPE_CHECKING:
+    from app.services.data_products.datasets.screener_factor_snapshot_daily import (
+        ScreenerFactorSnapshotDailyDataset,
+    )
     from app.services.factor_service.snapshot import FactorSnapshotService
     from app.services.feature_service.screener_factor_service import ScreenerFactorService
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )
+    from app.services.lineage_service.lineage_service import LineageService
     from app.services.prediction_service.prediction_service import PredictionService
     from app.services.screener_service.cross_section_factor_service import (
         CrossSectionFactorService,
@@ -62,7 +67,11 @@ class ScreenerPipeline:
         factor_snapshot_service: Optional[FactorSnapshotService] = None,
         screener_factor_service: Optional["ScreenerFactorService"] = None,
         cross_section_factor_service: Optional["CrossSectionFactorService"] = None,
+        screener_factor_snapshot_daily: Optional[
+            "ScreenerFactorSnapshotDailyDataset"
+        ] = None,
         prediction_service: Optional["PredictionService"] = None,
+        lineage_service: Optional["LineageService"] = None,
         lookback_days: int = 400,
         progress_log_interval: int = 100,
         batch_daily_bar_provider_priority: tuple[str, ...] = (
@@ -77,7 +86,9 @@ class ScreenerPipeline:
         self._factor_snapshot_service = factor_snapshot_service
         self._screener_factor_service = screener_factor_service
         self._cross_section_factor_service = cross_section_factor_service
+        self._screener_factor_snapshot_daily = screener_factor_snapshot_daily
         self._prediction_service = prediction_service
+        self._lineage_service = lineage_service
         self._lookback_days = max(lookback_days, 180)
         self._progress_log_interval = max(progress_log_interval, 1)
         self._batch_daily_bar_provider_priority = batch_daily_bar_provider_priority
@@ -221,6 +232,9 @@ class ScreenerPipeline:
             candidates.extend(
                 self._build_candidates_from_prepared(
                     prepared_candidates=prepared_candidates,
+                    max_symbols=max_symbols,
+                    top_n=top_n,
+                    run_context=run_context,
                 )
             )
 
@@ -567,6 +581,9 @@ class ScreenerPipeline:
         self,
         *,
         prepared_candidates: list["_PreparedCandidate"],
+        max_symbols: int | None,
+        top_n: int | None,
+        run_context: dict[str, object],
     ) -> list[ScreenerCandidate]:
         snapshots = [item.screener_factor_snapshot for item in prepared_candidates]
         if self._cross_section_factor_service is not None:
@@ -576,6 +593,11 @@ class ScreenerPipeline:
         snapshot_by_symbol = {
             snapshot.symbol: snapshot for snapshot in enriched_snapshots
         }
+        snapshot_params = _build_screener_factor_snapshot_params(
+            run_context=run_context,
+            max_symbols=max_symbols,
+            top_n=top_n,
+        )
 
         built_candidates: list[ScreenerCandidate] = []
         for prepared in prepared_candidates:
@@ -591,6 +613,19 @@ class ScreenerPipeline:
                 financial_quality=prepared.financial_quality,
                 announcement_quality=prepared.announcement_quality,
             )
+            evaluated_snapshot = apply_score_to_screener_factor_snapshot(
+                screener_factor_snapshot=screener_factor_snapshot,
+                score_result=score_result,
+                target_v2_list_type=quality_gate.target_v2_list_type,
+                target_screener_score=quality_gate.target_screener_score,
+                quality_penalty_applied=quality_gate.quality_penalty_applied,
+                quality_note=quality_gate.quality_note,
+            )
+            self._persist_screener_factor_snapshot(
+                symbol=prepared.item.symbol,
+                snapshot=evaluated_snapshot,
+                params=snapshot_params,
+            )
             candidate = _build_candidate(
                 item=prepared.item,
                 technical_snapshot=prepared.technical_snapshot,
@@ -603,9 +638,34 @@ class ScreenerPipeline:
                 announcement_quality=prepared.announcement_quality,
                 quality_penalty_applied=quality_gate.quality_penalty_applied,
                 quality_note=quality_gate.quality_note,
+                screener_factor_snapshot=evaluated_snapshot,
             )
             built_candidates.append(candidate)
         return built_candidates
+
+    def _persist_screener_factor_snapshot(
+        self,
+        *,
+        symbol: str,
+        snapshot: ScreenerFactorSnapshot,
+        params,
+    ) -> None:
+        if self._screener_factor_snapshot_daily is None:
+            return
+        try:
+            saved = self._screener_factor_snapshot_daily.save(
+                symbol,
+                params=params,
+                payload=snapshot,
+            )
+            if self._lineage_service is not None:
+                self._lineage_service.register_data_product(saved)
+        except Exception:
+            logger.exception(
+                "event=screener.factor_snapshot.persist_failed symbol=%s dataset_version=%s",
+                symbol,
+                snapshot.dataset_version,
+            )
 
     def _try_get_prediction_snapshot(self, *, symbol: str, as_of_date: date):
         if self._prediction_service is None:
@@ -747,24 +807,46 @@ def _build_candidate(
     announcement_quality: _QUALITY_STATUS,
     quality_penalty_applied: bool,
     quality_note: Optional[str],
+    screener_factor_snapshot: Optional[ScreenerFactorSnapshot] = None,
 ) -> ScreenerCandidate:
     v2_list_type = target_v2_list_type
+    selection_decision = (
+        screener_factor_snapshot.selection_decision
+        if screener_factor_snapshot is not None
+        else None
+    )
     display_fields = normalize_candidate_display_fields(
         name=item.name,
         list_type=v2_list_type,
-        short_reason=score_result.short_reason,
+        short_reason=(
+            selection_decision.short_reason
+            if selection_decision is not None and selection_decision.short_reason is not None
+            else score_result.short_reason
+        ),
         headline_verdict=None,
-        top_positive_factors=score_result.top_positive_factors,
-        top_negative_factors=score_result.top_negative_factors,
-        risk_notes=score_result.risk_notes,
+        top_positive_factors=(
+            selection_decision.top_positive_factors
+            if selection_decision is not None
+            else score_result.top_positive_factors
+        ),
+        top_negative_factors=(
+            selection_decision.top_negative_factors
+            if selection_decision is not None
+            else score_result.top_negative_factors
+        ),
+        risk_notes=(
+            selection_decision.risk_notes
+            if selection_decision is not None
+            else score_result.risk_notes
+        ),
         evidence_hints=[
-            *score_result.top_positive_factors[:2],
-            *score_result.risk_notes[:1],
+            *((selection_decision.top_positive_factors if selection_decision is not None else score_result.top_positive_factors)[:2]),
+            *((selection_decision.risk_notes if selection_decision is not None else score_result.risk_notes)[:1]),
         ],
     )
     evidence_hints = [
-        *score_result.top_positive_factors[:2],
-        *score_result.risk_notes[:1],
+        *((selection_decision.top_positive_factors if selection_decision is not None else score_result.top_positive_factors)[:2]),
+        *((selection_decision.risk_notes if selection_decision is not None else score_result.risk_notes)[:1]),
     ]
     return ScreenerCandidate(
         symbol=item.symbol,
@@ -1054,3 +1136,38 @@ def _stringify_log_value(value: object | None) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _int_or_none(value: object | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_screener_factor_snapshot_params(
+    *,
+    run_context: dict[str, object],
+    max_symbols: int | None,
+    top_n: int | None,
+):
+    from app.services.data_products.datasets.screener_factor_snapshot_daily import (
+        ScreenerFactorSnapshotParams,
+    )
+
+    return ScreenerFactorSnapshotParams(
+        workflow_name=_stringify_log_value(run_context.get("workflow_name"))
+        or "screener_run",
+        max_symbols=max_symbols,
+        top_n=top_n,
+        batch_size=_int_or_none(run_context.get("batch_size")),
+        cursor_start_symbol=_stringify_log_value(run_context.get("cursor_start_symbol")),
+        cursor_start_index=_int_or_none(run_context.get("cursor_start_index")),
+        reset_trade_date=_stringify_log_value(run_context.get("reset_trade_date")),
+    )

@@ -30,6 +30,12 @@ from app.services.feature_service.indicators import (
     clamp_score,
     latest_optional_float,
 )
+from app.services.lineage_service.utils import (
+    build_dependency,
+    build_lineage_metadata,
+    build_source_ref,
+    utcnow,
+)
 
 
 class ScreenerFactorService:
@@ -69,6 +75,12 @@ class ScreenerFactorService:
             for column in enriched.columns
         }
         as_of_date = latest_row["trade_date"].date()
+        dataset_version = build_screener_dataset_version(
+            dataset="screener_factor_snapshot_daily",
+            as_of_date=as_of_date,
+            symbol=canonical_symbol,
+        )
+        resolved_generated_at = generated_at or utcnow()
         process_metrics = _build_process_metrics(latest_map)
         raw_inputs = ScreenerRawInputs(
             symbol=canonical_symbol,
@@ -104,16 +116,39 @@ class ScreenerFactorService:
             ),
             volatility_regime_stability=_compute_volatility_regime_stability(enriched),
         )
+        lineage_metadata = build_lineage_metadata(
+            dataset="screener_factor_snapshot_daily",
+            dataset_version=dataset_version,
+            as_of_date=as_of_date,
+            symbol=canonical_symbol,
+            generated_at=resolved_generated_at,
+            dependencies=[
+                build_dependency(
+                    "daily_bars_daily",
+                    build_source_ref(
+                        dataset="daily_bars_daily",
+                        dataset_version=build_screener_dataset_version(
+                            dataset="daily_bars_daily",
+                            as_of_date=as_of_date,
+                            symbol=canonical_symbol,
+                        ),
+                        symbol=canonical_symbol,
+                        as_of_date=as_of_date,
+                        provider_used=provider_used,
+                        source_mode=source_mode,
+                        freshness_mode=freshness_mode,
+                        updated_at=resolved_generated_at,
+                    ),
+                )
+            ],
+            warning_messages=list(warning_messages or []),
+        )
 
         return ScreenerFactorSnapshot(
             symbol=canonical_symbol,
             as_of_date=as_of_date,
-            dataset_version=build_screener_dataset_version(
-                dataset="screener_factor_snapshot_daily",
-                as_of_date=as_of_date,
-                symbol=canonical_symbol,
-            ),
-            generated_at=generated_at,
+            dataset_version=dataset_version,
+            generated_at=resolved_generated_at,
             provider_used=provider_used,
             source_mode=source_mode,
             freshness_mode=freshness_mode,
@@ -121,6 +156,7 @@ class ScreenerFactorService:
             process_metrics=process_metrics,
             atomic_factors=atomic_factors,
             cross_section_factors=cross_section_factors,
+            lineage_metadata=lineage_metadata,
             warning_messages=list(warning_messages or []),
         )
 

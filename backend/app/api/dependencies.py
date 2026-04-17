@@ -83,6 +83,9 @@ if TYPE_CHECKING:
     from app.services.feature_service.technical_analysis_service import (
         TechnicalAnalysisService,
     )
+    from app.services.feature_service.screener_factor_service import (
+        ScreenerFactorService,
+    )
     from app.services.llm_debate_service.fallback import DebateRuntimeService
     from app.services.llm_debate_service.llm_debate_orchestrator import (
         LLMDebateOrchestrator,
@@ -100,6 +103,9 @@ if TYPE_CHECKING:
     from app.services.screener_service.deep_pipeline import DeepScreenerPipeline
     from app.services.screener_service.pipeline import ScreenerPipeline
     from app.services.screener_service.batch_service import ScreenerBatchService
+    from app.services.screener_service.cross_section_factor_service import (
+        CrossSectionFactorService,
+    )
     from app.services.trade_service.trade_service import TradeService
     from app.services.decision_snapshot_service.decision_snapshot_service import (
         DecisionSnapshotService,
@@ -180,6 +186,24 @@ def get_technical_analysis_service() -> "TechnicalAnalysisService":
     )
 
     return TechnicalAnalysisService(market_data_service=get_market_data_service())
+
+
+@lru_cache
+def get_screener_factor_service() -> "ScreenerFactorService":
+    from app.services.feature_service.screener_factor_service import (
+        ScreenerFactorService,
+    )
+
+    return ScreenerFactorService()
+
+
+@lru_cache
+def get_cross_section_factor_service() -> "CrossSectionFactorService":
+    from app.services.screener_service.cross_section_factor_service import (
+        CrossSectionFactorService,
+    )
+
+    return CrossSectionFactorService()
 
 
 @lru_cache
@@ -565,6 +589,15 @@ def get_screener_snapshot_daily_dataset() -> "ScreenerSnapshotDailyDataset":
 
 
 @lru_cache
+def get_screener_factor_snapshot_daily_dataset() -> "ScreenerFactorSnapshotDailyDataset":
+    from app.services.data_products.datasets.screener_factor_snapshot_daily import (
+        ScreenerFactorSnapshotDailyDataset,
+    )
+
+    return ScreenerFactorSnapshotDailyDataset(repository=get_data_product_repository())
+
+
+@lru_cache
 def get_workspace_bundle_service() -> "WorkspaceBundleService":
     from app.services.workspace_bundle_service.workspace_bundle_service import (
         WorkspaceBundleService,
@@ -619,7 +652,11 @@ def get_screener_pipeline() -> "ScreenerPipeline":
         market_data_service=get_market_data_service(),
         technical_analysis_service=get_technical_analysis_service(),
         factor_snapshot_service=get_factor_snapshot_service(),
+        screener_factor_service=get_screener_factor_service(),
+        cross_section_factor_service=get_cross_section_factor_service(),
+        screener_factor_snapshot_daily=get_screener_factor_snapshot_daily_dataset(),
         prediction_service=get_prediction_service(),
+        lineage_service=get_lineage_service(),
         lookback_days=settings.screener_lookback_days,
         progress_log_interval=settings.screener_progress_log_interval,
     )
