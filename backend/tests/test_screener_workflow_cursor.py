@@ -68,9 +68,11 @@ class _StubScreenerSnapshotDaily:
 class _StubScreenerSelectionSnapshotDaily:
     def __init__(self) -> None:
         self.save_calls = 0
+        self.saved_lineage_metadata = None
 
     def save(self, *, run_date, params, payload: ScreenerRunResponse, lineage_metadata=None):
         self.save_calls += 1
+        self.saved_lineage_metadata = lineage_metadata
         return DataProductResult(
             dataset="screener_selection_snapshot_daily",
             symbol=params.workflow_name,
@@ -111,7 +113,18 @@ class _StubScreenerPipeline:
         selected = scan_items or []
         self.last_scan_symbols = [item.symbol for item in selected]
         if isinstance(run_context, dict):
-            run_context.setdefault("screener_factor_snapshot_refs", [])
+            run_context["screener_factor_snapshot_refs"] = [
+                {
+                    "dataset": "screener_factor_snapshot_daily",
+                    "dataset_version": "screener_factor_snapshot_daily:2026-03-30:000001.SZ:v1",
+                    "symbol": "000001.SZ",
+                    "as_of_date": date(2026, 3, 30),
+                    "provider_used": "mootdx",
+                    "source_mode": "snapshot",
+                    "freshness_mode": "computed",
+                    "updated_at": datetime(2026, 3, 30, 17, 5, tzinfo=timezone.utc),
+                }
+            ]
         return ScreenerRunResponse(
             as_of_date=date(2026, 3, 30),
             freshness_mode="computed",
@@ -282,6 +295,11 @@ def test_screener_workflow_persists_selection_snapshot_and_registers_lineage(
     assert result.final_output.scanned_symbols == 2
     assert selection_dataset.save_calls == 1
     assert lineage_service.register_calls == 1
+    assert selection_dataset.saved_lineage_metadata is not None
+    assert len(selection_dataset.saved_lineage_metadata.dependencies) == 1
+    dependency = selection_dataset.saved_lineage_metadata.dependencies[0]
+    assert dependency.role == "screener_factor_snapshot"
+    assert dependency.source_ref.dataset == "screener_factor_snapshot_daily"
 
 
 def _patch_now(monkeypatch, value: datetime) -> None:

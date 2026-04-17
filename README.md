@@ -33,6 +33,10 @@
   - `decision brief`
 - workflow 运行记录、轮询与局部失败可见性
 - `bars / financial_summary / announcements` 数据清洗层
+- 初筛因子主链：
+  - `screener_factor_snapshot_daily`
+  - `screener_selection_snapshot_daily`
+  - 初筛 factor / selection 血缘诊断入口
 - 交易与复盘最小闭环：
   - `decision snapshot -> trade -> review`
 - 预测主线最小底座：
@@ -61,6 +65,8 @@
 
 - `POST /workflows/screener/run`
 - `GET /workflows/runs/{run_id}`
+- `GET /screener/diagnostics/selection-lineage/latest`
+- `GET /screener/diagnostics/factor-lineage/{symbol}`
 
 前端页面：
 
@@ -316,6 +322,11 @@ npm.cmd run test:smoke
 - `feature / label / prediction / backtest / evaluation` 已统一接入 lineage metadata
 - 本地 `dataset_lineage_records` 登记簿已落地
 - `workspace-bundle` 已新增模块级 `lineage_summary`
+- 初筛工作流已新增：
+  - 单票 `screener_factor_snapshot_daily`
+  - 批次 `screener_selection_snapshot_daily`
+  - `/screener/diagnostics/selection-lineage/latest`
+  - `/screener/diagnostics/factor-lineage/{symbol}`
 
 当前可用的只读 lineage 诊断接口：
 

@@ -75,6 +75,8 @@
 - `POST /workflows/screener/run`
 - `POST /workflows/deep-review/run`
 - `GET /workflows/runs/{run_id}`
+- `GET /screener/diagnostics/selection-lineage/latest`
+- `GET /screener/diagnostics/factor-lineage/{symbol}`
 
 当前形态：
 
@@ -150,6 +152,8 @@
 - `strategy_plan_daily`
 - `decision_brief_daily`
 - `screener_snapshot_daily`
+- `screener_factor_snapshot_daily`
+- `screener_selection_snapshot_daily`
 
 这套体系已经支撑“本地优先、按日复用、缺啥补啥”的当前链路。
 

@@ -12,12 +12,12 @@ from zoneinfo import ZoneInfo
 from app.schemas.screener import ScreenerRunResponse
 from app.schemas.workflow import ScreenerWorkflowRunRequest
 from app.services.data_products.catalog import SCREENER_SELECTION_SNAPSHOT_DAILY
+from app.services.data_products.datasets.screener_selection_snapshot_daily import (
+    ScreenerSelectionSnapshotDailyDataset,
+)
 from app.services.data_products.datasets.screener_snapshot_daily import (
     ScreenerSnapshotDailyDataset,
     ScreenerSnapshotParams,
-)
-from app.services.data_products.datasets.screener_selection_snapshot_daily import (
-    ScreenerSelectionSnapshotDailyDataset,
 )
 from app.services.data_service.market_data_service import MarketDataService
 from app.services.lineage_service.lineage_service import LineageService
@@ -105,7 +105,7 @@ class ScreenerWorkflowDefinitionBuilder:
 
         if not selection.selected_items:
             payload = ScreenerRunResponse(
-                as_of_date=now.date(),
+                as_of_date=current_date,
                 freshness_mode="cache_preferred",
                 source_mode="cursor_exhausted",
                 total_symbols=total_symbols,
@@ -128,7 +128,7 @@ class ScreenerWorkflowDefinitionBuilder:
             batch_size=batch_size,
             cursor_start_symbol=selection.cursor_start_symbol,
             cursor_start_index=selection.start_index,
-            reset_trade_date=now.date().isoformat(),
+            reset_trade_date=current_date.isoformat(),
         )
         snapshot_invalidated_today = self._is_snapshot_invalidated_for_date(
             current_date=current_date
@@ -148,7 +148,7 @@ class ScreenerWorkflowDefinitionBuilder:
         if snapshot_invalidated_today:
             warning_messages = list(context.get_meta("warning_messages") or [])
             warning_messages.append(
-                "已检测到当日游标重置：今日初筛快照已作废，将按游标分批重新计算。"
+                "检测到当日游标重置：今日初筛快照已作废，将按游标分批重新计算。"
             )
             context.set_meta("warning_messages", warning_messages)
 
@@ -183,7 +183,7 @@ class ScreenerWorkflowDefinitionBuilder:
             "batch_size": batch_size,
             "cursor_start_symbol": selection.cursor_start_symbol,
             "cursor_start_index": selection.start_index,
-            "reset_trade_date": now.date().isoformat(),
+            "reset_trade_date": current_date.isoformat(),
             "screener_factor_snapshot_refs": [],
         }
         response = self._screener_pipeline.run_screener(
@@ -195,25 +195,21 @@ class ScreenerWorkflowDefinitionBuilder:
             run_context=pipeline_run_context,
         )
         normalized_response = self._normalize_response(response)
+        normalized_payload = normalized_response.model_copy(
+            update={
+                "freshness_mode": normalized_response.freshness_mode or "computed",
+                "source_mode": normalized_response.source_mode or "pipeline",
+            }
+        )
         saved = self._screener_snapshot_daily.save(
             run_date=current_date,
             params=snapshot_params,
-            payload=normalized_response.model_copy(
-                update={
-                    "freshness_mode": normalized_response.freshness_mode or "computed",
-                    "source_mode": normalized_response.source_mode or "pipeline",
-                }
-            ),
+            payload=normalized_payload,
         )
         selection_saved = self._screener_selection_snapshot_daily.save(
             run_date=current_date,
             params=snapshot_params,
-            payload=normalized_response.model_copy(
-                update={
-                    "freshness_mode": normalized_response.freshness_mode or "computed",
-                    "source_mode": normalized_response.source_mode or "pipeline",
-                }
-            ),
+            payload=normalized_payload,
             lineage_metadata=self._build_selection_lineage_metadata(
                 run_date=current_date,
                 params=snapshot_params,
@@ -302,9 +298,7 @@ class ScreenerWorkflowDefinitionBuilder:
             selected_items=selected_items,
             start_index=start_index,
             cursor_start_symbol=selected_items[0].symbol if selected_items else None,
-            warning_messages=[
-                "17:00 后首次运行，游标已自动重置到股票池起点。"
-            ]
+            warning_messages=["17:00 后首次运行，游标已自动重置到股票池起点。"]
             if reset_applied
             else [],
             reset_applied=reset_applied,
@@ -322,7 +316,7 @@ class ScreenerWorkflowDefinitionBuilder:
         )
 
     def _normalize_response(self, response: ScreenerRunResponse) -> ScreenerRunResponse:
-        def _normalize_candidates(candidates):
+        def _normalize_candidates(candidates: list[Any]) -> list[Any]:
             normalized = []
             for candidate in candidates:
                 short_reason = ensure_chinese_short_reason(
@@ -332,7 +326,9 @@ class ScreenerWorkflowDefinitionBuilder:
                 if short_reason == candidate.short_reason:
                     normalized.append(candidate)
                     continue
-                normalized.append(candidate.model_copy(update={"short_reason": short_reason}))
+                normalized.append(
+                    candidate.model_copy(update={"short_reason": short_reason})
+                )
             return normalized
 
         return response.model_copy(

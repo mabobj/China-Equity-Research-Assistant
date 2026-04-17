@@ -30,8 +30,8 @@ class StubScreenerPipeline:
 
     def run_screener(
         self,
-        max_symbols: int = None,
-        top_n: int = None,
+        max_symbols: int | None = None,
+        top_n: int | None = None,
     ) -> ScreenerRunResponse:
         return ScreenerRunResponse(
             as_of_date=date(2024, 3, 25),
