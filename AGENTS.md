@@ -1,440 +1,110 @@
 # AGENTS.md
 
-本文件定义本项目对 Codex 和其他代码代理的长期约束。
+本文件只定义本项目对 Codex 与其他代码代理的工作约束，不承担项目背景、业务边界、阶段进度或任务管理职责。
 
-## 1. 项目定位
+## 1. 作用边界
 
-这是一个面向 **中国大陆 A 股市场** 的 **公开信息驱动的研究、选股、策略与因子系统**。
+`AGENTS.md` 仅保留对编码代理的约束，包括：
 
-项目当前的核心目标不是“聊天式荐股”，也不是“自动实盘机器人”，而是构建一个：
+- 执行任务前必须阅读哪些文档；
+- 编码与改动时必须遵守的工作方式；
+- 文档同步与边界检查要求。
 
-- 可持续接入与标准化 A 股公开数据；
-- 可输出结构化研究报告与结构化交易计划；
-- 可进行全市场初筛与候选深筛；
-- 可积累交易记录并进行复盘学习；
-- 可逐步演进为因子发现、验证、组合与监控系统。
+以下内容禁止继续写入本文件，应放入独立项目文档维护：
 
-## 2. 当前阶段边界
+- 项目定位与硬性边界；
+- 当前阶段、当前重点模块、当前优先级；
+- 需求设计书、任务书、实施路线图；
+- 业务规则、页面规划、产品状态说明。
 
-当前阶段明确要做：
+## 2. 每次任务前的必读文档
 
-- 全市场初筛与候选深筛
-- 单票研究报告
-- 单票交易策略计划
-- 公告/财务/技术输入统一结构化
-- 交易记录与复盘闭环
-- 因子字典与后续验证框架的工程落地准备
+所有代理在开始任何实现、重构、修复、补测、补文档任务前，必须先阅读：
 
-当前阶段明确不做：
+1. `README.md`
+2. `docs/project-constraints.md`
+3. `docs/execution-baseline.md`
 
-- 自动实盘下单
-- 无人确认的交易执行
-- 高频 / Tick 级自动化策略
-- 直接依赖内幕、未公开重大信息、小道消息的能力
-- 用自由文本 LLM 替代确定性计算与风控
+如果 `docs/execution-baseline.md` 中声明了当前有效的需求文档、任务书或专项设计文档，还必须继续阅读其中列出的相关文档，再开始动手。
 
-## 3. 第一原则
+如果任务涉及某一具体模块，代理还应补充阅读该模块当前有效的需求文档、任务书和相关架构说明。
 
-### 3.1 公开信息原则
+## 3. 工作方式要求
 
-系统只使用依法公开披露的信息和公开可观测市场数据作为事实源。
+### 3.1 先确认边界，再开始修改
 
-### 3.2 结构化优先于自由文本
+开始改动前必须先确认：
 
-所有关键输出必须优先结构化，文本只作为补充说明。
+- 本次任务属于哪个模块；
+- 应修改哪一层；
+- 是否已有可复用 service / schema / route / provider；
+- 是否有当前有效的需求文档或任务书约束实现范围。
 
-包括但不限于：
+禁止在未确认目录职责和模块边界前直接写代码。
 
-- 研究报告
-- 技术快照
-- 财务摘要
-- 公告列表
-- 交易策略
-- 选股结果
-- 交易记录
-- 复盘记录
-- 因子定义与验证结果
+### 3.2 较大任务先出计划
 
-### 3.3 代码与模型分工明确
+对于跨文件、跨模块、重构类或需求实现类任务，必须先给出清晰计划，再开始编码。
 
-#### 必须由代码负责
-- 数据清洗与标准化
-- 股票代码转换与 provider 映射
-- 技术指标计算
-- 趋势/波动/支撑压力等结构判断
-- 规则筛选与打分
-- 风险边界与价格区间计算
-- 交易记录存储
-- 回测、验证、组合、复盘统计
+推荐拆分顺序：
 
-#### 可以由 AI 负责
-- 财报/公告/新闻摘要
-- 事件分类与解释
-- 研究结论解释
-- 多信息源文本归纳
-- 复盘归因说明
+1. schema
+2. service
+3. route
+4. tests
+5. docs
 
-不要把确定性计算交给 LLM。
+### 3.3 优先复用既有能力
 
-### 3.4 简单、稳定、可解释优先
+生成代码时应优先：
 
-第一版优先选择：
+- 复用已有 service、schema、provider 和工具函数；
+- 保持 route 薄、service 清晰；
+- 优先选择简单、稳定、可解释、可测试的方案；
+- 避免重复实现字段映射、symbol 转换、日期标准化和 provider 调用逻辑。
 
-- 朴素方案
-- 清晰边界
-- 易测试逻辑
-- 可维护代码
+### 3.4 文档必须与代码同步
 
-不要为了“更智能”过早引入复杂黑盒。
+如果实现变更影响下列内容，代理必须同步更新对应文档：
 
-## 4. 当前系统主线
+- 项目硬性约束：更新 `docs/project-constraints.md`
+- 当前阶段、当前重点模块、当前有效需求与任务书：更新 `docs/execution-baseline.md`
+- 具体模块需求或任务分解：更新对应需求文档、任务书
 
-当前系统主线分为四条：
+禁止只改代码不更新已失效的执行文档。
 
-1. **数据主线**：profile / daily bars / technical / announcements / financial summary
-2. **研究主线**：/research/{symbol}
-3. **策略主线**：/strategy/{symbol}
-4. **选股主线**：/screener/run 以及后续 deep screener
+## 4. 文档职责约束
 
-后续增强主线：
+### 4.1 项目硬约束独立维护
 
-5. **交易记录与复盘主线**
-6. **因子发现、验证、组合与衰减监控主线**
+项目定位、阶段边界、架构原则、输出要求、禁止事项等硬约束，统一维护在：
 
-## 5. 架构原则
+- `docs/project-constraints.md`
 
-### 5.1 严格分层
+### 4.2 当前执行基线独立维护
 
-业务必须分层组织：
+当前阶段、当前优先级、当前重点模块、当前有效需求文档、当前有效任务书，统一维护在：
 
-- API 层
-- Schema 层
-- Service 层
-- Provider 层
-- DB 层
-- Task / Scheduler 层
+- `docs/execution-baseline.md`
 
-禁止把复杂业务逻辑直接写在路由层。
+### 4.3 AGENTS 不承担状态管理
 
-### 5.2 数据源必须通过 provider
+禁止把下列内容重新写回 `AGENTS.md`：
 
-所有外部数据源都必须放在：
+- 当前开发阶段；
+- 当前重点需求；
+- 当前活跃任务包；
+- 路线图进展；
+- 临时阅读清单。
 
-`backend/app/services/data_service/providers/`
+这些内容应由执行基线文档维护，并保持实时更新。
 
-禁止在业务层、研究层、策略层直接请求网页或第三方 API。
+## 5. 完成任务前的自检
 
-### 5.3 标准化必须集中管理
+提交前代理应至少确认：
 
-以下逻辑必须集中管理，不允许分散硬编码：
-
-- symbol normalize
-- provider symbol convert
-- 日期格式转换
-- 数据字段映射
-- 统一错误处理
-
-### 5.4 研究、策略、选股必须分层
-
-- `research_service` 负责研究结论
-- `strategy_planner` 负责交易计划
-- `screener_service` 负责全市场扫描与候选聚合
-
-禁止把选股、研究、策略逻辑混写在同一文件中。
-
-### 5.5 因子系统与产品接口分离
-
-未来因子开发、验证、组合与监控需要独立成层。
-
-当前实现中，研究和策略可以复用因子结果，但不能把“页面输出逻辑”直接当成“因子引擎”。
-
-## 6. 目录职责约束
-
-### 6.1 API 层
-
-目录：`backend/app/api/routes/`
-
-职责：
-- 接收请求
-- 参数校验
-- 调用 service
-- 返回 schema
-
-禁止：
-- 直接访问 provider
-- 写复杂研究逻辑
-- 写复杂评分逻辑
-- 写抓取逻辑
-
-### 6.2 Schema 层
-
-目录：`backend/app/schemas/`
-
-职责：
-- 定义 API 输入输出
-- 定义结构化研究对象
-- 定义结构化策略对象
-- 定义结构化选股对象
-- 定义研究输入对象
-
-要求：
-- 所有 API 都返回 typed Pydantic schema
-- 不允许 API 直接返回 dataframe 或第三方原始 dict
-
-### 6.3 Data Service 层
-
-目录：`backend/app/services/data_service/`
-
-职责：
-- 封装 provider
-- 标准化 symbol 和字段
-- 向上提供统一数据接口
-
-要求：
-- provider 异常不能直接泄漏到 API
-- 必须允许空结果和 graceful failure
-- 必须可 mock 测试
-
-### 6.4 Feature Service 层
-
-目录：`backend/app/services/feature_service/`
-
-职责：
-- 技术指标计算
-- 趋势/波动状态识别
-- 支撑/压力位计算
-- 结构化技术快照输出
-
-要求：
-- 优先使用 pandas / numpy 的朴素实现
-- 保持可解释、可测试
-
-### 6.5 Research Service 层
-
-目录：`backend/app/services/research_service/`
-
-职责：
-- 技术 researcher
-- 基本面 researcher
-- 事件 researcher
-- research_manager
-- strategy_planner
-
-要求：
-- 先规则化、结构化、模板化
-- 不把自由文本生成当核心能力
-- 研究结论必须可以被测试和复现
-
-### 6.6 Screener Service 层
-
-目录：`backend/app/services/screener_service/`
-
-职责：
-- universe 获取
-- filters
-- scoring
-- pipeline
-- 后续 deep_pipeline
-
-要求：
-- 初筛必须轻量、可扩展
-- 深筛必须复用 research / strategy 能力
-- 单个 symbol 失败不能中断整个扫描
-
-### 6.7 Review / Trade Service 层
-
-目录：
-- `backend/app/services/trade_service/`
-- `backend/app/services/review_service/`
-
-职责：
-- 保存交易记录
-- 绑定研究/策略快照
-- 生成复盘结果
-- 为后续学习和因子验证提供真实反馈
-
-## 7. 输出规范
-
-### 7.1 研究报告必须结构化
-
-至少应包含：
-
-- symbol
-- name
-- as_of_date
-- technical_score
-- fundamental_score
-- event_score
-- risk_score
-- overall_score
-- action
-- confidence
-- thesis
-- key_reasons
-- risks
-- triggers
-- invalidations
-
-### 7.2 交易策略必须结构化
-
-至少应包含：
-
-- symbol
-- name
-- as_of_date
-- action
-- strategy_type
-- entry_window
-- ideal_entry_range
-- entry_triggers
-- avoid_if
-- initial_position_hint
-- stop_loss_price
-- stop_loss_rule
-- take_profit_range
-- take_profit_rule
-- hold_rule
-- sell_rule
-- review_timeframe
-- confidence
-
-### 7.3 选股结果必须机器可读
-
-至少应包含：
-
-- symbol
-- name
-- list_type
-- rank
-- screener_score
-- trend_state
-- trend_score
-- latest_close
-- support_level
-- resistance_level
-- short_reason
-
-### 7.4 深筛结果必须可直接行动
-
-后续 deep screener 至少应包含：
-
-- base_screener_score
-- research_overall_score
-- research_action
-- strategy_action
-- strategy_type
-- ideal_entry_range
-- stop_loss_price
-- take_profit_range
-- priority_score
-
-## 8. 测试要求
-
-优先保证以下模块有单元测试或 API 测试：
-
-1. symbol normalize / convert
-2. 指标计算
-3. 趋势评分
-4. 支撑/压力位识别
-5. 研究聚合逻辑
-6. 策略输出逻辑
-7. 选股 filters / scoring / pipeline
-8. API 健康检查与关键接口
-
-对于抓取型 provider：
-
-- 可先以 smoke test 为主
-- 测试不要强依赖实时外网
-- 允许 mock provider
-- 不要写过于脆弱的硬编码断言
-
-## 9. 当前开发优先级（按阶段）
-
-当前优先级按顺序为：
-
-1. 数据层稳定性与真实 provider 联调
-2. 深筛选股器（候选 + 研究 + 策略）
-3. 前端接入当前已完成能力
-4. 交易记录与复盘闭环
-5. 因子字典落库与因子计算接口化
-6. 因子验证与回测框架
-7. 组合与风险约束层
-8. paper trading / shadow 模式
-
-## 10. 禁止事项
-
-### 禁止 1
-禁止把交易决策完全交给自由文本 LLM。
-
-### 禁止 2
-禁止在多个文件中散落重复字段映射、symbol 转换或日期标准化逻辑。
-
-### 禁止 3
-禁止在 route 文件中实现复杂研究、选股、策略或抓取逻辑。
-
-### 禁止 4
-禁止为了“先跑起来”而省略核心 schema。
-
-### 禁止 5
-禁止把未来自动实盘执行能力混入当前研究系统核心。
-
-### 禁止 6
-禁止在全市场扫描阶段引入过重的研究逻辑或高成本外部调用。
-
-### 禁止 7
-禁止在没有样本外、成本后与风险约束的前提下，直接把“好看分数”包装成可交易因子。
-
-## 11. Codex 工作方式
-
-当 Codex 在本项目中工作时，应遵守：
-
-1. 先阅读：
-   - `README.md`
-   - `docs/architecture.md`
-   - `docs/roadmap.md`
-   - `docs/a_share_factor_prd_v1.md`
-   - `docs/a_share_architecture_design_spec_v1.md`
-   - `docs/a_share_factor_dictionary_v1.md`
-2. 对复杂任务先给出 plan，再开始改代码
-3. 每次只完成一个清晰子任务，不跨阶段乱扩展
-4. 修改前先确认目录职责边界
-5. 优先补 schema、测试、脚本，再扩展功能
-6. 生成代码时优先选择清晰、稳定、朴素方案
-7. 能复用现有 service 时优先复用，不重复造轮子
-8. 变更 README / docs 时保持与代码一致
-
-## 12. 让 Codex 更稳的项目内规则
-
-如果任务较大，优先采用以下流程：
-
-1. 先实现 schema
-2. 再实现 service
-3. 再实现 route
-4. 再补测试
-5. 最后补 README
-
-如果任务涉及多个模块，优先拆成：
-
-- Phase A：最小骨架
-- Phase B：核心逻辑
-- Phase C：测试与文档
-
-如果任务涉及新外部数据源，优先拆成：
-
-- provider 封装
-- normalize / error handling
-- service 暴露
-- schema 输出
-- mock 测试
-
-## 13. 本项目的成功标准
-
-成功不是“看起来很聪明”，而是：
-
-- 能稳定接入 A 股关键公开数据
-- 能输出可信、结构化的研究报告
-- 能输出清晰、结构化的交易计划
-- 能从全市场里初筛并逐步深筛候选
-- 能积累交易记录并做有价值复盘
-- 能逐步演进到因子发现、验证、组合与监控系统
-- 能在后续平滑扩展到 paper trading 和更高级执行体系
+1. 是否先阅读了必读文档；
+2. 是否遵守了目录与分层职责；
+3. 是否复用了既有能力而非重复造轮子；
+4. 是否补充或更新了相关测试；
+5. 是否同步更新了受影响的执行文档。
