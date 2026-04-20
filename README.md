@@ -1,28 +1,12 @@
 # A 股研究、预测与决策工作台
 
-面向中国大陆 A 股市场的单用户研究与决策工作台。
+面向中国大陆 A 股市场的单用户研究、选股、策略与复盘系统。
 
-项目当前定位不是“聊天式荐股”，也不是“自动实盘机器人”，而是一个以公开信息为事实源、以结构化输出为核心、以可追溯闭环为基础的产品系统。它已经具备可用的单票工作台、选股工作台、交易记录与复盘闭环；长期主线则继续向“因子发现、验证、组合与监控系统”演进。
+项目当前定位不是“聊天式荐股”，也不是“自动实盘机器人”，而是一个以公开信息为事实源、以结构化输出为核心、以可追溯闭环为基础的产品系统。当前已经具备可用的单票工作台、选股工作台、交易记录与复盘闭环；长期主线则继续向“因子发现、验证、组合与监控系统”演进。
 
-## 1. 长期方向
+## 1. 当前状态
 
-项目今后的主线不是继续堆更多零散页面或报告模块，而是沿着两条并行主线持续推进：
-
-1. 研究与决策工作台主线  
-   保留现有 `workspace-bundle + workflow + trade/review` 产品外壳，持续提升稳定性、可解释性、可操作性和消费级体验。
-
-2. 预测与评估主线  
-   逐步补齐点时特征、标签、回测、预测、评估、模型版本治理，并最终服务于长期目标：因子发现、验证、组合与监控系统。
-
-其中，以下三份文档定义了长期方向：
-
-- [因子系统 PRD v1](docs/a_share_factor_prd_v1.md)
-- [因子系统架构设计 v1](docs/a_share_architecture_design_spec_v1.md)
-- [因子字典 v1](docs/a_share_factor_dictionary_v1.md)
-
-## 2. 当前项目状态
-
-截至当前版本，项目已经完成的主线能力包括：
+截至当前版本，项目已经具备的主线能力包括：
 
 - 单票工作台：`/stocks/[symbol]`
 - 选股工作台：`/screener`
@@ -51,15 +35,12 @@
 - 组合级归因与持仓引擎
 - 实盘执行系统
 
-## 3. 当前主入口
+## 2. 当前主入口
 
 ### 单票主入口
 
 - `GET /stocks/{symbol}/workspace-bundle`
-
-前端页面：
-
-- [http://127.0.0.1:3000/stocks/600519.SH](http://127.0.0.1:3000/stocks/600519.SH)
+- 前端页面：[http://127.0.0.1:3000/stocks/600519.SH](http://127.0.0.1:3000/stocks/600519.SH)
 
 ### 选股主入口
 
@@ -67,10 +48,7 @@
 - `GET /workflows/runs/{run_id}`
 - `GET /screener/diagnostics/selection-lineage/latest`
 - `GET /screener/diagnostics/factor-lineage/{symbol}`
-
-前端页面：
-
-- [http://127.0.0.1:3000/screener](http://127.0.0.1:3000/screener)
+- 前端页面：[http://127.0.0.1:3000/screener](http://127.0.0.1:3000/screener)
 
 ### 深筛主入口
 
@@ -85,18 +63,16 @@
 - `GET /market/risk-proxies`
 - `GET /stocks/{symbol}/classification`
 
-### 交易与复盘主入口
+### 交易与复盘入口
 
 - `POST /decision-snapshots`
 - `POST /trades`
 - `POST /reviews/from-trade/{trade_id}`
+- 前端页面：
+  - [http://127.0.0.1:3000/trades](http://127.0.0.1:3000/trades)
+  - [http://127.0.0.1:3000/reviews](http://127.0.0.1:3000/reviews)
 
-前端页面：
-
-- [http://127.0.0.1:3000/trades](http://127.0.0.1:3000/trades)
-- [http://127.0.0.1:3000/reviews](http://127.0.0.1:3000/reviews)
-
-## 4. 数据源优先级
+## 3. 数据源优先级
 
 当前 `data_service` 的默认优先级已经收敛为：
 
@@ -104,11 +80,11 @@
 
 补充说明：
 
-- `tdx-api` 是本地 HTTP 主数据源，优先承担股票池、搜索、日线、行情等稳定链路。
-- `mootdx` 是本地高速历史源，适合离线或批量历史读取，但必须经过新鲜度与完整性检查。
-- `AKShare` 主要承担补充型、结构化型、研究型数据，不适合作为高频核心链路。
-- `BaoStock` 是稳定兜底源，用于行情与证券基础数据 fallback。
-- 公告类正式披露信息以 `CNINFO` 为准。
+- `tdx-api` 是本地 HTTP 主数据源，优先承担股票池、搜索、日线、行情等稳定链路
+- `mootdx` 是本地高速历史源，适合离线或批量历史读取，但必须经过新鲜度与完整性检查
+- `AKShare` 主要承担补充型、结构化型、研究型数据，不适合作为高频核心链路
+- `BaoStock` 是稳定兜底源，用于行情与证券基础数据 fallback
+- 公告类正式披露信息以 `CNINFO` 为准
 
 详见：[Provider 使用说明](docs/provider-notes.md)
 
@@ -118,40 +94,7 @@
 - `GET /providers/health`
 - `GET /providers/health/{capability}`
 
-## 5. 数据底座当前结论
-
-从长期方向看，当前数据底座已经完成“多源接入”向“统一标准层”的第一步，但仍有几项需要继续补齐的关键能力：
-
-1. 点时一致性仍需加强  
-   长期因子验证要求所有特征与标签都能严格按 `as_of_date` 重建，避免未来函数与回看污染。
-
-2. 数据域还不够完整  
-   当前已经完成第一阶段补齐：`基准目录 / 行业与板块分类 / 市场广度 / 基础风险代理` 已有标准 schema、日级数据产品与只读接口；但真实指数行情链路、更多风格代理变量与更丰富的风险暴露输入仍需后续继续补齐。
-
-3. 复权与公司行为口径需要继续集中化  
-   长期回测和因子验证要求明确区分原始价、前复权价、后复权价，以及停牌、ST、退市、分红送转等事件处理口径。
-
-当前已经完成前两阶段收口：
-
-- 日线 schema 与响应层已显式暴露 `adjustment_mode`
-- `/stocks/{symbol}/daily-bars` 已支持显式 `adjustment_mode=raw/qfq/hfq`
-- `daily_bars` 本地存储已按 `symbol + trade_date + adjustment_mode` 区分保存
-- 日线响应已统一暴露 `corporate_action_mode / corporate_action_warnings`
-
-4. 数据血缘与重建能力仍需加强  
-   长期上要能回答“这条特征来自哪个 provider、哪次落盘、哪个版本、是否发生过 fallback”，这对因子验证和模型评估很关键。
-
-5. provider 健康度与能力矩阵还需继续收敛  
-   当前已有 fallback 和可见性，且 capability 策略已经集中收口；后续重点不再是“再接更多源”，而是继续把数据域级能力表、stale fallback 边界和本地持久化要求制度化。
-
-这些问题已经在文档中收口为“长期方向下必须补齐的有限缺口”，不是无休止优化项。详见：
-
-- [系统架构](docs/architecture.md)
-- [路线图](docs/roadmap.md)
-- [当前阶段](docs/current_phase.md)
-- [Provider 使用说明](docs/provider-notes.md)
-
-## 6. 快速开始
+## 4. 快速开始
 
 环境建议：
 
@@ -188,7 +131,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_frontend.ps1
 - [快速开始](docs/manuals/quickstart.md)
 - [日常使用说明](docs/manuals/daily-usage.md)
 
-## 7. 测试命令
+## 5. 测试命令
 
 后端关键回归：
 
@@ -207,15 +150,26 @@ npm.cmd run lint
 npm.cmd run test:smoke
 ```
 
-## 8. 文档导航
+## 6. 文档导航
 
-### 当前执行基线
+### 首先阅读
+
+- [AGENTS.md](AGENTS.md)
+- [项目硬性约束](docs/project-constraints.md)
+- [当前执行基线](docs/execution-baseline.md)
+
+### 当前有效需求与任务书
+
+- [因子优先初筛设计 v1](docs/factor-first-screener-design-v1.md)
+- [因子优先初筛任务书 v1](docs/taskbook-factor-first-screener-v1.md)
+
+### 项目架构与长期方向
 
 - [系统架构](docs/architecture.md)
 - [路线图](docs/roadmap.md)
-- [当前阶段](docs/current_phase.md)
-- [项目任务书（v2.1，产品化增强版）](docs/taskbook-v2.1.md)
-- [项目任务书（v2.2，数据底座与点时特征版）](docs/taskbook-v2.2.md)
+- [因子系统 PRD v1](docs/a_share_factor_prd_v1.md)
+- [因子系统架构设计 v1](docs/a_share_architecture_design_spec_v1.md)
+- [因子字典 v1](docs/a_share_factor_dictionary_v1.md)
 
 ### 数据底座
 
@@ -229,17 +183,11 @@ npm.cmd run test:smoke
 - [日常使用说明](docs/manuals/daily-usage.md)
 - [故障排查](docs/manuals/troubleshooting.md)
 
-### 历史稳定化审计
+### 历史审计文档
 
 - [稳定性审计 v1](docs/audits/stability-review-v1.md)
 
-### 长期北极星文档
-
-- [因子系统 PRD v1](docs/a_share_factor_prd_v1.md)
-- [因子系统架构设计 v1](docs/a_share_architecture_design_spec_v1.md)
-- [因子字典 v1](docs/a_share_factor_dictionary_v1.md)
-
-## 9. 当前边界
+## 7. 当前边界
 
 当前系统适合：
 
@@ -256,23 +204,26 @@ npm.cmd run test:smoke
 - 高频交易
 - 把自由文本 LLM 结果直接当作交易指令
 
-## 10. 文档状态说明
+## 8. 文档使用说明
 
-当前文档已经按“长期方向 > 当前阶段 > 使用手册”三层收口：
+当前文档体系已经收口为“agent 约束 > 项目硬约束 > 当前执行基线 > 当前有效需求 / 任务书 > 使用手册 / 历史文档”。
 
-- 长期方向：回答项目最终要走向哪里
-- 当前阶段：回答现在优先做什么、不做什么
-- 使用手册：回答今天怎么把系统用起来
+- `AGENTS.md`：只用于约束 agent 的工作方式、任务前阅读要求和文档同步要求
+- `docs/project-constraints.md`：维护项目长期稳定的硬边界与架构约束
+- `docs/execution-baseline.md`：维护当前阶段、当前优先级、当前重点模块、当前有效需求与任务书
+- 当前有效的需求与任务书：以 `docs/execution-baseline.md` 中声明的文档为准
+- `README.md`：只作为项目总览与入口导航，不再承担“当前有效规则源”的职责
 
-如果后续代码和文档出现差异，应优先按下面顺序理解：
+如果代码与文档出现差异，应优先按下面顺序理解：
 
-1. `AGENTS.md`
-2. `docs/architecture.md`
-3. `docs/current_phase.md`
-4. `docs/taskbook-v2.1.md`
+1. `AGENTS.md`（仅限 agent 行为与执行要求）
+2. `docs/project-constraints.md`
+3. `docs/execution-baseline.md`
+4. `docs/execution-baseline.md` 中声明的当前有效需求与任务书
 5. `README.md`
 
-## 11. 财务数据源分层策略
+## 9. 财务数据源分层策略
+
 当前财务摘要主链已收口为：
 
 - 官方披露原文索引：`CNINFO`
@@ -283,66 +234,31 @@ npm.cmd run test:smoke
 
 补充说明：
 
-- `AKShare` 不再作为默认财务主源，只承担最后级补洞和临时 fallback。
-- `Tushare` 通过 `TUSHARE_ENABLED=true` 与 `TUSHARE_TOKEN=...` 启用；未启用时链路自动退化为 `local -> baostock -> akshare`。
-- 官方披露原文本轮只做“报告索引 + 下载链接”接口位，不做 PDF/XBRL 正文解析。
+- `AKShare` 不再作为默认财务主源，只承担最后级补洞和临时 fallback
+- `Tushare` 通过 `TUSHARE_ENABLED=true` 与 `TUSHARE_TOKEN=...` 启用；未启用时链路自动退化为 `local -> baostock -> akshare`
+- 官方披露原文本轮只做“报告索引 + 下载链接”接口位，不做 PDF/XBRL 正文解析
 - 财务摘要内部统一口径字段包括：
   - `revenue / net_profit`：单位统一为“元”
   - `roe / debt_ratio / revenue_yoy / net_profit_yoy / gross_margin`：统一为百分数
   - `eps / bps`：统一为元/股
   - `report_period`：`YYYY-MM-DD`
   - `report_type`：`q1 / half / q3 / annual / ttm / unknown`
-## 12. 数据血缘与版本追踪
 
-当前项目已经完成包 4 的主链落地，目标是把零散存在的：
+## 10. 数据血缘与版本追踪
 
-- `as_of_date`
-- `generated_at`
-- `feature_version`
-- `label_version`
-- `model_version`
-- `provider_used`
+当前项目已经完成 Phase 4 的主链落地，目标是把分散存在的：
 
-统一收口成可落袋、可查询、可回溯的数据血缘体系。
+- workflow runs
+- screener batches
+- daily products
+- factor snapshots
+- predictive snapshots
+- evaluation / backtest artifacts
 
-当前已落地的能力包括：
+逐步收敛到统一的“数据来源、版本、参数、回放依据”体系中。
 
-- 统一 lineage schema：
-  - `LineageSourceRef`
-  - `LineageDependency`
-  - `LineageMetadata`
-  - `LineageListResponse`
-  - `WorkspaceLineageItem`
-  - `LineageSummary`
-- 日级数据产品统一携带：
-  - `dataset_version`
-  - `provider_used`
-  - `warning_messages`
-  - `lineage_metadata`
-- `feature / label / prediction / backtest / evaluation` 已统一接入 lineage metadata
-- 本地 `dataset_lineage_records` 登记簿已落地
-- `workspace-bundle` 已新增模块级 `lineage_summary`
-- 初筛工作流已新增：
-  - 单票 `screener_factor_snapshot_daily`
-  - 批次 `screener_selection_snapshot_daily`
-  - `/screener/diagnostics/selection-lineage/latest`
-  - `/screener/diagnostics/factor-lineage/{symbol}`
+现阶段重点是：
 
-当前可用的只读 lineage 诊断接口：
-
-- `GET /lineage/datasets`
-- `GET /lineage/datasets/{dataset}/{dataset_version}`
-- `GET /datasets/features/{dataset_version}/lineage`
-- `GET /datasets/labels/{label_version}/lineage`
-- `GET /predictions/{symbol}/lineage`
-- `GET /stocks/{symbol}/workspace-lineage`
-
-当前边界：
-
-- 只记录直接上游依赖，不做递归依赖图展开
-- 不做前端 lineage 展示重构
-- 不引入新的外部元数据仓库
-
-如需查看当前包 4 的阶段说明，见：
-
-- [数据血缘与版本追踪包状态说明](docs/lineage-package-v1.md)
+- 让初筛结果能追溯到因子快照、方案版本和质量门控结果
+- 让预测与评估结果具备更明确的版本信息与重建依据
+- 为后续因子验证、策略复盘与方案比较提供统一底座
