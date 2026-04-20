@@ -157,11 +157,15 @@ npm.cmd run test:smoke
 - [AGENTS.md](AGENTS.md)
 - [项目硬性约束](docs/project-constraints.md)
 - [当前执行基线](docs/execution-baseline.md)
+- [Docs 索引](docs/index.md)
 
 ### 当前有效需求与任务书
 
 - [因子优先初筛设计 v1](docs/factor-first-screener-design-v1.md)
 - [因子优先初筛任务书 v1](docs/taskbook-factor-first-screener-v1.md)
+- [因子优先初筛实现规格 v1](docs/factor-first-screener-implementation-spec-v1.md)
+- [因子优先初筛 API 与存储规格 v1](docs/factor-first-screener-api-storage-spec-v1.md)
+- [因子优先初筛前端交互规格 v1](docs/factor-first-screener-frontend-spec-v1.md)
 
 ### 项目架构与长期方向
 
@@ -211,6 +215,7 @@ npm.cmd run test:smoke
 - `AGENTS.md`：只用于约束 agent 的工作方式、任务前阅读要求和文档同步要求
 - `docs/project-constraints.md`：维护项目长期稳定的硬边界与架构约束
 - `docs/execution-baseline.md`：维护当前阶段、当前优先级、当前重点模块、当前有效需求与任务书
+- `docs/index.md`：整理 `docs/` 目录，区分当前有效、长期参考、使用文档与历史文档
 - 当前有效的需求与任务书：以 `docs/execution-baseline.md` 中声明的文档为准
 - `README.md`：只作为项目总览与入口导航，不再承担“当前有效规则源”的职责
 

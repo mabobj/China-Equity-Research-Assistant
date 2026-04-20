@@ -21,6 +21,11 @@
 - 长期项目硬约束：见 `docs/project-constraints.md`
 - 代理工作方式约束：见 `AGENTS.md`
 
+补充说明：
+
+- `docs/index.md` 是当前 `docs/` 目录的整理入口；
+- 它不替代本文件，但用于区分“当前有效”和“历史参考”。
+
 ## 2. 当前阶段
 
 当前项目处于：
@@ -62,12 +67,18 @@
 以下文档当前有效，涉及初筛、因子、前端重构、方案化筛选时必须阅读：
 
 1. `docs/factor-first-screener-design-v1.md`
+2. `docs/factor-first-screener-implementation-spec-v1.md`
+3. `docs/factor-first-screener-api-storage-spec-v1.md`
+4. `docs/factor-first-screener-frontend-spec-v1.md`
 
 其职责是：
 
 - 定义“以因子出发的股票初筛，可记录、可复盘”的目标形态；
 - 说明当前项目现状能直接复用什么、还缺什么；
 - 定义方案对象、版本对象、运行快照、结果挂接与复盘聚合方向。
+- 定义第一阶段可直接编码的对象边界、模块落点、接入顺序。
+- 定义后端 API、存储、版本与迁移规则。
+- 定义前端交互主线、页面分区、依赖顺序与验收边界。
 
 ## 6. 当前有效任务书
 
@@ -107,6 +118,9 @@
 
 1. `docs/factor-first-screener-design-v1.md`
 2. `docs/taskbook-factor-first-screener-v1.md`
+3. `docs/factor-first-screener-implementation-spec-v1.md`
+4. `docs/factor-first-screener-api-storage-spec-v1.md`
+5. `docs/factor-first-screener-frontend-spec-v1.md`
 
 ### 7.3 其他模块任务
 
@@ -129,3 +143,16 @@
 - 避免把历史版本长期并列为同等有效；
 - 当文档失效时，应明确替换关系或移出当前有效清单；
 - 当实现已经偏离文档时，优先更新文档，再继续让代理引用。
+
+## 9. 当前文档整理状态
+
+当前 `docs/` 目录已经按下列方式收口：
+
+- 当前有效入口：见 `docs/index.md`
+- 当前有效需求与技术规格：见本文件第 5、6 节
+- 历史阶段文档继续保留，但不再作为当前实现依据
+
+后续新增文档时，必须同步更新：
+
+1. `docs/index.md`
+2. 本文件的当前有效清单
