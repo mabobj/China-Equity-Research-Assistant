@@ -63,9 +63,8 @@ export function ScreenerWorkspace() {
   const [schemeDetail, setSchemeDetail] = useState<ScreenerSchemeDetailResponse | null>(null);
   const [schemeRuns, setSchemeRuns] = useState<ScreenerSchemeRunsResponse | null>(null);
   const [schemeStats, setSchemeStats] = useState<ScreenerSchemeStatsResponse | null>(null);
-  const [schemeFeedback, setSchemeFeedback] = useState<ScreenerSchemeReviewStatsResponse | null>(
-    null,
-  );
+  const [schemeFeedback, setSchemeFeedback] =
+    useState<ScreenerSchemeReviewStatsResponse | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [selectedBatchResults, setSelectedBatchResults] =
     useState<ScreenerBatchResultsResponse | null>(null);
@@ -422,6 +421,7 @@ export function ScreenerWorkspace() {
         }
         batchId={selectedBatchResults?.batch.batch_id ?? selectedBatchId}
         batchStatus={selectedBatchResults?.batch.status ?? selectedRunSummary?.status ?? null}
+        batchCandidateCount={selectedBatchResults?.results.length ?? null}
         selectedResultCount={filteredResults.length}
         selectedSymbol={selectedResult?.symbol ?? null}
       />
@@ -454,6 +454,7 @@ export function ScreenerWorkspace() {
 
       <ScreenerResultPanel
         batch={selectedBatchResults?.batch ?? null}
+        batchResultCount={allResults.length}
         loading={resultsLoading}
         error={resultsError}
         results={pagedResults}
@@ -495,7 +496,7 @@ export function ScreenerWorkspace() {
         <div className="mt-4 space-y-6">
           <SectionCard
             title="深筛工作流（保持兼容）"
-            description="深筛仍保留为二次筛选入口，建议先完成当前方案的初筛运行后再继续。"
+            description="深筛仍然保留为二次筛选入口，建议先完成当前方案的初筛运行后再继续。"
           >
             <form className="grid gap-4 md:grid-cols-4" onSubmit={handleRunDeep}>
               <ScreenerField
@@ -524,7 +525,11 @@ export function ScreenerWorkspace() {
             </form>
             <div className="mt-5 space-y-4">
               {deepError ? (
-                <StatusBlock title="深筛工作流启动失败" description={deepError} tone="error" />
+                <StatusBlock
+                  title="深筛工作流启动失败"
+                  description={deepError}
+                  tone="error"
+                />
               ) : null}
               {deepRun ? (
                 <WorkflowRunSummary run={deepRun} />
@@ -548,6 +553,7 @@ function ContextOverview({
   schemeVersion,
   batchId,
   batchStatus,
+  batchCandidateCount,
   selectedResultCount,
   selectedSymbol,
 }: {
@@ -555,6 +561,7 @@ function ContextOverview({
   schemeVersion: string | null;
   batchId: string | null;
   batchStatus: string | null;
+  batchCandidateCount: number | null;
   selectedResultCount: number;
   selectedSymbol: string | null;
 }) {
@@ -570,8 +577,12 @@ function ContextOverview({
         <ScreenerMetric label="批次状态" value={batchStatus ?? "-"} />
         <ScreenerMetric label="当前明细股票" value={selectedSymbol ?? "-"} />
       </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <ScreenerMetric label="当前候选数" value={String(selectedResultCount)} />
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <ScreenerMetric label="当前筛选命中" value={String(selectedResultCount)} />
+        <ScreenerMetric
+          label="批次原始候选"
+          value={batchCandidateCount === null ? "-" : String(batchCandidateCount)}
+        />
         <ScreenerMetric
           label="如何切换批次"
           value="在反馈区点击历史运行行"
@@ -629,7 +640,7 @@ function renderDeepFinalOutput(run: WorkflowRunDetailResponse | null) {
     return (
       <StatusBlock
         title="无深筛输出"
-        description="工作流已结束，但没有返回深筛候选。"
+        description="工作流已经结束，但没有返回深筛候选。"
         tone="error"
       />
     );

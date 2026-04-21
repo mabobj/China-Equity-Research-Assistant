@@ -28,16 +28,31 @@ export function ScreenerReviewPanel({
   selectedBatchId: string | null;
   onSelectBatchId: (batchId: string) => void;
 }) {
+  const hasAnyReviewData = Boolean(stats || feedback || runs);
+
   return (
     <SectionCard
       title="反馈"
-      description="这里按方案看历史运行、转入研究/交易/复盘的数量，以及最基础的反馈分布。"
+      description="这里按方案查看历史运行、进入研究/交易/复盘的数量，以及最基础的反馈分布。"
     >
       <div className="space-y-4">
         {loading ? (
-          <StatusBlock title="加载中" description="正在读取当前方案的历史运行与反馈统计..." />
+          <StatusBlock
+            title="加载中"
+            description="正在读取当前方案的历史运行与反馈统计..."
+          />
         ) : null}
         {error ? <StatusBlock title="反馈加载失败" description={error} tone="error" /> : null}
+        {!loading && !error && !hasAnyReviewData ? (
+          <StatusBlock
+            title="反馈数据暂未形成"
+            description="当前方案还没有足够的历史运行、研究、交易或复盘沉淀。先完成一次初筛运行，后续这里会逐步形成统计。"
+          />
+        ) : null}
+
+        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-900">
+          反馈区回答三个问题：这套方案跑过多少次、筛出了什么、后续有没有进入研究与交易。点击历史批次后，结果区会同步切换到对应批次。
+        </div>
 
         {stats ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -127,11 +142,18 @@ export function ScreenerReviewPanel({
                 <p className="mt-2 text-sm font-medium text-emerald-700">
                   当前正在查看批次：{selectedBatchId}
                 </p>
-              ) : null}
+              ) : (
+                <p className="mt-2 text-sm text-slate-600">
+                  请选择一个批次，结果区才会切换到对应候选。
+                </p>
+              )}
             </div>
             {runs.items.length === 0 ? (
               <div className="p-4">
-                <StatusBlock title="暂无历史运行" description="当前方案还没有可查看的运行记录。" />
+                <StatusBlock
+                  title="暂无历史运行"
+                  description="当前方案还没有可查看的运行记录。"
+                />
               </div>
             ) : (
               <div className="overflow-x-auto">

@@ -235,3 +235,16 @@
   - `frontend` `npm run type-check`
   - `frontend` `npm run lint`
 - 当前下一步进入包 5 后续收口：继续处理消费级体验细化，包括关键文案统一、中文展示核对、必要的空状态和说明优化，以及真实页面走查后的小步修正。
+## 13. 2026-04-21 Package 5 Wrap-up Update
+
+本次补充如下：
+- `/screener` 四个主面板与顶层工作台已完成 UTF-8 文本收口，修复了关键中文提示中的乱码问题。
+- `frontend/src/components/screener-scheme-panel.tsx` 已补齐“暂无可用方案”状态，并明确解释“方案 = 配置快照”的含义。
+- `frontend/src/components/screener-run-panel.tsx` 已补齐运行参数解释、无方案时的阻断提示，以及“重置游标”后的行为说明。
+- `frontend/src/components/screener-result-panel.tsx` 已补齐“无批次结果”“无匹配结果”“暂无模型评估建议”等空状态，并显式区分当前筛选命中、批次原始候选、当前展开股票。
+- `frontend/src/components/screener-review-panel.tsx` 已补齐“反馈数据暂未形成”解释、历史批次切换说明与当前查看批次提示。
+- `frontend/src/components/screener-workspace.tsx` 已同步完成工作台级中文文案收口与上下文提示修复，深筛兼容区文案也已统一。
+- 当前 package 5 的前端主收尾已完成；后续若继续迭代 `/screener`，应进入新的任务包而不是继续在本包内追加零散 UI 修补。
+- 校验结果：
+  - `frontend npm run type-check`
+  - `frontend npm run lint`

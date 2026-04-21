@@ -68,7 +68,12 @@ export function ScreenerRunPanel({
               value={formatDateTime(schemeDetail.scheme.updated_at)}
             />
           </div>
-        ) : null}
+        ) : (
+          <StatusBlock
+            title="请先选择方案"
+            description="运行区不会自己决定用哪套规则。先在上方方案区选中方案，再回来发起初筛。"
+          />
+        )}
 
         <form className="grid gap-4 lg:grid-cols-4" onSubmit={onRun}>
           <ScreenerField
@@ -103,6 +108,21 @@ export function ScreenerRunPanel({
           </div>
         </form>
 
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <ScreenerMetric
+            label="batch_size 含义"
+            value="控制本批返回多少只股票，不等于全市场补数。"
+          />
+          <ScreenerMetric
+            label="max_symbols 含义"
+            value="控制本次最多扫描多少只股票，留空时跟随 batch_size。"
+          />
+          <ScreenerMetric
+            label="force_refresh 含义"
+            value="只刷新本次执行所需数据，不会改写方案版本。"
+          />
+        </div>
+
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <button
             type="button"
@@ -113,7 +133,7 @@ export function ScreenerRunPanel({
             {resetLoading ? "重置中..." : "重置游标"}
           </button>
           <p className="text-sm text-slate-600">
-            当日快照作废后，下次初筛会从股票池起点重新开始计算。
+            点击后会让当日快照失效。下一次初筛会从股票池起点重新开始计算，但仍然保留 batch_size 的分批机制。
           </p>
         </div>
 

@@ -29,19 +29,29 @@ export function ScreenerSchemePanel({
   const enabledGroups = Array.isArray(
     version?.config.factor_selection_config.enabled_groups,
   )
-    ? version?.config.factor_selection_config.enabled_groups.map((item) => String(item))
+    ? version.config.factor_selection_config.enabled_groups.map((item) => String(item))
     : [];
 
   return (
     <SectionCard
       title="方案"
-      description="先确认当前使用哪套初筛方案，再决定是否发起运行。结果和反馈都会回挂到这里。"
+      description="先确认当前使用的是哪套初筛方案，再决定是否发起运行。后续的结果与反馈都会围绕这个方案展开。"
     >
       <div className="space-y-4">
         {loading ? (
-          <StatusBlock title="加载中" description="正在读取方案列表与当前方案详情..." />
+          <StatusBlock
+            title="加载中"
+            description="正在读取方案列表与当前方案详情..."
+          />
         ) : null}
         {error ? <StatusBlock title="方案加载失败" description={error} tone="error" /> : null}
+        {schemes && schemes.items.length === 0 && !loading && !error ? (
+          <StatusBlock
+            title="暂无可用方案"
+            description="当前还没有可供运行的初筛方案。需要先在后端准备好方案定义，再回到这里选择并运行。"
+          />
+        ) : null}
+
         {schemes && schemes.items.length > 0 ? (
           <>
             <label className="space-y-2">
@@ -62,6 +72,10 @@ export function ScreenerSchemePanel({
 
             {schemeDetail ? (
               <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                  方案是本次初筛的配置快照。这里定义因子分组、权重、阈值和质量门控；切换方案不会改写历史批次，历史结果会继续挂在各自运行时使用的方案版本下。
+                </div>
+
                 <div className="flex flex-col gap-2">
                   <h3 className="text-lg font-semibold text-slate-950">
                     {schemeDetail.scheme.name}
@@ -70,6 +84,7 @@ export function ScreenerSchemePanel({
                     {schemeDetail.scheme.description ?? "当前方案暂未填写说明。"}
                   </p>
                 </div>
+
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <ScreenerMetric
                     label="方案状态"
@@ -88,6 +103,7 @@ export function ScreenerSchemePanel({
                     value={formatDateTime(schemeDetail.scheme.updated_at)}
                   />
                 </div>
+
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <ScreenerMetric
                     label="启用因子组"
@@ -102,6 +118,7 @@ export function ScreenerSchemePanel({
                     value={formatConfigSummary(version?.config.quality_gate_config ?? {})}
                   />
                 </div>
+
                 <div className="grid gap-4 xl:grid-cols-2">
                   <ScreenerStringPanel
                     title="最近版本摘要"

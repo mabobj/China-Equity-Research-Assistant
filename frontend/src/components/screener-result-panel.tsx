@@ -45,6 +45,7 @@ export type ResultFilters = {
 
 export function ScreenerResultPanel({
   batch,
+  batchResultCount,
   loading,
   error,
   results,
@@ -64,6 +65,7 @@ export function ScreenerResultPanel({
   evaluationError,
 }: {
   batch: ScreenerBatchRecord | null;
+  batchResultCount: number;
   loading: boolean;
   error: string | null;
   results: ScreenerSymbolResult[];
@@ -102,13 +104,23 @@ export function ScreenerResultPanel({
   return (
     <SectionCard
       title="结果"
-      description="结果列表始终带着方案上下文展示，不再只给一串脱离方案的股票。"
+      description="结果列表始终带着方案上下文展示，不再只给出一串脱离方案的股票。"
     >
       <div className="space-y-4">
         {loading ? (
-          <StatusBlock title="加载中" description="正在读取当前方案最近一次运行结果..." />
+          <StatusBlock
+            title="加载中"
+            description="正在读取当前方案最近一次运行结果..."
+          />
         ) : null}
         {error ? <StatusBlock title="结果加载失败" description={error} tone="error" /> : null}
+        {!loading && !error && !batch ? (
+          <StatusBlock
+            title="还没有可查看的批次结果"
+            description="先运行当前方案，或到下方反馈区选择一条已有历史批次，结果区才会出现候选列表。"
+          />
+        ) : null}
+
         {batch ? (
           <>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -121,10 +133,27 @@ export function ScreenerResultPanel({
                 value={formatDateTime(batch.finished_at ?? batch.started_at)}
               />
             </div>
+
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900">
               当前结果区展示的是批次 <span className="font-semibold">{batch.batch_id}</span>{" "}
               的候选列表。若要切换到其他历史运行，请到下方反馈区点击对应批次。
             </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <ScreenerMetric
+                label="当前筛选命中"
+                value={String(filteredResults.length)}
+              />
+              <ScreenerMetric
+                label="批次原始候选"
+                value={String(batchResultCount)}
+              />
+              <ScreenerMetric
+                label="当前展开股票"
+                value={selectedSymbol ?? "未选择"}
+              />
+            </div>
+
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               <ScreenerMetric
                 label={formatListType("READY_TO_BUY")}
@@ -276,6 +305,7 @@ function BatchPagination({
 }) {
   const start = totalResults === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const end = Math.min(currentPage * pageSize, totalResults);
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -342,7 +372,7 @@ function BatchResultTable({
     return (
       <StatusBlock
         title="没有匹配结果"
-        description="当前方案最近运行暂无候选，或筛选条件过滤掉了全部结果。"
+        description="当前方案最近运行暂无候选，或者筛选条件已经把结果全部过滤掉了。"
       />
     );
   }
@@ -368,6 +398,7 @@ function BatchResultTable({
             const evaluation = modelVersion ? evaluationByVersion[modelVersion] ?? null : null;
             const evaluationLoading =
               modelVersion !== null && evaluationLoadingVersion === modelVersion;
+
             return (
               <Fragment key={`${item.symbol}-${item.calculated_at}`}>
                 <tr
@@ -433,6 +464,8 @@ function BatchResultDetail({
   evaluationLoading: boolean;
   evaluationError: string | null;
 }) {
+  const hasPredictiveModel = Boolean(result.predictive_model_version);
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -451,6 +484,7 @@ function BatchResultDetail({
           打开单票页
         </Link>
       </div>
+
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <ScreenerMetric label="方案名称" value={result.scheme_name ?? "-"} />
         <ScreenerMetric label="方案版本" value={result.scheme_version ?? "-"} />
@@ -462,6 +496,7 @@ function BatchResultDetail({
           value={result.action_now ? formatDecisionBriefAction(result.action_now) : "-"}
         />
       </div>
+
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <ScreenerMetric label="行情质量" value={formatLabel(result.bars_quality ?? "-")} />
         <ScreenerMetric label="财务质量" value={formatLabel(result.financial_quality ?? "-")} />
@@ -474,6 +509,7 @@ function BatchResultDetail({
           value={result.quality_penalty_applied ? "已应用" : "未应用"}
         />
       </div>
+
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <ScreenerMetric
           label="预测分"
@@ -500,10 +536,17 @@ function BatchResultDetail({
           value={result.predictive_model_version ?? "-"}
         />
       </div>
+
       {evaluationLoading ? (
         <StatusBlock
           title="模型版本建议"
           description="正在加载该模型版本的评估建议..."
+        />
+      ) : null}
+      {!hasPredictiveModel ? (
+        <StatusBlock
+          title="暂无模型评估建议"
+          description="这条候选结果还没有绑定预测模型版本，因此不会展示模型评估建议。当前仍可先使用规则侧结果与质量信息进行判断。"
         />
       ) : null}
       {evaluation ? (
@@ -535,14 +578,23 @@ function BatchResultDetail({
         </div>
       ) : null}
       {evaluationError ? (
-        <StatusBlock title="模型评估建议加载失败" description={evaluationError} tone="error" />
+        <StatusBlock
+          title="模型评估建议加载失败"
+          description={evaluationError}
+          tone="error"
+        />
       ) : null}
+
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <ScreenerMetric label="支持位" value={formatPrice(result.support_level)} />
+        <ScreenerMetric label="支撑位" value={formatPrice(result.support_level)} />
         <ScreenerMetric label="压力位" value={formatPrice(result.resistance_level)} />
         <ScreenerMetric label="评分配置" value={result.scoring_profile_name ?? "-"} />
-        <ScreenerMetric label="质量门控配置" value={result.quality_gate_profile_name ?? "-"} />
+        <ScreenerMetric
+          label="质量门控配置"
+          value={result.quality_gate_profile_name ?? "-"}
+        />
       </div>
+
       <div className="mt-4 space-y-3">
         <ScreenerMetric label="规则版本" value={result.rule_version} />
         <ScreenerMetric label="规则说明" value={result.rule_summary} />
