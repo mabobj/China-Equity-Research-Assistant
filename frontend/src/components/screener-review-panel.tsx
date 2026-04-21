@@ -123,6 +123,11 @@ export function ScreenerReviewPanel({
               <p className="mt-1 text-sm text-slate-600">
                 点击某次运行后，结果区会切换到对应批次的候选列表。
               </p>
+              {selectedBatchId ? (
+                <p className="mt-2 text-sm font-medium text-emerald-700">
+                  当前正在查看批次：{selectedBatchId}
+                </p>
+              ) : null}
             </div>
             {runs.items.length === 0 ? (
               <div className="p-4">

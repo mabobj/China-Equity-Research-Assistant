@@ -121,6 +121,10 @@ export function ScreenerResultPanel({
                 value={formatDateTime(batch.finished_at ?? batch.started_at)}
               />
             </div>
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900">
+              当前结果区展示的是批次 <span className="font-semibold">{batch.batch_id}</span>{" "}
+              的候选列表。若要切换到其他历史运行，请到下方反馈区点击对应批次。
+            </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               <ScreenerMetric
                 label={formatListType("READY_TO_BUY")}

@@ -299,6 +299,11 @@ export function ScreenerWorkspace() {
         allResults.find((item) => item.symbol === selectedSymbol) ??
         null;
 
+  const selectedRunSummary =
+    selectedBatchId == null
+      ? null
+      : schemeRuns?.items.find((item) => item.batch_id === selectedBatchId) ?? null;
+
   useEffect(() => {
     const modelVersion = selectedResult?.predictive_model_version;
     if (!modelVersion) {
@@ -408,6 +413,19 @@ export function ScreenerWorkspace() {
 
   return (
     <div className="space-y-6">
+      <ContextOverview
+        schemeName={schemeDetail?.scheme.name ?? null}
+        schemeVersion={
+          schemeDetail?.current_version_detail?.version_label ??
+          schemeDetail?.scheme.current_version ??
+          null
+        }
+        batchId={selectedBatchResults?.batch.batch_id ?? selectedBatchId}
+        batchStatus={selectedBatchResults?.batch.status ?? selectedRunSummary?.status ?? null}
+        selectedResultCount={filteredResults.length}
+        selectedSymbol={selectedResult?.symbol ?? null}
+      />
+
       <ScreenerSchemePanel
         schemes={schemes}
         selectedSchemeId={selectedSchemeId}
@@ -522,6 +540,48 @@ export function ScreenerWorkspace() {
         </div>
       </details>
     </div>
+  );
+}
+
+function ContextOverview({
+  schemeName,
+  schemeVersion,
+  batchId,
+  batchStatus,
+  selectedResultCount,
+  selectedSymbol,
+}: {
+  schemeName: string | null;
+  schemeVersion: string | null;
+  batchId: string | null;
+  batchStatus: string | null;
+  selectedResultCount: number;
+  selectedSymbol: string | null;
+}) {
+  return (
+    <SectionCard
+      title="当前查看上下文"
+      description="先确认你当前看的是哪套方案、哪次批次、哪只股票，后面的结果和反馈都会围绕这个上下文变化。"
+    >
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <ScreenerMetric label="当前方案" value={schemeName ?? "尚未选择"} />
+        <ScreenerMetric label="方案版本" value={schemeVersion ?? "-"} />
+        <ScreenerMetric label="当前批次" value={batchId ?? "尚未选中"} />
+        <ScreenerMetric label="批次状态" value={batchStatus ?? "-"} />
+        <ScreenerMetric label="当前明细股票" value={selectedSymbol ?? "-"} />
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ScreenerMetric label="当前候选数" value={String(selectedResultCount)} />
+        <ScreenerMetric
+          label="如何切换批次"
+          value="在反馈区点击历史运行行"
+        />
+        <ScreenerMetric
+          label="如何切换股票"
+          value="在结果区点击候选行"
+        />
+      </div>
+    </SectionCard>
   );
 }
 

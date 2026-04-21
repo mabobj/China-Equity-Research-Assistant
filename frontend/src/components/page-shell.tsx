@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 type NavItem = {
@@ -21,13 +24,15 @@ const NAV_ITEMS: readonly NavItem[] = [
 ];
 
 export function PageShell({ title, description, children }: PageShellProps) {
+  const pathname = usePathname();
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 px-5 py-8 sm:px-8 lg:px-10">
       <header className="rounded-[2rem] border border-emerald-950/10 bg-white/90 p-6 shadow-sm backdrop-blur">
         <div className="flex flex-col gap-6">
           <div className="space-y-2">
             <p className="text-sm font-medium uppercase tracking-[0.28em] text-emerald-700">
-              稳定性阶段
+              China Equity Research Assistant
             </p>
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
               {title}
@@ -41,7 +46,11 @@ export function PageShell({ title, description, children }: PageShellProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800"
+                className={
+                  pathname === item.href
+                    ? "rounded-full border border-emerald-300 bg-emerald-100 px-4 py-2 font-semibold text-emerald-900 transition"
+                    : "rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800"
+                }
               >
                 {item.label}
               </Link>

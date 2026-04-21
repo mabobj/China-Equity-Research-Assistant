@@ -31,6 +31,13 @@ export function WorkflowRunSummary({ run }: WorkflowRunSummaryProps) {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="方案名称" value={run.scheme_name ?? "-"} />
+        <Metric label="方案版本" value={run.scheme_version ?? "-"} />
+        <Metric label="方案 ID" value={run.scheme_id ?? "-"} />
+        <Metric label="方案快照" value={run.scheme_snapshot_hash ?? "-"} />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
           label="请求模式"
           value={formatLabel(run.runtime_mode_requested ?? "-")}
