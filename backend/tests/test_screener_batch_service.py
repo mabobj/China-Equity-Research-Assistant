@@ -22,6 +22,10 @@ def test_batch_service_persists_batch_and_symbol_results(tmp_path) -> None:
         max_symbols=120,
         top_n=30,
         started_at=started_at,
+        scheme_id="default_builtin_scheme",
+        scheme_version="legacy_v1",
+        scheme_name="默认内置方案",
+        scheme_snapshot_hash="hash-001",
     )
 
     output = ScreenerRunResponse(
@@ -65,6 +69,13 @@ def test_batch_service_persists_batch_and_symbol_results(tmp_path) -> None:
         watch_pullback_candidates=[],
         watch_breakout_candidates=[],
         research_only_candidates=[],
+        scheme_id="default_builtin_scheme",
+        scheme_version="legacy_v1",
+        scheme_name="默认内置方案",
+        scheme_snapshot_hash="hash-001",
+        selected_factor_groups=["trend", "trigger", "risk", "quality"],
+        scoring_profile_name="legacy_weights",
+        quality_gate_profile_name="default_quality_gate",
     )
 
     finished_at = datetime(2026, 3, 29, 17, 8, tzinfo=ZoneInfo("Asia/Shanghai"))
@@ -86,6 +97,8 @@ def test_batch_service_persists_batch_and_symbol_results(tmp_path) -> None:
     latest = service.get_latest_batch(now=finished_at + timedelta(minutes=1))
     assert latest is not None
     assert latest.batch_id == batch.batch_id
+    assert latest.scheme_id == "default_builtin_scheme"
+    assert latest.scheme_version == "legacy_v1"
 
     results = service.load_batch_results(batch.batch_id)
     assert len(results) == 1
@@ -95,6 +108,13 @@ def test_batch_service_persists_batch_and_symbol_results(tmp_path) -> None:
     assert results[0].financial_quality == "warning"
     assert results[0].quality_penalty_applied is True
     assert results[0].quality_note is not None
+    assert results[0].scheme_id == "default_builtin_scheme"
+    assert results[0].scheme_version == "legacy_v1"
+    assert results[0].scheme_name == "默认内置方案"
+    assert results[0].scheme_snapshot_hash == "hash-001"
+    assert results[0].selected_factor_groups == ["trend", "trigger", "risk", "quality"]
+    assert results[0].scoring_profile_name == "legacy_weights"
+    assert results[0].quality_gate_profile_name == "default_quality_gate"
 
     detail = service.load_symbol_result(batch.batch_id, "600519.SH")
     assert detail is not None

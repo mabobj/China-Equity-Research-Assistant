@@ -54,6 +54,10 @@ class ScreenerBatchService:
         started_at: datetime,
         trade_date: date | None = None,
         rule_version: str = _DEFAULT_RULE_VERSION,
+        scheme_id: str | None = None,
+        scheme_version: str | None = None,
+        scheme_name: str | None = None,
+        scheme_snapshot_hash: str | None = None,
     ) -> ScreenerBatchRecord:
         resolved_trade_date = trade_date or resolve_screener_trade_date()
         batch_id = self._build_batch_id(resolved_trade_date)
@@ -70,12 +74,16 @@ class ScreenerBatchService:
             batch_size=batch_size,
             max_symbols=max_symbols,
             top_n=top_n,
+            scheme_id=scheme_id,
+            scheme_version=scheme_version,
+            scheme_name=scheme_name,
+            scheme_snapshot_hash=scheme_snapshot_hash,
         )
         with self._lock:
             self._save_batch_record(record)
             self._save_run_index(run_id=run_id, batch_id=batch_id)
         logger.info(
-            "event=screener.batch.created run_id=%s batch_id=%s trade_date=%s batch_size=%s max_symbols=%s top_n=%s started_at=%s",
+            "event=screener.batch.created run_id=%s batch_id=%s trade_date=%s batch_size=%s max_symbols=%s top_n=%s started_at=%s scheme_id=%s scheme_version=%s",
             run_id,
             batch_id,
             resolved_trade_date.isoformat(),
@@ -83,6 +91,8 @@ class ScreenerBatchService:
             max_symbols,
             top_n,
             started_at.isoformat(),
+            scheme_id,
+            scheme_version,
         )
         return record
 
@@ -115,11 +125,21 @@ class ScreenerBatchService:
             results: list[ScreenerSymbolResult] = []
 
             if screener_output is not None:
+                resolved_output = screener_output.model_copy(
+                    update={
+                        "scheme_id": screener_output.scheme_id or current.scheme_id,
+                        "scheme_version": screener_output.scheme_version
+                        or current.scheme_version,
+                        "scheme_name": screener_output.scheme_name or current.scheme_name,
+                        "scheme_snapshot_hash": screener_output.scheme_snapshot_hash
+                        or current.scheme_snapshot_hash,
+                    }
+                )
                 universe_size = screener_output.total_symbols
                 scanned_size = screener_output.scanned_symbols
                 results = self._build_symbol_results(
                     batch_id=batch_id,
-                    output=screener_output,
+                    output=resolved_output,
                     calculated_at=finished_at or datetime.now(_SHANGHAI_TZ),
                     rule_version=current.rule_version,
                 )
@@ -409,6 +429,13 @@ class ScreenerBatchService:
                     calculated_at=candidate.calculated_at or calculated_at,
                     rule_version=candidate.rule_version or rule_version,
                     rule_summary=candidate.rule_summary or _DEFAULT_RULE_SUMMARY,
+                    scheme_id=output.scheme_id,
+                    scheme_version=output.scheme_version,
+                    scheme_name=output.scheme_name,
+                    scheme_snapshot_hash=output.scheme_snapshot_hash,
+                    selected_factor_groups=list(output.selected_factor_groups),
+                    scoring_profile_name=output.scoring_profile_name,
+                    quality_gate_profile_name=output.quality_gate_profile_name,
                     action_now=candidate.action_now,
                     headline_verdict=str(display_fields["headline_verdict"]),
                     evidence_hints=list(display_fields["evidence_hints"]),

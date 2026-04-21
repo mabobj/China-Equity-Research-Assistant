@@ -24,6 +24,10 @@ class ScreenerSnapshotParams:
     cursor_start_index: int | None = None
     reset_trade_date: str | None = None
     deep_top_k: int | None = None
+    scheme_id: str | None = None
+    scheme_version: str | None = None
+    scheme_name: str | None = None
+    scheme_snapshot_hash: str | None = None
     snapshot_version: str = _SCREENER_SNAPSHOT_VERSION
 
 
@@ -109,6 +113,10 @@ class ScreenerSnapshotDailyDataset:
                 "cursor_start_index": params.cursor_start_index,
                 "reset_trade_date": params.reset_trade_date,
                 "deep_top_k": params.deep_top_k,
+                "scheme_id": params.scheme_id,
+                "scheme_version": params.scheme_version,
+                "scheme_name": params.scheme_name,
+                "scheme_snapshot_hash": params.scheme_snapshot_hash,
                 "snapshot_version": params.snapshot_version,
             }
         )

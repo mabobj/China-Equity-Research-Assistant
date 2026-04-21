@@ -106,6 +106,8 @@ if TYPE_CHECKING:
     from app.services.screener_service.deep_pipeline import DeepScreenerPipeline
     from app.services.screener_service.pipeline import ScreenerPipeline
     from app.services.screener_service.batch_service import ScreenerBatchService
+    from app.services.screener_service.scheme_service import ScreenerSchemeService
+    from app.services.screener_service.scheme_service import ScreenerSchemeService
     from app.services.screener_service.cross_section_factor_service import (
         CrossSectionFactorService,
     )
@@ -697,6 +699,14 @@ def get_screener_batch_service() -> "ScreenerBatchService":
 
 
 @lru_cache
+def get_screener_scheme_service() -> "ScreenerSchemeService":
+    from app.services.screener_service.scheme_service import ScreenerSchemeService
+
+    settings = get_settings()
+    return ScreenerSchemeService(root_dir=settings.data_dir)
+
+
+@lru_cache
 def get_workflow_artifact_store() -> "FileWorkflowArtifactStore":
     from app.services.workflow_runtime.artifacts import FileWorkflowArtifactStore
 
@@ -770,6 +780,9 @@ def get_workflow_runtime_service(
     screener_batch_service: "ScreenerBatchService" = Depends(
         get_screener_batch_service
     ),
+    screener_scheme_service: "ScreenerSchemeService" = Depends(
+        get_screener_scheme_service
+    ),
     evaluation_service: "EvaluationService" = Depends(get_evaluation_service),
     experiment_service: "ExperimentService" = Depends(get_experiment_service),
 ) -> "WorkflowRuntimeService":
@@ -814,6 +827,7 @@ def get_workflow_runtime_service(
                 screener_selection_snapshot_daily=screener_selection_snapshot_daily,
                 market_data_service=get_market_data_service(),
                 lineage_service=get_lineage_service(),
+                scheme_service=screener_scheme_service,
             ),
         )
     )
@@ -824,6 +838,7 @@ def get_workflow_runtime_service(
         artifact_store=artifact_store,
         background_executor=get_workflow_background_executor(),
         screener_batch_service=screener_batch_service,
+        screener_scheme_service=screener_scheme_service,
         evaluation_service=evaluation_service,
         experiment_service=experiment_service,
     )

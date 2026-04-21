@@ -176,6 +176,13 @@ class ScreenerFactorSnapshot(BaseModel):
     provider_used: Optional[str] = None
     source_mode: Optional[str] = None
     freshness_mode: Optional[str] = None
+    scheme_id: Optional[str] = None
+    scheme_version: Optional[str] = None
+    scheme_name: Optional[str] = None
+    scheme_snapshot_hash: Optional[str] = None
+    selected_factor_groups: list[str] = Field(default_factory=list)
+    scoring_profile_name: Optional[str] = None
+    quality_gate_profile_name: Optional[str] = None
     raw_inputs: Optional[ScreenerRawInputs] = None
     process_metrics: ScreenerProcessMetrics = Field(default_factory=ScreenerProcessMetrics)
     atomic_factors: ScreenerAtomicFactors = Field(default_factory=ScreenerAtomicFactors)

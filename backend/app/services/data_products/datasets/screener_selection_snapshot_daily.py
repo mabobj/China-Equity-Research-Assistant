@@ -103,6 +103,10 @@ class ScreenerSelectionSnapshotDailyDataset:
                 "cursor_start_index": params.cursor_start_index,
                 "reset_trade_date": params.reset_trade_date,
                 "deep_top_k": params.deep_top_k,
+                "scheme_id": params.scheme_id,
+                "scheme_version": params.scheme_version,
+                "scheme_name": params.scheme_name,
+                "scheme_snapshot_hash": params.scheme_snapshot_hash,
                 "snapshot_version": params.snapshot_version,
             }
         )

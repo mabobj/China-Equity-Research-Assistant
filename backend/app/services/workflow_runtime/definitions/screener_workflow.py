@@ -27,6 +27,7 @@ from app.services.lineage_service.utils import (
     build_source_ref,
 )
 from app.services.screener_service.pipeline import ScreenerPipeline
+from app.services.screener_service.scheme_service import ScreenerSchemeService
 from app.services.screener_service.texts import ensure_chinese_short_reason
 from app.services.screener_service.universe import load_scan_universe
 from app.services.workflow_runtime.base import WorkflowDefinition, WorkflowNode
@@ -59,12 +60,14 @@ class ScreenerWorkflowDefinitionBuilder:
         screener_selection_snapshot_daily: ScreenerSelectionSnapshotDailyDataset,
         market_data_service: MarketDataService,
         lineage_service: LineageService,
+        scheme_service: ScreenerSchemeService | None = None,
     ) -> None:
         self._screener_pipeline = screener_pipeline
         self._screener_snapshot_daily = screener_snapshot_daily
         self._screener_selection_snapshot_daily = screener_selection_snapshot_daily
         self._market_data_service = market_data_service
         self._lineage_service = lineage_service
+        self._scheme_service = scheme_service
 
     def build(self) -> WorkflowDefinition:
         return WorkflowDefinition(
@@ -117,10 +120,18 @@ class ScreenerWorkflowDefinitionBuilder:
                 watch_pullback_candidates=[],
                 watch_breakout_candidates=[],
                 research_only_candidates=[],
+                scheme_id=request.scheme_id,
+                scheme_version=request.scheme_version,
             )
             context.set_output("ScreenerRun", payload)
             return payload
 
+        scheme_run_context = (
+            self._scheme_service.load_run_context(context.run_id)
+            if self._scheme_service is not None
+            else None
+        )
+        scheme_metadata = _build_scheme_runtime_metadata(scheme_run_context)
         snapshot_params = ScreenerSnapshotParams(
             workflow_name="screener_run",
             max_symbols=request.max_symbols,
@@ -129,6 +140,10 @@ class ScreenerWorkflowDefinitionBuilder:
             cursor_start_symbol=selection.cursor_start_symbol,
             cursor_start_index=selection.start_index,
             reset_trade_date=current_date.isoformat(),
+            scheme_id=scheme_metadata["scheme_id"],
+            scheme_version=scheme_metadata["scheme_version"],
+            scheme_name=scheme_metadata["scheme_name"],
+            scheme_snapshot_hash=scheme_metadata["scheme_snapshot_hash"],
         )
         snapshot_invalidated_today = self._is_snapshot_invalidated_for_date(
             current_date=current_date
@@ -185,6 +200,7 @@ class ScreenerWorkflowDefinitionBuilder:
             "cursor_start_index": selection.start_index,
             "reset_trade_date": current_date.isoformat(),
             "screener_factor_snapshot_refs": [],
+            **scheme_metadata,
         }
         response = self._screener_pipeline.run_screener(
             max_symbols=request.max_symbols,
@@ -199,6 +215,7 @@ class ScreenerWorkflowDefinitionBuilder:
             update={
                 "freshness_mode": normalized_response.freshness_mode or "computed",
                 "source_mode": normalized_response.source_mode or "pipeline",
+                **scheme_metadata,
             }
         )
         saved = self._screener_snapshot_daily.save(
@@ -362,6 +379,8 @@ class ScreenerWorkflowDefinitionBuilder:
             "force_refresh": request.force_refresh,
             "start_from": request.start_from,
             "stop_after": request.stop_after,
+            "scheme_id": request.scheme_id,
+            "scheme_version": request.scheme_version,
         }
 
     def _build_request_input_summary(self, context: WorkflowContext) -> dict[str, Any]:
@@ -371,6 +390,8 @@ class ScreenerWorkflowDefinitionBuilder:
             "max_symbols": request.max_symbols,
             "top_n": request.top_n,
             "force_refresh": request.force_refresh,
+            "scheme_id": request.scheme_id,
+            "scheme_version": request.scheme_version,
         }
 
     def _build_screener_summary(self, output: ScreenerRunResponse) -> dict[str, Any]:
@@ -487,6 +508,7 @@ def build_screener_workflow_definition(
     screener_selection_snapshot_daily: ScreenerSelectionSnapshotDailyDataset,
     market_data_service: MarketDataService,
     lineage_service: LineageService,
+    scheme_service: ScreenerSchemeService | None = None,
 ) -> WorkflowDefinition:
     """Build the screener workflow definition."""
     return ScreenerWorkflowDefinitionBuilder(
@@ -495,4 +517,57 @@ def build_screener_workflow_definition(
         screener_selection_snapshot_daily=screener_selection_snapshot_daily,
         market_data_service=market_data_service,
         lineage_service=lineage_service,
+        scheme_service=scheme_service,
     ).build()
+
+
+def _build_scheme_runtime_metadata(
+    snapshot,
+) -> dict[str, object]:
+    if snapshot is None:
+        return {
+            "scheme_id": None,
+            "scheme_version": None,
+            "scheme_name": None,
+            "scheme_snapshot_hash": None,
+            "selected_factor_groups": [],
+            "scoring_profile_name": None,
+            "quality_gate_profile_name": None,
+        }
+    factor_selection = snapshot.effective_scheme_config.factor_selection_config
+    factor_weights = snapshot.effective_scheme_config.factor_weight_config
+    quality_gate = snapshot.effective_scheme_config.quality_gate_config
+    return {
+        "scheme_id": snapshot.scheme_id,
+        "scheme_version": snapshot.scheme_version,
+        "scheme_name": snapshot.scheme_name,
+        "scheme_snapshot_hash": snapshot.scheme_snapshot_hash,
+        "selected_factor_groups": _normalize_string_list(
+            factor_selection.get("enabled_groups")
+            if isinstance(factor_selection, dict)
+            else None
+        ),
+        "scoring_profile_name": (
+            _string_or_none(factor_weights.get("profile_name"))
+            if isinstance(factor_weights, dict)
+            else None
+        ),
+        "quality_gate_profile_name": (
+            _string_or_none(quality_gate.get("profile_name"))
+            if isinstance(quality_gate, dict)
+            else None
+        ),
+    }
+
+
+def _normalize_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item.strip()]
+
+
+def _string_or_none(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None

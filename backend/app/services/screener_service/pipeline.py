@@ -299,6 +299,21 @@ class ScreenerPipeline:
             watch_pullback_candidates=watch_pullback_candidates,
             watch_breakout_candidates=watch_breakout_candidates,
             research_only_candidates=research_only_candidates,
+            scheme_id=_stringify_log_value(run_context.get("scheme_id")),
+            scheme_version=_stringify_log_value(run_context.get("scheme_version")),
+            scheme_name=_stringify_log_value(run_context.get("scheme_name")),
+            scheme_snapshot_hash=_stringify_log_value(
+                run_context.get("scheme_snapshot_hash")
+            ),
+            selected_factor_groups=_string_list_or_empty(
+                run_context.get("selected_factor_groups")
+            ),
+            scoring_profile_name=_stringify_log_value(
+                run_context.get("scoring_profile_name")
+            ),
+            quality_gate_profile_name=_stringify_log_value(
+                run_context.get("quality_gate_profile_name")
+            ),
         )
 
     def _scan_one_symbol(
@@ -621,6 +636,27 @@ class ScreenerPipeline:
                 target_screener_score=quality_gate.target_screener_score,
                 quality_penalty_applied=quality_gate.quality_penalty_applied,
                 quality_note=quality_gate.quality_note,
+            )
+            evaluated_snapshot = evaluated_snapshot.model_copy(
+                update={
+                    "scheme_id": _stringify_log_value(run_context.get("scheme_id")),
+                    "scheme_version": _stringify_log_value(
+                        run_context.get("scheme_version")
+                    ),
+                    "scheme_name": _stringify_log_value(run_context.get("scheme_name")),
+                    "scheme_snapshot_hash": _stringify_log_value(
+                        run_context.get("scheme_snapshot_hash")
+                    ),
+                    "selected_factor_groups": _string_list_or_empty(
+                        run_context.get("selected_factor_groups")
+                    ),
+                    "scoring_profile_name": _stringify_log_value(
+                        run_context.get("scoring_profile_name")
+                    ),
+                    "quality_gate_profile_name": _stringify_log_value(
+                        run_context.get("quality_gate_profile_name")
+                    ),
+                }
             )
             self._persist_screener_factor_snapshot(
                 symbol=prepared.item.symbol,
@@ -1191,4 +1227,14 @@ def _build_screener_factor_snapshot_params(
         cursor_start_symbol=_stringify_log_value(run_context.get("cursor_start_symbol")),
         cursor_start_index=_int_or_none(run_context.get("cursor_start_index")),
         reset_trade_date=_stringify_log_value(run_context.get("reset_trade_date")),
+        scheme_id=_stringify_log_value(run_context.get("scheme_id")),
+        scheme_version=_stringify_log_value(run_context.get("scheme_version")),
+        scheme_name=_stringify_log_value(run_context.get("scheme_name")),
+        scheme_snapshot_hash=_stringify_log_value(run_context.get("scheme_snapshot_hash")),
     )
+
+
+def _string_list_or_empty(value: object | None) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item]

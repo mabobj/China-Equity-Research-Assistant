@@ -64,3 +64,34 @@ def test_screener_selection_snapshot_daily_round_trip(tmp_path) -> None:
     assert loaded.dataset == "screener_selection_snapshot_daily"
     assert loaded.lineage_metadata is not None
     assert loaded.lineage_metadata.dataset_version == lineage_metadata.dataset_version
+
+
+def test_screener_selection_snapshot_params_hash_changes_with_scheme_metadata(
+    tmp_path,
+) -> None:
+    repository = DataProductRepository(tmp_path / "daily_products")
+    dataset = ScreenerSelectionSnapshotDailyDataset(repository=repository)
+    base_params = ScreenerSnapshotParams(
+        workflow_name="screener_run",
+        max_symbols=50,
+        top_n=20,
+        batch_size=50,
+        cursor_start_symbol="000001.SZ",
+        cursor_start_index=0,
+        reset_trade_date="2026-04-17",
+    )
+    scheme_params = ScreenerSnapshotParams(
+        workflow_name="screener_run",
+        max_symbols=50,
+        top_n=20,
+        batch_size=50,
+        cursor_start_symbol="000001.SZ",
+        cursor_start_index=0,
+        reset_trade_date="2026-04-17",
+        scheme_id="default_builtin_scheme",
+        scheme_version="legacy_v1",
+        scheme_name="默认内置方案",
+        scheme_snapshot_hash="hash-001",
+    )
+
+    assert dataset._params_hash(base_params) != dataset._params_hash(scheme_params)

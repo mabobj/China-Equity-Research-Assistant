@@ -49,6 +49,36 @@ def test_screener_factor_snapshot_daily_round_trip(tmp_path) -> None:
     assert loaded.lineage_metadata.dependencies[0].role == "daily_bars_daily"
 
 
+def test_screener_factor_snapshot_params_hash_changes_with_scheme_metadata(tmp_path) -> None:
+    repository = DataProductRepository(tmp_path / "daily_products")
+    dataset = ScreenerFactorSnapshotDailyDataset(repository=repository)
+
+    base_params = ScreenerFactorSnapshotParams(
+        workflow_name="screener_run",
+        max_symbols=50,
+        top_n=20,
+        batch_size=50,
+        cursor_start_symbol="600519.SH",
+        cursor_start_index=0,
+        reset_trade_date="2026-04-16",
+    )
+    scheme_params = ScreenerFactorSnapshotParams(
+        workflow_name="screener_run",
+        max_symbols=50,
+        top_n=20,
+        batch_size=50,
+        cursor_start_symbol="600519.SH",
+        cursor_start_index=0,
+        reset_trade_date="2026-04-16",
+        scheme_id="default_builtin_scheme",
+        scheme_version="legacy_v1",
+        scheme_name="默认内置方案",
+        scheme_snapshot_hash="hash-001",
+    )
+
+    assert dataset._params_hash(base_params) != dataset._params_hash(scheme_params)
+
+
 def _build_bars(symbol: str, length: int = 160) -> list[DailyBar]:
     start_date = date(2025, 9, 1)
     bars: list[DailyBar] = []

@@ -44,6 +44,17 @@
 4. 前端交互重构以适配方案化初筛
 5. 深筛、研究、策略与交易复盘的后续衔接
 
+当前正在推进：
+
+- factor-first screener 包 1：方案对象与版本对象
+- 已完成第一版 `ScreenerScheme` / `ScreenerSchemeVersion` / `ScreenerRunContextSnapshot` schema
+- 已完成 file-backed `screener_scheme_service`、稳定 `snapshot_hash` 计算与 `/screener/schemes*` API 骨架
+- 已完成 `ScreenerWorkflowRunRequest` / `WorkflowRunResponse` 的 `scheme_id / scheme_version / scheme_name / scheme_snapshot_hash` 扩展
+- 已完成 screener workflow run 启动时的 scheme 解析与运行时方案快照落袋
+- 已完成 scheme 元数据贯穿到 `ScreenerBatchRecord`、`ScreenerSymbolResult`、`ScreenerRunResponse`、`screener_factor_snapshot_daily` 与 `screener_selection_snapshot_daily` 参数哈希
+- 已补齐针对性回归：scheme metadata 透传、snapshot params hash 变更、batch/result 挂接均已通过测试
+- 下一步进入“方案真正驱动初筛运行”的阶段，也就是让 scheme config 开始影响 pipeline 权重、阈值和质量门控
+
 ## 4. 当前重点模块
 
 当前重点模块为：

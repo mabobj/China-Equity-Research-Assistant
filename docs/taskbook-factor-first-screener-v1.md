@@ -89,6 +89,21 @@
 
 ## 6. 包 1：方案对象与版本对象
 
+### 当前进度
+
+已完成第一阶段：
+
+- 已新增 `ScreenerScheme`、`ScreenerSchemeVersion`、`ScreenerRunContextSnapshot` 及对应 request / response schema
+- 已新增 file-backed `screener_scheme_service` 与稳定 `snapshot_hash` 计算工具
+- 已新增 `GET /screener/schemes`、`POST /screener/schemes`、`GET /screener/schemes/{scheme_id}`、`PATCH /screener/schemes/{scheme_id}`、`GET /screener/schemes/{scheme_id}/versions`、`POST /screener/schemes/{scheme_id}/versions`、`GET /screener/schemes/{scheme_id}/versions/{scheme_version}`
+- 已内置 `default_builtin_scheme / legacy_v1` 作为默认兼容方案
+
+下一阶段：
+
+- batch / result / factor snapshot 挂接 scheme 元数据
+- workflow detail / batch detail / symbol result 透出完整 scheme 上下文
+- 方案级 runs / stats / feedback 聚合
+
 ### 目标
 
 建立“筛选方案系统”的最小后端骨架。
@@ -139,6 +154,20 @@
 
 ## 7. 包 2：方案驱动的初筛运行接入
 
+### 当前进度
+
+已完成第一阶段：
+
+- 已完成 `ScreenerWorkflowRunRequest` / `WorkflowRunResponse` 的 `scheme_id / scheme_version / scheme_name / scheme_snapshot_hash` 扩展
+- 已完成 screener workflow run 启动时的 scheme 解析与 `ScreenerRunContextSnapshot` 落袋
+- 已完成 workflow detail / runtime visibility 对 scheme 摘要字段的透传
+
+下一阶段：
+
+- 让 `ScreenerPipeline` 真正消费 `effective_scheme_config`
+- 先从 `factor_weight_config`、`threshold_config`、`quality_gate_config` 的有限覆盖开始
+- 保持“未传方案时仍兼容默认内置方案”的回退行为
+
 ### 目标
 
 让 `ScreenerPipeline` 不再只依赖固定内置规则，而能消费方案版本配置。
@@ -175,6 +204,19 @@
 - workflow 详情中能返回方案摘要。
 
 ## 8. 包 3：批次、结果与因子快照的方案挂接
+
+### 当前进度
+
+已完成第一阶段：
+
+- 已完成 `ScreenerBatchRecord` / `ScreenerSymbolResult` / `ScreenerRunResponse` 的 scheme 元数据扩展
+- 已完成 scheme 元数据从 workflow run context 透传到 batch、result、factor snapshot 与 selection snapshot params hash
+- 已完成针对 `batch_service`、`screener_factor_snapshot_daily`、`screener_selection_snapshot_daily`、`screener_workflow_cursor` 的回归测试
+
+下一阶段：
+
+- 让批次详情、结果详情与 scheme 版本对象形成更稳定的双向查询关系
+- 为后续方案级 runs / stats / feedback 聚合准备索引与查询入口
 
 ### 目标
 

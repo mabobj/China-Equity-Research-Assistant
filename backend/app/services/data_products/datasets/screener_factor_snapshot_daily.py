@@ -23,6 +23,10 @@ class ScreenerFactorSnapshotParams:
     cursor_start_symbol: str | None = None
     cursor_start_index: int | None = None
     reset_trade_date: str | None = None
+    scheme_id: str | None = None
+    scheme_version: str | None = None
+    scheme_name: str | None = None
+    scheme_snapshot_hash: str | None = None
     snapshot_version: str = _SCREENER_FACTOR_SNAPSHOT_VERSION
 
 
@@ -114,6 +118,10 @@ class ScreenerFactorSnapshotDailyDataset:
                 "cursor_start_symbol": params.cursor_start_symbol,
                 "cursor_start_index": params.cursor_start_index,
                 "reset_trade_date": params.reset_trade_date,
+                "scheme_id": params.scheme_id,
+                "scheme_version": params.scheme_version,
+                "scheme_name": params.scheme_name,
+                "scheme_snapshot_hash": params.scheme_snapshot_hash,
                 "snapshot_version": params.snapshot_version,
             }
         )

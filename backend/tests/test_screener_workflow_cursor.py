@@ -8,6 +8,10 @@ from typing import Optional
 import app.services.workflow_runtime.definitions.screener_workflow as screener_workflow_module
 from app.schemas.market_data import UniverseItem, UniverseResponse
 from app.schemas.screener import ScreenerRunResponse
+from app.schemas.screener_scheme import (
+    ScreenerRunContextSnapshot,
+    ScreenerSchemeConfig,
+)
 from app.schemas.workflow import ScreenerWorkflowRunRequest
 from app.services.data_products.base import DataProductResult
 from app.services.data_products.catalog import SCREENER_SNAPSHOT_DAILY
@@ -95,6 +99,28 @@ class _StubLineageService:
 
     def register_data_product(self, result) -> None:
         self.register_calls += 1
+
+
+class _StubSchemeService:
+    def load_run_context(self, run_id: str) -> ScreenerRunContextSnapshot:
+        return ScreenerRunContextSnapshot(
+            run_id=run_id,
+            scheme_id="default_builtin_scheme",
+            scheme_version="legacy_v1",
+            scheme_name="默认内置方案",
+            scheme_snapshot_hash="hash-001",
+            trade_date=date(2026, 3, 30),
+            started_at=datetime(2026, 3, 30, 17, 5, tzinfo=timezone.utc),
+            workflow_name="screener_run",
+            runtime_params={"batch_size": 2},
+            effective_scheme_config=ScreenerSchemeConfig(
+                factor_selection_config={
+                    "enabled_groups": ["trend", "trigger", "risk", "quality"]
+                },
+                factor_weight_config={"profile_name": "legacy_weights"},
+                quality_gate_config={"profile_name": "default_quality_gate"},
+            ),
+        )
 
 
 class _StubScreenerPipeline:
@@ -300,6 +326,39 @@ def test_screener_workflow_persists_selection_snapshot_and_registers_lineage(
     dependency = selection_dataset.saved_lineage_metadata.dependencies[0]
     assert dependency.role == "screener_factor_snapshot"
     assert dependency.source_ref.dataset == "screener_factor_snapshot_daily"
+
+
+def test_screener_workflow_attaches_scheme_metadata_to_output(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _patch_now(monkeypatch, datetime(2026, 3, 30, 17, 5, tzinfo=screener_workflow_module._SHANGHAI_TZ))
+    definition = screener_workflow_module.build_screener_workflow_definition(
+        screener_pipeline=_StubScreenerPipeline(),
+        screener_snapshot_daily=_StubScreenerSnapshotDaily(),
+        screener_selection_snapshot_daily=_StubScreenerSelectionSnapshotDaily(),
+        market_data_service=_StubMarketDataService(),
+        lineage_service=_StubLineageService(),
+        scheme_service=_StubSchemeService(),
+    )
+    executor = WorkflowExecutor(artifact_store=FileWorkflowArtifactStore(tmp_path))
+
+    result = executor.execute(definition, ScreenerWorkflowRunRequest(batch_size=2))
+
+    assert result.status == "completed"
+    assert result.final_output is not None
+    assert result.final_output.scheme_id == "default_builtin_scheme"
+    assert result.final_output.scheme_version == "legacy_v1"
+    assert result.final_output.scheme_name == "默认内置方案"
+    assert result.final_output.scheme_snapshot_hash == "hash-001"
+    assert result.final_output.selected_factor_groups == [
+        "trend",
+        "trigger",
+        "risk",
+        "quality",
+    ]
+    assert result.final_output.scoring_profile_name == "legacy_weights"
+    assert result.final_output.quality_gate_profile_name == "default_quality_gate"
 
 
 def _patch_now(monkeypatch, value: datetime) -> None:

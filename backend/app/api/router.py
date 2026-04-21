@@ -17,6 +17,7 @@ from app.api.routes import (
     research,
     reviews,
     screener,
+    screener_schemes,
     stocks,
     strategy,
     trades,
@@ -39,6 +40,7 @@ api_router.include_router(stocks.router)
 api_router.include_router(research.router)
 api_router.include_router(strategy.router)
 api_router.include_router(screener.router)
+api_router.include_router(screener_schemes.router)
 api_router.include_router(trades.router)
 api_router.include_router(reviews.router)
 api_router.include_router(workflows.router)

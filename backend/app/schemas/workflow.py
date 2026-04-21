@@ -94,6 +94,8 @@ class ScreenerWorkflowRunRequest(WorkflowRunRequest):
     max_symbols: Optional[int] = Field(default=None, ge=1)
     top_n: Optional[int] = Field(default=None, ge=1)
     force_refresh: Optional[bool] = None
+    scheme_id: Optional[str] = None
+    scheme_version: Optional[str] = None
 
 
 class WorkflowStepSummary(BaseModel):
@@ -203,6 +205,10 @@ class WorkflowRunResponse(BaseModel):
     failed_symbols: list[str] = Field(default_factory=list)
     model_recommendation: Optional[ModelVersionRecommendation] = None
     version_recommendation_alert: Optional[str] = None
+    scheme_id: Optional[str] = None
+    scheme_version: Optional[str] = None
+    scheme_name: Optional[str] = None
+    scheme_snapshot_hash: Optional[str] = None
 
 
 class WorkflowRunDetailResponse(WorkflowRunResponse):

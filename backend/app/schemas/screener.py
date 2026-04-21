@@ -75,6 +75,13 @@ class ScreenerRunResponse(BaseModel):
     watch_pullback_candidates: list[ScreenerCandidate] = Field(default_factory=list)
     watch_breakout_candidates: list[ScreenerCandidate] = Field(default_factory=list)
     research_only_candidates: list[ScreenerCandidate] = Field(default_factory=list)
+    scheme_id: Optional[str] = None
+    scheme_version: Optional[str] = None
+    scheme_name: Optional[str] = None
+    scheme_snapshot_hash: Optional[str] = None
+    selected_factor_groups: list[str] = Field(default_factory=list)
+    scoring_profile_name: Optional[str] = None
+    quality_gate_profile_name: Optional[str] = None
 
 
 class DeepScreenerCandidate(BaseModel):
@@ -136,6 +143,10 @@ class ScreenerBatchRecord(BaseModel):
     max_symbols: Optional[int] = Field(default=None, ge=1)
     top_n: Optional[int] = Field(default=None, ge=1)
     workflow_name: str = "screener_run"
+    scheme_id: Optional[str] = None
+    scheme_version: Optional[str] = None
+    scheme_name: Optional[str] = None
+    scheme_snapshot_hash: Optional[str] = None
     warning_messages: list[str] = Field(default_factory=list)
     failure_reason: Optional[str] = None
 
@@ -159,6 +170,13 @@ class ScreenerSymbolResult(BaseModel):
     calculated_at: datetime
     rule_version: str
     rule_summary: str
+    scheme_id: Optional[str] = None
+    scheme_version: Optional[str] = None
+    scheme_name: Optional[str] = None
+    scheme_snapshot_hash: Optional[str] = None
+    selected_factor_groups: list[str] = Field(default_factory=list)
+    scoring_profile_name: Optional[str] = None
+    quality_gate_profile_name: Optional[str] = None
     action_now: Optional[ScreenerActionNow] = None
     headline_verdict: Optional[str] = None
     evidence_hints: list[str] = Field(default_factory=list)

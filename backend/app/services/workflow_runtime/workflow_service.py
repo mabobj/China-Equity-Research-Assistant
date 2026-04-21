@@ -8,6 +8,7 @@ import logging
 from threading import Lock
 from typing import Any, Callable
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from app.schemas.workflow import (
     DeepReviewWorkflowRunRequest,
@@ -28,6 +29,7 @@ from app.services.workflow_runtime.executor import WorkflowExecutor
 from app.services.workflow_runtime.registry import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
+_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
 class WorkflowRuntimeService:
@@ -40,6 +42,7 @@ class WorkflowRuntimeService:
         artifact_store: FileWorkflowArtifactStore,
         background_executor: ThreadPoolExecutor | None = None,
         screener_batch_service: Any | None = None,
+        screener_scheme_service: Any | None = None,
         evaluation_service: Any | None = None,
         experiment_service: Any | None = None,
         stale_running_timeout_seconds: int = 600,
@@ -53,6 +56,7 @@ class WorkflowRuntimeService:
             thread_name_prefix="workflow-runtime",
         )
         self._screener_batch_service = screener_batch_service
+        self._screener_scheme_service = screener_scheme_service
         self._evaluation_service = evaluation_service
         self._experiment_service = experiment_service
         self._stale_running_timeout = timedelta(
@@ -85,6 +89,23 @@ class WorkflowRuntimeService:
         request: ScreenerWorkflowRunRequest,
     ) -> WorkflowRunResponse:
         definition = self._registry.get_definition("screener_run")
+        scheme_snapshot = None
+        if self._screener_scheme_service is not None:
+            started_at = datetime.now(_SHANGHAI_TZ)
+            scheme_snapshot = self._screener_scheme_service.build_run_context_snapshot(
+                run_id="pending",
+                workflow_name=definition.name,
+                trade_date=started_at.date(),
+                started_at=started_at,
+                runtime_params={
+                    "batch_size": request.batch_size,
+                    "max_symbols": request.max_symbols,
+                    "top_n": request.top_n,
+                    "force_refresh": request.force_refresh,
+                },
+                scheme_id=request.scheme_id,
+                scheme_version=request.scheme_version,
+            )
         running_artifact = self._find_valid_running_artifact(
             workflow_name=definition.name
         )
@@ -98,6 +119,12 @@ class WorkflowRuntimeService:
             return self._build_existing_running_response(running_artifact)
 
         def _on_started(artifact: WorkflowArtifact) -> None:
+            if self._screener_scheme_service is not None and scheme_snapshot is not None:
+                self._screener_scheme_service.save_run_context(
+                    scheme_snapshot.model_copy(
+                        update={"run_id": artifact.run_id, "started_at": artifact.started_at}
+                    )
+                )
             if self._screener_batch_service is None:
                 return
             batch_size = self._resolve_screener_batch_size(request)
@@ -107,6 +134,22 @@ class WorkflowRuntimeService:
                 max_symbols=request.max_symbols,
                 top_n=request.top_n,
                 started_at=artifact.started_at,
+                scheme_id=(
+                    scheme_snapshot.scheme_id if scheme_snapshot is not None else None
+                ),
+                scheme_version=(
+                    scheme_snapshot.scheme_version
+                    if scheme_snapshot is not None
+                    else None
+                ),
+                scheme_name=(
+                    scheme_snapshot.scheme_name if scheme_snapshot is not None else None
+                ),
+                scheme_snapshot_hash=(
+                    scheme_snapshot.scheme_snapshot_hash
+                    if scheme_snapshot is not None
+                    else None
+                ),
             )
             logger.info(
                 "event=screener.run.started workflow=%s run_id=%s batch_id=%s batch_size=%s max_symbols=%s top_n=%s force_refresh=%s",
@@ -149,6 +192,16 @@ class WorkflowRuntimeService:
             request,
             on_started=_on_started,
             on_completed=_on_completed,
+            input_summary_overrides=(
+                {
+                    "scheme_id": scheme_snapshot.scheme_id,
+                    "scheme_version": scheme_snapshot.scheme_version,
+                    "scheme_name": scheme_snapshot.scheme_name,
+                    "scheme_snapshot_hash": scheme_snapshot.scheme_snapshot_hash,
+                }
+                if scheme_snapshot is not None
+                else None
+            ),
         )
 
     def get_run_detail(self, run_id: str) -> WorkflowRunDetailResponse:
@@ -197,17 +250,21 @@ class WorkflowRuntimeService:
         *,
         on_started: Callable[[WorkflowArtifact], None] | None = None,
         on_completed: Callable[[WorkflowRunResult], None] | None = None,
+        input_summary_overrides: dict[str, Any] | None = None,
     ) -> WorkflowRunResponse:
         validated_request = definition.request_contract.model_validate(request)
         run_id = uuid4().hex
         started_at = datetime.now(timezone.utc)
+        input_summary = definition.input_summary_builder(validated_request)
+        if input_summary_overrides:
+            input_summary.update(input_summary_overrides)
         initial_artifact = WorkflowArtifact(
             run_id=run_id,
             workflow_name=definition.name,
             status="running",
             started_at=started_at,
             finished_at=None,
-            input_summary=definition.input_summary_builder(validated_request),
+            input_summary=input_summary,
             steps=tuple(),
             final_output_summary={},
             final_output=None,
@@ -360,6 +417,10 @@ class WorkflowRuntimeService:
         final_output: dict[str, Any] | None,
     ) -> dict[str, Any]:
         requested_mode = self._requested_runtime_mode(input_summary=input_summary)
+        scheme_id = input_summary.get("scheme_id")
+        scheme_version = input_summary.get("scheme_version")
+        scheme_name = input_summary.get("scheme_name")
+        scheme_snapshot_hash = input_summary.get("scheme_snapshot_hash")
         debate_payload = self._extract_debate_payload(final_output=final_output)
         effective_mode = (
             debate_payload.get("runtime_mode_effective")
@@ -418,6 +479,10 @@ class WorkflowRuntimeService:
             "failed_symbols": failed_symbols,
             "model_recommendation": model_recommendation,
             "version_recommendation_alert": version_recommendation_alert,
+            "scheme_id": scheme_id,
+            "scheme_version": scheme_version,
+            "scheme_name": scheme_name,
+            "scheme_snapshot_hash": scheme_snapshot_hash,
         }
 
     def _build_existing_running_response(
