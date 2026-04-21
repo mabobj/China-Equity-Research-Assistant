@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
 
-from app.api.dependencies import get_screener_scheme_service
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from app.api.dependencies import (
+    get_screener_scheme_review_service,
+    get_screener_scheme_service,
+)
+from app.schemas.screener_scheme_review import (
+    ScreenerSchemeReviewStatsResponse,
+    ScreenerSchemeRunsResponse,
+    ScreenerSchemeStatsResponse,
+)
 from app.schemas.screener_scheme import (
     CreateScreenerSchemeRequest,
     CreateScreenerSchemeVersionRequest,
@@ -15,6 +25,9 @@ from app.schemas.screener_scheme import (
     ScreenerSchemeVersionListResponse,
     ScreenerSchemeVersionSummary,
     UpdateScreenerSchemeRequest,
+)
+from app.services.screener_service.scheme_review_service import (
+    ScreenerSchemeReviewService,
 )
 from app.services.screener_service.scheme_service import (
     ScreenerSchemeNotFoundError,
@@ -137,6 +150,72 @@ def get_scheme_version(
             status_code=404,
             detail="Screener scheme version not found.",
         ) from exc
+
+
+@router.get(
+    "/{scheme_id}/runs",
+    response_model=ScreenerSchemeRunsResponse,
+)
+def list_scheme_runs(
+    scheme_id: str,
+    started_from: datetime | None = Query(default=None),
+    started_to: datetime | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=200),
+    service: ScreenerSchemeReviewService = Depends(get_screener_scheme_review_service),
+) -> ScreenerSchemeRunsResponse:
+    try:
+        return service.list_scheme_runs(
+            scheme_id=scheme_id,
+            started_from=started_from,
+            started_to=started_to,
+            limit=limit,
+        )
+    except ScreenerSchemeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Screener scheme not found.") from exc
+
+
+@router.get(
+    "/{scheme_id}/stats",
+    response_model=ScreenerSchemeStatsResponse,
+)
+def get_scheme_stats(
+    scheme_id: str,
+    started_from: datetime | None = Query(default=None),
+    started_to: datetime | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    service: ScreenerSchemeReviewService = Depends(get_screener_scheme_review_service),
+) -> ScreenerSchemeStatsResponse:
+    try:
+        return service.get_scheme_stats(
+            scheme_id=scheme_id,
+            started_from=started_from,
+            started_to=started_to,
+            limit=limit,
+        )
+    except ScreenerSchemeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Screener scheme not found.") from exc
+
+
+@router.get(
+    "/{scheme_id}/feedback",
+    response_model=ScreenerSchemeReviewStatsResponse,
+)
+def get_scheme_feedback(
+    scheme_id: str,
+    started_from: datetime | None = Query(default=None),
+    started_to: datetime | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    service: ScreenerSchemeReviewService = Depends(get_screener_scheme_review_service),
+) -> ScreenerSchemeReviewStatsResponse:
+    try:
+        return service.get_scheme_feedback(
+            scheme_id=scheme_id,
+            started_from=started_from,
+            started_to=started_to,
+            limit=limit,
+        )
+    except ScreenerSchemeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Screener scheme not found.") from exc
 
 
 def _build_scheme_summary(

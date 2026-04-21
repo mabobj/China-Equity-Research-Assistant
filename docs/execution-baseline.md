@@ -168,3 +168,20 @@
 
 1. `docs/index.md`
 2. 本文件的当前有效清单
+
+## 10. 2026-04-21 Update
+
+本次基线同步补充如下：
+
+- factor-first screener 包 4 后端第一阶段已完成。
+- 已新增方案级只读聚合能力：
+  - `GET /screener/schemes/{scheme_id}/runs`
+  - `GET /screener/schemes/{scheme_id}/stats`
+  - `GET /screener/schemes/{scheme_id}/feedback`
+- 已新增 `backend/app/services/screener_service/scheme_review_service.py`，复用现有 batch 与 trade/review 存储完成方案级 runs / stats / feedback 聚合。
+- 当前方案级反馈统计口径为：
+  - 以方案批次命中的股票集合为主键；
+  - 向本地 `decision_snapshot / trade / review` 记录做符号级聚合；
+  - 用于包 4 第一阶段的“可查询、可回看”目标；
+  - 不是最终的一对一严格归因模型，后续可在 journal 显式挂接 scheme 外键后继续收紧。
+- 当前下一步切换为包 5：前端初筛工作台方案中心化改造，围绕“方案 -> 运行 -> 结果 -> 反馈”重组主交互。

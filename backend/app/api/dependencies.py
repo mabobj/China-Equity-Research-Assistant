@@ -106,6 +106,9 @@ if TYPE_CHECKING:
     from app.services.screener_service.deep_pipeline import DeepScreenerPipeline
     from app.services.screener_service.pipeline import ScreenerPipeline
     from app.services.screener_service.batch_service import ScreenerBatchService
+    from app.services.screener_service.scheme_review_service import (
+        ScreenerSchemeReviewService,
+    )
     from app.services.screener_service.scheme_service import ScreenerSchemeService
     from app.services.screener_service.scheme_service import ScreenerSchemeService
     from app.services.screener_service.cross_section_factor_service import (
@@ -704,6 +707,19 @@ def get_screener_scheme_service() -> "ScreenerSchemeService":
 
     settings = get_settings()
     return ScreenerSchemeService(root_dir=settings.data_dir)
+
+
+@lru_cache
+def get_screener_scheme_review_service() -> "ScreenerSchemeReviewService":
+    from app.services.screener_service.scheme_review_service import (
+        ScreenerSchemeReviewService,
+    )
+
+    return ScreenerSchemeReviewService(
+        scheme_service=get_screener_scheme_service(),
+        batch_service=get_screener_batch_service(),
+        store=get_trade_review_store(),
+    )
 
 
 @lru_cache

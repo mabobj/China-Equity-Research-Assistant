@@ -374,6 +374,48 @@
 
 确保方案系统不是只在前端“看起来能用”，而是后端对象、版本、结果、复盘都稳定可测。
 
+## 12. 2026-04-21 Progress Update
+
+### 包 4 当前状态
+
+包 4 第一阶段后端已完成，已落地内容：
+
+- 新增方案级聚合 schema：
+  - `ScreenerSchemeRunSummary`
+  - `ScreenerSchemeStats`
+  - `ScreenerSchemeFeedbackSummary`
+  - `ScreenerSchemeReviewStatsResponse`
+- 新增只读聚合服务：
+  - `backend/app/services/screener_service/scheme_review_service.py`
+- 新增只读接口：
+  - `GET /screener/schemes/{scheme_id}/runs`
+  - `GET /screener/schemes/{scheme_id}/stats`
+  - `GET /screener/schemes/{scheme_id}/feedback`
+- 已补齐测试：
+  - `backend/tests/test_screener_scheme_review_service.py`
+  - `backend/tests/test_screener_scheme_api.py` 中方案级 runs/stats/feedback 路由测试
+
+### 包 4 当前统计口径
+
+当前第一阶段采用“方案批次结果符号集合 + 本地 journal 记录”的轻量归因方式：
+
+- runs：按 `ScreenerBatchRecord.scheme_id` 过滤批次并汇总单批次结果；
+- stats：聚合方案批次的运行数、候选数、bucket 分布，以及本地 `decision_snapshot / trade / review` 的去重统计；
+- feedback：汇总 `strategy_alignment`、`did_follow_plan`、`outcome_label`、`lesson_tags` 等反馈信号；
+- 当前不引入新的存储表，也不修改 trade/review 主链外键结构。
+
+### 包 4 后续收紧点
+
+包 4 第二阶段再处理：
+
+- 更严格的方案到 journal 显式归因；
+- 时间窗和版本窗口的精细化过滤；
+- 5/10/20 日后验与 bucket 转化类统计。
+
+### 下一步
+
+下一步进入包 5：前端初筛工作台方案中心化改造。
+
 ### 需要新增测试
 
 #### 后端
