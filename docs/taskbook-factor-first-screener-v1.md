@@ -416,6 +416,57 @@
 
 下一步进入包 5：前端初筛工作台方案中心化改造。
 
+## 13. 2026-04-21 Package 5 Progress Update
+
+### 包 5 当前状态
+
+包 5 第一阶段前端已完成，已落地内容：
+
+- 已补齐前端 API types 与 API client 对下列能力的消费：
+  - `GET /screener/schemes`
+  - `GET /screener/schemes/{scheme_id}`
+  - `GET /screener/schemes/{scheme_id}/runs`
+  - `GET /screener/schemes/{scheme_id}/stats`
+  - `GET /screener/schemes/{scheme_id}/feedback`
+- 已补齐 workflow run、batch、result 上的 `scheme_*` 元数据前端类型。
+- 已将 `frontend/src/components/screener-workspace.tsx` 重组为方案中心化编排组件。
+- 已新增四个分区组件：
+  - `screener-scheme-panel.tsx`
+  - `screener-run-panel.tsx`
+  - `screener-result-panel.tsx`
+  - `screener-review-panel.tsx`
+- 已新增 `screener-shared.tsx` 作为方案页共享展示原语。
+
+### 包 5 第一阶段页面行为
+
+当前 `/screener` 页面已经具备：
+
+- 先显示当前方案与当前版本摘要；
+- 允许切换方案后查看该方案的详情、版本摘要、阈值和质量门控摘要；
+- 按当前选中方案发起初筛 workflow；
+- 结果区按“该方案的历史运行批次”切换，而不是只围绕全局 latest batch 展示；
+- 反馈区展示方案级 runs / stats / feedback，并允许从历史运行切换批次联动结果区。
+
+### 包 5 当前仍未覆盖
+
+包 5 第二阶段再处理：
+
+- 方案创建/编辑入口的页面化接入；
+- 运行区、结果区、反馈区更细的视觉压缩与信息层级优化；
+- 对“待接入字段”和“当前统计口径”的前端显式说明进一步补齐；
+- 更完整的前端 smoke 回归。
+
+### 当前验证
+
+当前已完成验证：
+
+- `frontend` `npm run type-check`
+- `frontend` `npm run lint`
+
+### 下一步
+
+下一步进入包 5 第二阶段，继续优化方案中心工作台的交互收口与消费级体验。
+
 ### 需要新增测试
 
 #### 后端

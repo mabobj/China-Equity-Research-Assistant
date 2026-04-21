@@ -185,3 +185,29 @@
   - 用于包 4 第一阶段的“可查询、可回看”目标；
   - 不是最终的一对一严格归因模型，后续可在 journal 显式挂接 scheme 外键后继续收紧。
 - 当前下一步切换为包 5：前端初筛工作台方案中心化改造，围绕“方案 -> 运行 -> 结果 -> 反馈”重组主交互。
+
+## 11. 2026-04-21 Package 5 Update
+
+本次继续补充如下：
+
+- factor-first screener 包 5 第一阶段已完成。
+- 前端 `/screener` 已从“批次/结果中心”重组为四段式主线：
+  - 方案
+  - 运行
+  - 结果
+  - 反馈
+- 已补齐前端对后端方案能力的消费：
+  - 方案列表与方案详情
+  - 方案级 runs / stats / feedback
+  - workflow run 的 scheme 元数据
+  - batch / symbol result 的 scheme 元数据
+- 已完成 `frontend/src/components/screener-workspace.tsx` 顶层状态重组，并拆出：
+  - `screener-scheme-panel.tsx`
+  - `screener-run-panel.tsx`
+  - `screener-result-panel.tsx`
+  - `screener-review-panel.tsx`
+- 当前结果区已切换为“按已选方案的历史运行批次查看”，不再默认只围绕全局 latest batch 展开。
+- 前端校验已通过：
+  - `frontend` `npm run type-check`
+  - `frontend` `npm run lint`
+- 当前下一步进入包 5 第二阶段：继续细化方案页体验，包括运行完成后的方案/批次联动、结果区与反馈区的信息密度优化，以及必要的中文展示和说明补齐。

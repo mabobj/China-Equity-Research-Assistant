@@ -24,6 +24,11 @@ import type {
   ScreenerCursorResetResponse,
   ScreenerLatestBatchResponse,
   ScreenerLatestBatchSummaryResponse,
+  ScreenerSchemeDetailResponse,
+  ScreenerSchemeListResponse,
+  ScreenerSchemeReviewStatsResponse,
+  ScreenerSchemeRunsResponse,
+  ScreenerSchemeStatsResponse,
   ScreenerSymbolResultResponse,
   ScreenerWorkflowRunRequest,
   SingleStockWorkflowRunRequest,
@@ -146,6 +151,56 @@ export async function getLatestScreenerWindowResults(): Promise<ScreenerLatestBa
   return fetchBackend<ScreenerLatestBatchResponse>("/screener/latest-batch/results", {
     timeoutMs: STOCK_PAGE_TIMEOUT_MS,
   });
+}
+
+export async function getScreenerSchemes(): Promise<ScreenerSchemeListResponse> {
+  return fetchBackend<ScreenerSchemeListResponse>("/screener/schemes", {
+    timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+  });
+}
+
+export async function getScreenerSchemeDetail(
+  schemeId: string,
+): Promise<ScreenerSchemeDetailResponse> {
+  return fetchBackend<ScreenerSchemeDetailResponse>(
+    `/screener/schemes/${encodeURIComponent(schemeId)}`,
+    {
+      timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    },
+  );
+}
+
+export async function getScreenerSchemeRuns(
+  schemeId: string,
+): Promise<ScreenerSchemeRunsResponse> {
+  return fetchBackend<ScreenerSchemeRunsResponse>(
+    `/screener/schemes/${encodeURIComponent(schemeId)}/runs`,
+    {
+      timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    },
+  );
+}
+
+export async function getScreenerSchemeStats(
+  schemeId: string,
+): Promise<ScreenerSchemeStatsResponse> {
+  return fetchBackend<ScreenerSchemeStatsResponse>(
+    `/screener/schemes/${encodeURIComponent(schemeId)}/stats`,
+    {
+      timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    },
+  );
+}
+
+export async function getScreenerSchemeFeedback(
+  schemeId: string,
+): Promise<ScreenerSchemeReviewStatsResponse> {
+  return fetchBackend<ScreenerSchemeReviewStatsResponse>(
+    `/screener/schemes/${encodeURIComponent(schemeId)}/feedback`,
+    {
+      timeoutMs: STOCK_PAGE_TIMEOUT_MS,
+    },
+  );
 }
 
 export async function getActiveScreenerRun(): Promise<WorkflowRunDetailResponse | null> {

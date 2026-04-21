@@ -7,6 +7,7 @@ export type ScreenerListType =
   | "WATCH_BREAKOUT"
   | "RESEARCH_ONLY"
   | "AVOID";
+export type SchemeStatus = "draft" | "active" | "archived";
 export type DataRefreshTaskStatus = "idle" | "running" | "completed" | "failed";
 export type WorkflowRunStatus = "running" | "completed" | "failed";
 export type WorkflowStepStatus =
@@ -296,6 +297,144 @@ export type ScreenerCandidate = {
   fail_reason?: string | null;
 };
 
+export type ScreenerSchemeConfig = {
+  universe_filter_config: Record<string, unknown>;
+  factor_selection_config: Record<string, unknown>;
+  factor_weight_config: Record<string, unknown>;
+  threshold_config: Record<string, unknown>;
+  quality_gate_config: Record<string, unknown>;
+  bucket_rule_config: Record<string, unknown>;
+};
+
+export type ScreenerSchemeVersionSummary = {
+  scheme_version: string;
+  version_label: string;
+  created_at: string;
+  change_note: string | null;
+  snapshot_hash: string;
+};
+
+export type ScreenerSchemeSummary = {
+  scheme_id: string;
+  name: string;
+  description: string | null;
+  status: SchemeStatus;
+  current_version: string | null;
+  is_builtin: boolean;
+  is_default: boolean;
+  updated_at: string;
+  current_version_summary: ScreenerSchemeVersionSummary | null;
+};
+
+export type ScreenerScheme = {
+  scheme_id: string;
+  name: string;
+  description: string | null;
+  status: SchemeStatus;
+  created_at: string;
+  updated_at: string;
+  current_version: string | null;
+  is_builtin: boolean;
+  is_default: boolean;
+};
+
+export type ScreenerSchemeVersion = {
+  scheme_id: string;
+  scheme_version: string;
+  version_label: string;
+  created_at: string;
+  created_by: string | null;
+  change_note: string | null;
+  snapshot_hash: string;
+  config: ScreenerSchemeConfig;
+};
+
+export type ScreenerSchemeListResponse = {
+  items: ScreenerSchemeSummary[];
+  total: number;
+};
+
+export type ScreenerSchemeDetailResponse = {
+  scheme: ScreenerScheme;
+  current_version_detail: ScreenerSchemeVersion | null;
+  recent_versions: ScreenerSchemeVersionSummary[];
+};
+
+export type ScreenerSchemeRunSummary = {
+  batch_id: string;
+  run_id: string;
+  trade_date: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  scheme_version: string | null;
+  scheme_name: string | null;
+  universe_size: number;
+  scanned_size: number;
+  result_count: number;
+  ready_count: number;
+  watch_count: number;
+  avoid_count: number;
+  research_count: number;
+  decision_snapshot_count: number;
+  trade_count: number;
+  review_count: number;
+  warning_messages: string[];
+  failure_reason: string | null;
+};
+
+export type ScreenerSchemeRunsResponse = {
+  scheme_id: string;
+  count: number;
+  items: ScreenerSchemeRunSummary[];
+};
+
+export type ScreenerSchemeStats = {
+  total_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  running_runs: number;
+  total_candidates: number;
+  ready_count: number;
+  watch_count: number;
+  avoid_count: number;
+  research_count: number;
+  entered_research_count: number;
+  decision_snapshot_count: number;
+  trade_count: number;
+  review_count: number;
+  outcome_distribution: Record<string, number>;
+  scheme_versions: string[];
+  warning_messages: string[];
+};
+
+export type ScreenerSchemeStatsResponse = {
+  scheme_id: string;
+  started_from: string | null;
+  started_to: string | null;
+  stats: ScreenerSchemeStats;
+};
+
+export type ScreenerSchemeFeedbackSummary = {
+  linked_symbols: number;
+  traded_symbols: number;
+  reviewed_symbols: number;
+  aligned_trades: number;
+  partially_aligned_trades: number;
+  not_aligned_trades: number;
+  did_follow_plan_distribution: Record<string, number>;
+  outcome_distribution: Record<string, number>;
+  lesson_tag_distribution: Record<string, number>;
+  warning_messages: string[];
+};
+
+export type ScreenerSchemeReviewStatsResponse = {
+  scheme_id: string;
+  started_from: string | null;
+  started_to: string | null;
+  feedback: ScreenerSchemeFeedbackSummary;
+};
+
 export type ScreenerRunResponse = {
   as_of_date: string;
   freshness_mode?: string | null;
@@ -309,6 +448,13 @@ export type ScreenerRunResponse = {
   watch_pullback_candidates: ScreenerCandidate[];
   watch_breakout_candidates: ScreenerCandidate[];
   research_only_candidates: ScreenerCandidate[];
+  scheme_id?: string | null;
+  scheme_version?: string | null;
+  scheme_name?: string | null;
+  scheme_snapshot_hash?: string | null;
+  selected_factor_groups?: string[];
+  scoring_profile_name?: string | null;
+  quality_gate_profile_name?: string | null;
 };
 
 export type ScreenerBatchStatus = "running" | "completed" | "failed";
@@ -327,6 +473,10 @@ export type ScreenerBatchRecord = {
   max_symbols: number | null;
   top_n: number | null;
   workflow_name: string;
+  scheme_id?: string | null;
+  scheme_version?: string | null;
+  scheme_name?: string | null;
+  scheme_snapshot_hash?: string | null;
   warning_messages: string[];
   failure_reason: string | null;
 };
@@ -346,6 +496,13 @@ export type ScreenerSymbolResult = {
   calculated_at: string;
   rule_version: string;
   rule_summary: string;
+  scheme_id?: string | null;
+  scheme_version?: string | null;
+  scheme_name?: string | null;
+  scheme_snapshot_hash?: string | null;
+  selected_factor_groups?: string[];
+  scoring_profile_name?: string | null;
+  quality_gate_profile_name?: string | null;
   action_now: DecisionBriefActionNow | null;
   headline_verdict: string | null;
   evidence_hints: string[];
@@ -733,6 +890,10 @@ export type WorkflowRunResponse = {
   failed_symbols: string[];
   model_recommendation: ModelVersionRecommendation | null;
   version_recommendation_alert: string | null;
+  scheme_id?: string | null;
+  scheme_version?: string | null;
+  scheme_name?: string | null;
+  scheme_snapshot_hash?: string | null;
 };
 
 export type WorkflowRunDetailResponse = WorkflowRunResponse & {
@@ -885,6 +1046,8 @@ export type ScreenerWorkflowRunRequest = {
   max_symbols?: number;
   top_n?: number;
   force_refresh?: boolean;
+  scheme_id?: string;
+  scheme_version?: string;
   start_from?: string;
   stop_after?: string;
   use_llm?: boolean;
