@@ -14,6 +14,7 @@ from app.services.screener_service.cross_section_factor_service import CrossSect
 from app.services.screener_service.scoring import (
     apply_score_to_screener_factor_snapshot,
     score_screener_factor_snapshot,
+    score_screener_factor_snapshot_with_scheme,
 )
 
 
@@ -110,6 +111,75 @@ def test_score_screener_factor_snapshot_returns_ready_candidate_for_strong_setup
     assert updated_snapshot.selection_decision is not None
     assert updated_snapshot.selection_decision.list_type == "BUY_CANDIDATE"
     assert updated_snapshot.selection_decision.top_positive_factors
+
+
+def test_score_screener_factor_snapshot_respects_threshold_override() -> None:
+    factor_service = ScreenerFactorService()
+    snapshots = [
+        factor_service.build_snapshot_from_bars(
+            symbol="600519.SH",
+            bars=_build_bars(
+                symbol="600519.SH",
+                length=160,
+                close_start=100.0,
+                close_step=0.7,
+                amount=180_000_000.0,
+            ),
+            industry="Consumer",
+            list_date=date(2001, 8, 27),
+        ),
+        factor_service.build_snapshot_from_bars(
+            symbol="000001.SZ",
+            bars=_build_bars(
+                symbol="000001.SZ",
+                length=160,
+                close_start=12.0,
+                close_step=0.08,
+                amount=60_000_000.0,
+            ),
+            industry="Bank",
+            list_date=date(1991, 4, 3),
+        ),
+    ]
+    enriched = CrossSectionFactorService().enrich_snapshots(snapshots)
+    snapshot = next(item for item in enriched if item.symbol == "600519.SH")
+    technical_snapshot = TechnicalSnapshot(
+        symbol="600519.SH",
+        as_of_date=snapshot.as_of_date,
+        latest_close=snapshot.raw_inputs.latest_close or 0.0,
+        latest_volume=snapshot.raw_inputs.latest_volume,
+        moving_averages=MovingAverageSnapshot(
+            ma20=snapshot.process_metrics.ma_20,
+            ma60=snapshot.process_metrics.ma_60,
+            ma120=snapshot.process_metrics.ma_120,
+        ),
+        ema=EmaSnapshot(),
+        macd=MacdSnapshot(),
+        bollinger=BollingerSnapshot(),
+        volume_metrics=VolumeMetricsSnapshot(),
+        trend_state="up",
+        trend_score=80,
+        volatility_state="normal",
+        support_level=snapshot.process_metrics.support_level_20d,
+        resistance_level=snapshot.process_metrics.resistance_level_20d,
+    )
+
+    default_result = score_screener_factor_snapshot(
+        screener_factor_snapshot=snapshot,
+        technical_snapshot=technical_snapshot,
+    )
+    strict_result = score_screener_factor_snapshot_with_scheme(
+        screener_factor_snapshot=snapshot,
+        technical_snapshot=technical_snapshot,
+        threshold_config={
+            "ready_min_score": 95,
+            "watch_min_score": 90,
+            "research_min_score": 80,
+        },
+    )
+
+    assert default_result.v2_list_type == "READY_TO_BUY"
+    assert strict_result.v2_list_type != "READY_TO_BUY"
 
 
 def _build_bars(

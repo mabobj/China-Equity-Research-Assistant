@@ -150,6 +150,38 @@ def test_run_screener_uses_new_screener_factor_pipeline() -> None:
     assert any(candidate.symbol == "300750.SZ" for candidate in response.avoid_candidates)
 
 
+def test_run_screener_respects_scheme_threshold_override_in_run_context() -> None:
+    pipeline = ScreenerPipeline(
+        market_data_service=FactorModeMarketDataService(),
+        technical_analysis_service=FactorModeTechnicalAnalysisService(),
+        screener_factor_service=ScreenerFactorService(),
+        cross_section_factor_service=CrossSectionFactorService(),
+        factor_snapshot_service=None,
+    )
+
+    response = pipeline.run_screener(
+        scan_items=[
+            UniverseItem(symbol="600519.SH", code="600519", exchange="SH", name="A", source="stub"),
+            UniverseItem(symbol="000001.SZ", code="000001", exchange="SZ", name="B", source="stub"),
+            UniverseItem(symbol="300750.SZ", code="300750", exchange="SZ", name="C", source="stub"),
+        ],
+        run_context={
+            "effective_scheme_config": {
+                "threshold_config": {
+                    "ready_min_score": 95,
+                    "watch_min_score": 90,
+                    "research_min_score": 80,
+                }
+            }
+        },
+    )
+
+    assert response.buy_candidates == []
+    assert all(
+        candidate.symbol != "600519.SH" for candidate in response.ready_to_buy_candidates
+    )
+
+
 def _build_bars(
     *,
     symbol: str,

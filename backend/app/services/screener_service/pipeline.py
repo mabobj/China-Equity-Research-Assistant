@@ -23,9 +23,9 @@ from app.services.screener_service.filters import (
 )
 from app.services.screener_service.scoring import (
     apply_score_to_screener_factor_snapshot,
-    score_factor_snapshot,
-    score_screener_factor_snapshot,
-    score_technical_snapshot,
+    score_factor_snapshot_with_scheme,
+    score_screener_factor_snapshot_with_scheme,
+    score_technical_snapshot_with_scheme,
 )
 from app.services.screener_service.texts import normalize_candidate_display_fields
 from app.services.screener_service.universe import load_scan_universe
@@ -113,6 +113,19 @@ class ScreenerPipeline:
         cursor_start_index = _stringify_log_value(run_context.get("cursor_start_index"))
 
         with self._market_data_service.session_scope():
+            effective_scheme_config = _dict_or_none(run_context.get("effective_scheme_config"))
+            factor_weight_config = _nested_config(
+                effective_scheme_config,
+                "factor_weight_config",
+            )
+            threshold_config = _nested_config(
+                effective_scheme_config,
+                "threshold_config",
+            )
+            quality_gate_config = _nested_config(
+                effective_scheme_config,
+                "quality_gate_config",
+            )
             if scan_items is None:
                 total_symbols, scan_items = load_scan_universe(
                     market_data_service=self._market_data_service,
@@ -158,6 +171,9 @@ class ScreenerPipeline:
                         start_date=lookback_start_date,
                         force_refresh=force_refresh,
                         run_context=run_context,
+                        factor_weight_config=factor_weight_config,
+                        threshold_config=threshold_config,
+                        quality_gate_config=quality_gate_config,
                     )
                     processed_symbols += 1
                     if scan_result is None:
@@ -192,6 +208,9 @@ class ScreenerPipeline:
                             start_date=lookback_start_date,
                             force_refresh=force_refresh,
                             run_context=run_context,
+                            factor_weight_config=factor_weight_config,
+                            threshold_config=threshold_config,
+                            quality_gate_config=quality_gate_config,
                         ): item
                         for item in scan_items
                     }
@@ -236,6 +255,9 @@ class ScreenerPipeline:
                     max_symbols=max_symbols,
                     top_n=top_n,
                     run_context=run_context,
+                    factor_weight_config=factor_weight_config,
+                    threshold_config=threshold_config,
+                    quality_gate_config=quality_gate_config,
                 )
             )
 
@@ -322,6 +344,9 @@ class ScreenerPipeline:
         start_date: str,
         force_refresh: bool,
         run_context: Optional[dict[str, object]] = None,
+        factor_weight_config: dict[str, object] | None = None,
+        threshold_config: dict[str, object] | None = None,
+        quality_gate_config: dict[str, object] | None = None,
     ) -> Optional["_ScanResult"]:
         run_context = run_context or {}
         run_id = _stringify_log_value(run_context.get("run_id"))
@@ -535,12 +560,20 @@ class ScreenerPipeline:
                     announcements=recent_announcements,
                 )
             )
-            score_result = score_factor_snapshot(
+
+        if factor_snapshot is not None:
+            score_result = score_factor_snapshot_with_scheme(
                 factor_snapshot=factor_snapshot,
                 technical_snapshot=technical_snapshot,
+                factor_weight_config=factor_weight_config,
+                threshold_config=threshold_config,
             )
         else:
-            score_result = score_technical_snapshot(technical_snapshot)
+            score_result = score_technical_snapshot_with_scheme(
+                technical_snapshot=technical_snapshot,
+                factor_weight_config=factor_weight_config,
+                threshold_config=threshold_config,
+            )
 
         quality_gate = _apply_quality_gate(
             origin_v2_list_type=score_result.v2_list_type,
@@ -548,6 +581,7 @@ class ScreenerPipeline:
             bars_quality=bars_quality,
             financial_quality=financial_quality,
             announcement_quality=announcement_quality,
+            quality_gate_config=quality_gate_config,
         )
 
         prediction_started_at = perf_counter()
@@ -600,6 +634,9 @@ class ScreenerPipeline:
         max_symbols: int | None,
         top_n: int | None,
         run_context: dict[str, object],
+        factor_weight_config: dict[str, object] | None = None,
+        threshold_config: dict[str, object] | None = None,
+        quality_gate_config: dict[str, object] | None = None,
     ) -> list[ScreenerCandidate]:
         snapshots = [item.screener_factor_snapshot for item in prepared_candidates]
         if self._cross_section_factor_service is not None:
@@ -618,9 +655,11 @@ class ScreenerPipeline:
         built_candidates: list[ScreenerCandidate] = []
         for prepared in prepared_candidates:
             screener_factor_snapshot = snapshot_by_symbol[prepared.item.symbol]
-            score_result = score_screener_factor_snapshot(
+            score_result = score_screener_factor_snapshot_with_scheme(
                 screener_factor_snapshot=screener_factor_snapshot,
                 technical_snapshot=prepared.technical_snapshot,
+                factor_weight_config=factor_weight_config,
+                threshold_config=threshold_config,
             )
             quality_gate = _apply_quality_gate(
                 origin_v2_list_type=score_result.v2_list_type,
@@ -628,6 +667,7 @@ class ScreenerPipeline:
                 bars_quality=prepared.bars_quality,
                 financial_quality=prepared.financial_quality,
                 announcement_quality=prepared.announcement_quality,
+                quality_gate_config=quality_gate_config,
             )
             evaluated_snapshot = apply_score_to_screener_factor_snapshot(
                 screener_factor_snapshot=screener_factor_snapshot,
@@ -1039,10 +1079,21 @@ def _apply_quality_gate(
     bars_quality: _QUALITY_STATUS,
     financial_quality: _QUALITY_STATUS,
     announcement_quality: _QUALITY_STATUS,
+    quality_gate_config: dict[str, object] | None = None,
 ) -> _QualityGateResult:
     target_v2_list_type = origin_v2_list_type
     quality_notes: list[str] = []
     quality_penalty_applied = False
+    allow_warning_quality = _resolve_quality_gate_bool(
+        quality_gate_config,
+        "allow_warning_quality",
+        True,
+    )
+    drop_failed_quality = _resolve_quality_gate_bool(
+        quality_gate_config,
+        "drop_failed_quality",
+        False,
+    )
 
     if bars_quality == "degraded" and target_v2_list_type in {
         "READY_TO_BUY",
@@ -1078,6 +1129,30 @@ def _apply_quality_gate(
     ):
         target_v2_list_type = "RESEARCH_ONLY"
         quality_notes.append("质量门槛未满足，已从交易候选降级为研究观察。")
+        quality_penalty_applied = True
+
+    if (
+        not allow_warning_quality
+        and any(
+            status != "ok"
+            for status in (bars_quality, financial_quality, announcement_quality)
+        )
+        and target_v2_list_type in {
+            "READY_TO_BUY",
+            "WATCH_PULLBACK",
+            "WATCH_BREAKOUT",
+        }
+    ):
+        target_v2_list_type = "RESEARCH_ONLY"
+        quality_notes.append("方案质量门控不接受 warning/degraded，候选已下调为研究观察。")
+        quality_penalty_applied = True
+
+    if drop_failed_quality and any(
+        status == "failed"
+        for status in (bars_quality, financial_quality, announcement_quality)
+    ):
+        target_v2_list_type = "AVOID"
+        quality_notes.append("方案质量门控要求直接剔除 failed 数据候选。")
         quality_penalty_applied = True
 
     combined_weight = (
@@ -1238,3 +1313,40 @@ def _string_list_or_empty(value: object | None) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if isinstance(item, str) and item]
+
+
+def _dict_or_none(value: object | None) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    return value
+
+
+def _nested_config(
+    root: dict[str, object] | None,
+    key: str,
+) -> dict[str, object] | None:
+    if root is None:
+        return None
+    value = root.get(key)
+    if not isinstance(value, dict):
+        return None
+    return value
+
+
+def _resolve_quality_gate_bool(
+    config: dict[str, object] | None,
+    key: str,
+    default: bool,
+) -> bool:
+    if not isinstance(config, dict):
+        return default
+    value = config.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off"}:
+            return False
+    return default

@@ -1,7 +1,7 @@
 """选股评分与兼容分桶规则。"""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from app.schemas.factor import FactorSnapshot
 from app.schemas.screener_factors import (
@@ -31,6 +31,16 @@ class ScreenerScoreResult:
 
 def score_technical_snapshot(snapshot: TechnicalSnapshot) -> ScreenerScoreResult:
     """兼容旧逻辑的兜底评分。"""
+    return score_technical_snapshot_with_scheme(snapshot)
+
+
+def score_technical_snapshot_with_scheme(
+    snapshot: TechnicalSnapshot,
+    *,
+    factor_weight_config: dict[str, Any] | None = None,
+    threshold_config: dict[str, Any] | None = None,
+) -> ScreenerScoreResult:
+    """兼容旧逻辑的兜底评分，并允许有限方案覆盖。"""
     score = float(snapshot.trend_score)
 
     if snapshot.trend_state == "up":
@@ -58,16 +68,24 @@ def score_technical_snapshot(snapshot: TechnicalSnapshot) -> ScreenerScoreResult
     trigger_score = alpha_score
     risk_score = _estimate_legacy_risk_score(snapshot)
     trigger_state = _infer_legacy_trigger_state(snapshot)
+    screener_score = _build_screener_score(
+        alpha_score,
+        trigger_score,
+        risk_score,
+        factor_weight_config=factor_weight_config,
+    )
     v2_list_type = _classify_v2_list_type(
         alpha_score=alpha_score,
         trigger_score=trigger_score,
         risk_score=risk_score,
+        screener_score=screener_score,
         technical_snapshot=snapshot,
         trigger_state=trigger_state,
+        threshold_config=threshold_config,
     )
 
     return ScreenerScoreResult(
-        screener_score=_build_screener_score(alpha_score, trigger_score, risk_score),
+        screener_score=screener_score,
         alpha_score=alpha_score,
         trigger_score=trigger_score,
         risk_score=risk_score,
@@ -85,20 +103,42 @@ def score_factor_snapshot(
     technical_snapshot: TechnicalSnapshot,
 ) -> ScreenerScoreResult:
     """基于因子快照评分。"""
+    return score_factor_snapshot_with_scheme(
+        factor_snapshot,
+        technical_snapshot,
+    )
+
+
+def score_factor_snapshot_with_scheme(
+    factor_snapshot: FactorSnapshot,
+    technical_snapshot: TechnicalSnapshot,
+    *,
+    factor_weight_config: dict[str, Any] | None = None,
+    threshold_config: dict[str, Any] | None = None,
+) -> ScreenerScoreResult:
+    """基于因子快照评分，并允许有限方案覆盖。"""
     alpha_score = factor_snapshot.alpha_score.total_score
     trigger_score = factor_snapshot.trigger_score.total_score
     risk_score = factor_snapshot.risk_score.total_score
+    screener_score = _build_screener_score(
+        alpha_score,
+        trigger_score,
+        risk_score,
+        factor_weight_config=factor_weight_config,
+    )
     v2_list_type = _classify_v2_list_type(
         alpha_score=alpha_score,
         trigger_score=trigger_score,
         risk_score=risk_score,
+        screener_score=screener_score,
         technical_snapshot=technical_snapshot,
         trigger_state=factor_snapshot.trigger_score.trigger_state,
+        threshold_config=threshold_config,
     )
     reasons = build_reason_summary(factor_snapshot)
 
     return ScreenerScoreResult(
-        screener_score=_build_screener_score(alpha_score, trigger_score, risk_score),
+        screener_score=screener_score,
         alpha_score=alpha_score,
         trigger_score=trigger_score,
         risk_score=risk_score,
@@ -116,6 +156,20 @@ def score_screener_factor_snapshot(
     technical_snapshot: TechnicalSnapshot,
 ) -> ScreenerScoreResult:
     """Score the new initial screener factor snapshot."""
+    return score_screener_factor_snapshot_with_scheme(
+        screener_factor_snapshot,
+        technical_snapshot,
+    )
+
+
+def score_screener_factor_snapshot_with_scheme(
+    screener_factor_snapshot: ScreenerFactorSnapshot,
+    technical_snapshot: TechnicalSnapshot,
+    *,
+    factor_weight_config: dict[str, Any] | None = None,
+    threshold_config: dict[str, Any] | None = None,
+) -> ScreenerScoreResult:
+    """Score the new initial screener factor snapshot with optional scheme overrides."""
 
     alpha_score = _score_screener_alpha(screener_factor_snapshot)
     trigger_state = _infer_screener_trigger_state(screener_factor_snapshot)
@@ -124,12 +178,20 @@ def score_screener_factor_snapshot(
         trigger_state=trigger_state,
     )
     risk_score = _score_screener_risk(screener_factor_snapshot, technical_snapshot)
+    screener_score = _build_screener_score(
+        alpha_score,
+        trigger_score,
+        risk_score,
+        factor_weight_config=factor_weight_config,
+    )
     v2_list_type = _classify_v2_list_type(
         alpha_score=alpha_score,
         trigger_score=trigger_score,
         risk_score=risk_score,
+        screener_score=screener_score,
         technical_snapshot=technical_snapshot,
         trigger_state=trigger_state,
+        threshold_config=threshold_config,
     )
     reasons = _build_screener_reason_summary(
         screener_factor_snapshot=screener_factor_snapshot,
@@ -138,7 +200,7 @@ def score_screener_factor_snapshot(
     )
 
     return ScreenerScoreResult(
-        screener_score=_build_screener_score(alpha_score, trigger_score, risk_score),
+        screener_score=screener_score,
         alpha_score=alpha_score,
         trigger_score=trigger_score,
         risk_score=risk_score,
@@ -207,36 +269,76 @@ def _classify_v2_list_type(
     alpha_score: int,
     trigger_score: int,
     risk_score: int,
+    screener_score: int,
     technical_snapshot: TechnicalSnapshot,
     trigger_state: str,
+    threshold_config: dict[str, Any] | None = None,
 ) -> str:
     if risk_score >= 75 or (technical_snapshot.trend_state == "down" and alpha_score < 60):
         return "AVOID"
 
+    result: str
     if alpha_score >= 72 and trigger_score >= 68 and risk_score <= 45:
         if trigger_state in {"pullback", "breakout"}:
-            return "READY_TO_BUY"
-        return "RESEARCH_ONLY"
+            result = "READY_TO_BUY"
+        else:
+            result = "RESEARCH_ONLY"
+        return _apply_threshold_bucket_overrides(
+            base_v2_list_type=result,
+            screener_score=screener_score,
+            technical_snapshot=technical_snapshot,
+            trigger_state=trigger_state,
+            threshold_config=threshold_config,
+        )
 
     if alpha_score >= 60 and risk_score <= 60:
         if trigger_state == "pullback":
-            return "WATCH_PULLBACK"
-        if trigger_state == "breakout":
-            return "WATCH_BREAKOUT"
-        return "RESEARCH_ONLY"
+            result = "WATCH_PULLBACK"
+        elif trigger_state == "breakout":
+            result = "WATCH_BREAKOUT"
+        else:
+            result = "RESEARCH_ONLY"
+        return _apply_threshold_bucket_overrides(
+            base_v2_list_type=result,
+            screener_score=screener_score,
+            technical_snapshot=technical_snapshot,
+            trigger_state=trigger_state,
+            threshold_config=threshold_config,
+        )
 
     if alpha_score >= 50 and technical_snapshot.trend_state != "down" and risk_score <= 68:
         if trigger_state == "pullback":
-            return "WATCH_PULLBACK"
-        if trigger_state == "breakout":
-            return "WATCH_BREAKOUT"
-        return "RESEARCH_ONLY"
+            result = "WATCH_PULLBACK"
+        elif trigger_state == "breakout":
+            result = "WATCH_BREAKOUT"
+        else:
+            result = "RESEARCH_ONLY"
+        return _apply_threshold_bucket_overrides(
+            base_v2_list_type=result,
+            screener_score=screener_score,
+            technical_snapshot=technical_snapshot,
+            trigger_state=trigger_state,
+            threshold_config=threshold_config,
+        )
 
     return "AVOID"
 
 
-def _build_screener_score(alpha_score: int, trigger_score: int, risk_score: int) -> int:
-    score = alpha_score * 0.55 + trigger_score * 0.30 + (100 - risk_score) * 0.15
+def _build_screener_score(
+    alpha_score: int,
+    trigger_score: int,
+    risk_score: int,
+    *,
+    factor_weight_config: dict[str, Any] | None = None,
+) -> int:
+    alpha_weight, trigger_weight, risk_weight = _resolve_screener_score_weights(
+        factor_weight_config
+    )
+    score = (
+        alpha_score * alpha_weight
+        + trigger_score * trigger_weight
+        + (100 - risk_score) * risk_weight
+    )
     return _clamp_score(score)
 
 
@@ -521,3 +623,104 @@ def _build_legacy_short_reason(snapshot: TechnicalSnapshot, v2_list_type: str) -
 
 def _clamp_score(score: float) -> int:
     return max(0, min(100, int(round(score))))
+
+
+def _resolve_screener_score_weights(
+    factor_weight_config: dict[str, Any] | None,
+) -> tuple[float, float, float]:
+    default_weights = (0.55, 0.30, 0.15)
+    if not isinstance(factor_weight_config, dict):
+        return default_weights
+
+    alpha_weight = _float_or_none(
+        factor_weight_config.get("alpha_weight", factor_weight_config.get("alpha"))
+    )
+    trigger_weight = _float_or_none(
+        factor_weight_config.get("trigger_weight", factor_weight_config.get("trigger"))
+    )
+    risk_weight = _float_or_none(
+        factor_weight_config.get("risk_weight", factor_weight_config.get("risk"))
+    )
+    if alpha_weight is None or trigger_weight is None or risk_weight is None:
+        return default_weights
+    if alpha_weight < 0 or trigger_weight < 0 or risk_weight < 0:
+        return default_weights
+    weight_sum = alpha_weight + trigger_weight + risk_weight
+    if weight_sum <= 0:
+        return default_weights
+    return (
+        alpha_weight / weight_sum,
+        trigger_weight / weight_sum,
+        risk_weight / weight_sum,
+    )
+
+
+def _apply_threshold_bucket_overrides(
+    *,
+    base_v2_list_type: str,
+    screener_score: int,
+    technical_snapshot: TechnicalSnapshot,
+    trigger_state: str,
+    threshold_config: dict[str, Any] | None,
+) -> str:
+    if not isinstance(threshold_config, dict):
+        return base_v2_list_type
+
+    ready_min_score = _int_or_none(threshold_config.get("ready_min_score"))
+    watch_min_score = _int_or_none(threshold_config.get("watch_min_score"))
+    research_min_score = _int_or_none(threshold_config.get("research_min_score"))
+
+    result = base_v2_list_type
+    if (
+        result == "READY_TO_BUY"
+        and ready_min_score is not None
+        and screener_score < ready_min_score
+    ):
+        result = _fallback_watch_bucket(trigger_state)
+
+    if (
+        result in {"WATCH_PULLBACK", "WATCH_BREAKOUT"}
+        and watch_min_score is not None
+        and screener_score < watch_min_score
+    ):
+        result = "RESEARCH_ONLY"
+
+    if (
+        result == "RESEARCH_ONLY"
+        and research_min_score is not None
+        and screener_score < research_min_score
+        and technical_snapshot.trend_state == "down"
+    ):
+        result = "AVOID"
+
+    return result
+
+
+def _fallback_watch_bucket(trigger_state: str) -> str:
+    if trigger_state == "pullback":
+        return "WATCH_PULLBACK"
+    if trigger_state == "breakout":
+        return "WATCH_BREAKOUT"
+    return "RESEARCH_ONLY"
+
+
+def _float_or_none(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (float, int)):
+        return float(value)
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_or_none(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(float(str(value)))
+    except (TypeError, ValueError):
+        return None

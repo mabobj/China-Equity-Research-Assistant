@@ -557,6 +557,9 @@ def _build_scheme_runtime_metadata(
             if isinstance(quality_gate, dict)
             else None
         ),
+        "effective_scheme_config": snapshot.effective_scheme_config.model_dump(
+            mode="json"
+        ),
     }
 
 

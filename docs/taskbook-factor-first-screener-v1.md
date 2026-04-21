@@ -161,12 +161,13 @@
 - 已完成 `ScreenerWorkflowRunRequest` / `WorkflowRunResponse` 的 `scheme_id / scheme_version / scheme_name / scheme_snapshot_hash` 扩展
 - 已完成 screener workflow run 启动时的 scheme 解析与 `ScreenerRunContextSnapshot` 落袋
 - 已完成 workflow detail / runtime visibility 对 scheme 摘要字段的透传
+- 已完成 `effective_scheme_config` 的有限消费：`factor_weight_config`、`threshold_config`、`quality_gate_config` 已可影响初筛评分、分桶和质量门控
 
 下一阶段：
 
-- 让 `ScreenerPipeline` 真正消费 `effective_scheme_config`
-- 先从 `factor_weight_config`、`threshold_config`、`quality_gate_config` 的有限覆盖开始
-- 保持“未传方案时仍兼容默认内置方案”的回退行为
+- 扩展更多可控但仍有限的 scheme 覆盖面，同时继续保持默认内置方案兼容
+- 为方案级 runs / stats / feedback 聚合准备稳定查询字段
+- 明确哪些 config 进入 v1 主链、哪些延后到更高自由度阶段
 
 ### 目标
 

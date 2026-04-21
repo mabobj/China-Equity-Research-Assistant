@@ -52,8 +52,9 @@
 - 已完成 `ScreenerWorkflowRunRequest` / `WorkflowRunResponse` 的 `scheme_id / scheme_version / scheme_name / scheme_snapshot_hash` 扩展
 - 已完成 screener workflow run 启动时的 scheme 解析与运行时方案快照落袋
 - 已完成 scheme 元数据贯穿到 `ScreenerBatchRecord`、`ScreenerSymbolResult`、`ScreenerRunResponse`、`screener_factor_snapshot_daily` 与 `screener_selection_snapshot_daily` 参数哈希
+- 已完成 `effective_scheme_config` 对初筛运行的有限接入：当前已支持 `factor_weight_config`、`threshold_config`、`quality_gate_config` 覆盖评分、分桶与质量门控
 - 已补齐针对性回归：scheme metadata 透传、snapshot params hash 变更、batch/result 挂接均已通过测试
-- 下一步进入“方案真正驱动初筛运行”的阶段，也就是让 scheme config 开始影响 pipeline 权重、阈值和质量门控
+- 下一步进入方案级 runs / stats / feedback 聚合与查询阶段，为前端“方案中心化工作台”做后端闭环准备
 
 ## 4. 当前重点模块
 
